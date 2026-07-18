@@ -1,23 +1,32 @@
 """
-Command MCP - 시스템 활용 커맨드 카탈로그 조회.
-실제 실행은 System MCP가 담당하며, 여기서는 "어떤 커맨드가 있고 어떻게 쓰는지" 정보만 제공한다.
+Command MCP - 두 가지 역할.
+1) 커맨드 카탈로그 조회: "어떤 커맨드가 있고 어떻게 쓰는지" 하이브리드 의미검색(읽기 전용).
+2) 사용자 스코프 실행: 스케줄러 job 등 '본인' 자원에 대한 애플리케이션 명령 실행.
+   실행 툴은 user_scoped=True로, user_id를 LLM 스키마에서 감추고 호출자 신원에서 강제 주입한다
+   (남의 job을 조회할 수 없다). enabled/역할/감사로그는 shared/mcp_caller로 공통 처리한다.
 전용 DB(command_db)를 사용한다.
-
-검색은 벡터+키워드 하이브리드(RRF)로 후보를 뽑고 리랭커로 순위를 정한다. 따라서 사용자가
-정확한 커맨드명을 몰라도 "무엇을 하고 싶은지" 설명형으로 물으면 의미상 가까운 커맨드를 찾는다.
-임베딩 서버 장애 시에는 키워드(부분일치/FTS) 검색으로 자동 fallback한다.
 """
 import sys
 import os
+import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../shared"))
 from db import get_pool, embed_text, vector_literal, rerank, clamp_top_k, clamp_candidates  # noqa: E402
+from config_store import get_config  # noqa: E402
+from mcp_caller import (  # noqa: E402
+    get_caller, CallerContextMiddleware, load_overrides_sync, tool_description, build_wrapped,
+)
 
+import httpx  # noqa: E402
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("command-mcp", stateless_http=True)
 
+_DSN = "command_db_dsn"
+_STATE = "command_whitelist_state"
 
+
+# ------------------------------------------------------------------ 카탈로그 검색
 @mcp.tool()
 async def search_commands(query: str, top_k: int = 10, category: str | None = None) -> list[dict]:
     """하고 싶은 작업을 설명하면 의미상 가까운 시스템 커맨드를 찾아 준다.
@@ -33,7 +42,7 @@ async def search_commands(query: str, top_k: int = 10, category: str | None = No
         return []
     top_k = await clamp_top_k(top_k)
     candidate_k = await clamp_candidates(top_k * 5)
-    pool = await get_pool("command_db_dsn")
+    pool = await get_pool(_DSN)
 
     vec = None
     try:
@@ -113,7 +122,7 @@ async def get_command_detail(name: str) -> dict | None:
     Args:
         name: command_catalog.name 값
     """
-    pool = await get_pool("command_db_dsn")
+    pool = await get_pool(_DSN)
     row = await pool.fetchrow(
         "SELECT name, description, usage, category FROM command_catalog WHERE name = $1",
         name,
@@ -121,6 +130,92 @@ async def get_command_detail(name: str) -> dict | None:
     return dict(row) if row else None
 
 
+# ------------------------------------------------------------------ 사용자 스코프 실행
+async def get_scheduler_job_info(user_id: str) -> dict:
+    """현재 사용자 '본인'의 스케줄러 job 정보를 조회한다.
+    user_id는 호출자 신원(X-User-Id)에서 강제 주입되므로 남의 job을 조회할 수 없다."""
+    base_url = await get_config("scheduler_api_base_url")
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(f"{base_url}/jobs", params={"user_id": user_id})
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def get_scheduler_queue_status() -> dict:
+    """s2 스케줄러 큐의 전체 대기/실행 상태를 조회한다(사용자별 데이터 아님)."""
+    base_url = await get_config("scheduler_api_base_url")
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(f"{base_url}/queue/status")
+        resp.raise_for_status()
+        return resp.json()
+
+
+EXEC_WHITELIST = {
+    "get_scheduler_job_info": {
+        "handler": get_scheduler_job_info,
+        "description": "현재 사용자 본인의 스케줄러 job 정보를 조회한다.",
+        "enabled": True, "required_roles": [], "user_scoped": True, "scope_param": "user_id",
+    },
+    "get_scheduler_queue_status": {
+        "handler": get_scheduler_queue_status,
+        "description": "s2 스케줄러 큐의 전체 대기/실행 상태를 조회한다(사용자별 데이터 아님).",
+        "enabled": True, "required_roles": [], "user_scoped": False,
+    },
+}
+
+_OVERRIDES = load_overrides_sync(_DSN, _STATE)
+
+
+async def _log_execution(tool_name: str, params: dict, status: str, result):
+    caller = get_caller()
+    pool = await get_pool(_DSN)
+    await pool.execute(
+        """
+        INSERT INTO job_logs (tool_name, params, requested_by, status, result,
+                              conversation_id, request_id)
+        VALUES ($1, $2::jsonb, $3, $4, $5::jsonb, $6, $7)
+        """,
+        tool_name,
+        json.dumps(params, ensure_ascii=False, default=str),
+        caller.get("user_id") or "unknown",
+        status,
+        json.dumps(result, ensure_ascii=False, default=str) if result is not None else None,
+        caller.get("conversation_id"),
+        caller.get("request_id"),
+    )
+
+
+async def _is_enabled(tool_name: str, default: bool) -> bool:
+    pool = await get_pool(_DSN)
+    row = await pool.fetchrow(f"SELECT enabled FROM {_STATE} WHERE tool_name = $1", tool_name)
+    if row is None:
+        await pool.execute(
+            f"INSERT INTO {_STATE} (tool_name, enabled) VALUES ($1, $2) "
+            "ON CONFLICT (tool_name) DO NOTHING", tool_name, default)
+        return default
+    return row["enabled"]
+
+
+async def _required_roles(tool_name: str, code_default: list) -> list:
+    pool = await get_pool(_DSN)
+    row = await pool.fetchrow(f"SELECT required_roles FROM {_STATE} WHERE tool_name = $1", tool_name)
+    if row and row["required_roles"] is not None:
+        return list(row["required_roles"])
+    return list(code_default or [])
+
+
+for _name, _entry in EXEC_WHITELIST.items():
+    mcp.add_tool(
+        build_wrapped(_name, _entry, is_enabled=_is_enabled,
+                      required_roles=_required_roles, log_execution=_log_execution),
+        name=_name,
+        description=tool_description(_name, _entry, _OVERRIDES),
+    )
+
+
 if __name__ == "__main__":
-    import os as _os
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=int(_os.environ.get("MCP_PORT", 8002)))
+    import uvicorn
+
+    port = int(os.environ.get("MCP_PORT", 8002))
+    app = CallerContextMiddleware(mcp.streamable_http_app())
+    uvicorn.run(app, host="0.0.0.0", port=port)

@@ -193,6 +193,30 @@ MIGRATIONS: list[tuple[str, int, str]] = [
         ALTER TABLE system_whitelist_state
             ADD COLUMN IF NOT EXISTS description_override TEXT;
     """),
+    # v4: 스케줄러 실행 툴이 System에서 Command로 이동. Command도 실행형 MCP가 되므로
+    #     활성/역할/설명 오버라이드 상태 테이블과 감사로그를 둔다(System과 동일 구조).
+    ("command_db", 4, """
+        CREATE TABLE IF NOT EXISTS command_whitelist_state (
+            tool_name TEXT PRIMARY KEY,
+            enabled BOOLEAN NOT NULL DEFAULT true,
+            required_roles TEXT[] NOT NULL DEFAULT '{}',
+            description_override TEXT,
+            updated_by TEXT,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        CREATE TABLE IF NOT EXISTS job_logs (
+            id SERIAL PRIMARY KEY,
+            tool_name TEXT NOT NULL,
+            params JSONB,
+            requested_by TEXT,
+            status TEXT,
+            result JSONB,
+            conversation_id TEXT,
+            request_id TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS command_job_logs_created_idx ON job_logs (created_at DESC);
+    """),
 ]
 
 
@@ -250,7 +274,10 @@ AGENT_INSTRUCTION = """당신은 사내 시스템 운영/사용을 돕는 한국
 - 사용법/절차/개념 질문: 먼저 manual MCP의 search_manual로 관련 매뉴얼을 찾습니다.
 - "예전에 이런 경우 어떻게 해결했나" 류: voc MCP의 search_voc로 과거 해결 이력을 찾습니다.
 - 어떤 명령이 있는지: command MCP의 search_commands / get_command_detail을 사용합니다.
-- 실제 서버 상태·job 조회가 필요할 때만: system MCP의 화이트리스트 툴을 사용합니다.
+- 본인 스케줄러 job 조회가 필요할 때: command MCP의 get_scheduler_job_info를 사용합니다
+  (사용자 id는 시스템이 본인으로 고정하므로 임의 사용자를 지정하지 않습니다).
+- 서버의 파일 탐색·디스크·시스템 정보 조회가 필요할 때만: system MCP의 read-only 툴을
+  사용합니다(호출자 본인 권한으로 실행됩니다).
 - 매뉴얼과 VOC 양쪽이 도움이 될 것 같으면 둘 다 검색해 종합합니다.
 - 한 번의 검색으로 부족하면 질문을 바꿔 다시 검색합니다. 단, 관련 없는 툴을 습관적으로 호출하지 않습니다.
 
