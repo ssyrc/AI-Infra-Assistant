@@ -1,117 +1,122 @@
-# 개발/데모용 compose. 실제 vLLM/GPU 없이 전체 흐름(3개 웹 + 에이전트 + 4개 MCP)을 확인한다.
+# 개발/데모용. 실제 vLLM/GPU 없이 전체 흐름을 확인한다.
 #   docker compose -f docker-compose.dev.yml up -d --build
-#
-# - mock-vllm: 임베딩/LLM을 흉내내는 가짜 서버 (dev/mock_vllm.py)
-# - admin-console: docling 없이 빌드, 엑셀 업로드/컬럼선택 흐름은 정상 동작
-#   (docx/pptx/pdf 파싱만 프로덕션에서 확인)
-# - config DB 시드 후 dev-config-override.sql이 vLLM 주소를 mock으로 덮어씀
+# dev는 편의를 위해 포트를 열어두고 비밀번호도 고정값을 쓴다(운영에 사용 금지).
+
+x-pg-pass: &pgpass devpass
+x-config-dsn: &configdsn postgresql://agent:devpass@postgres:5432/platform_config
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: agent
-      POSTGRES_PASSWORD: devpass
+      POSTGRES_PASSWORD: *pgpass
     volumes:
       - ./shared/init-db:/docker-entrypoint-initdb.d
-      - ./dev/dev-config-override.sql:/docker-entrypoint-initdb.d/99-dev-override.sql
-    ports:
-      - "5432:5432"
+    ports: ["5432:5432"]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agent -d agent_sessions_db"]
+      test: ["CMD-SHELL", "pg_isready -U agent -d postgres"]
       interval: 5s
       timeout: 3s
       retries: 20
 
+  db-init:
+    build: { context: ., dockerfile: shared/Dockerfile.db-init }
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: *pgpass
+      REDIS_HOST: ""          # dev에는 redis 없음 -> 임베딩 캐시 비활성
+      MANUAL_MCP_URL: http://manual-mcp:8001/mcp
+      COMMAND_MCP_URL: http://command-mcp:8002/mcp
+      VOC_MCP_URL: http://voc-mcp:8003/mcp
+      SYSTEM_MCP_URL: http://system-mcp:8004/mcp
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+  # dev 전용: 설정을 mock vLLM으로 덮어쓴다 (db-init 이후 실행)
+  dev-config:
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: *pgpass
+    entrypoint: >
+      sh -c "psql -h postgres -U agent -d platform_config -c \"
+        UPDATE platform_settings SET value='http://mock-vllm:8000/v1' WHERE key IN ('vllm_llm_base_url','vllm_embed_base_url');
+        UPDATE platform_settings SET value='mock-llm' WHERE key='vllm_llm_model';
+        UPDATE platform_settings SET value='mock-embed' WHERE key='vllm_embed_model';
+        UPDATE platform_settings SET value='' WHERE key IN ('redis_url','rerank_base_url');\""
+    depends_on:
+      db-init: { condition: service_completed_successfully }
+    restart: "no"
+
   mock-vllm:
-    build:
-      context: .
-      dockerfile: dev/Dockerfile.mock
-    ports:
-      - "8100:8000"
+    build: { context: ., dockerfile: dev/Dockerfile.mock }
+    ports: ["8100:8000"]
 
   manual-mcp:
     build: { context: ., dockerfile: mcp_servers/Dockerfile }
     command: ["python", "mcp_servers/manual_mcp/server.py"]
-    environment:
-      CONFIG_DB_DSN: postgresql://agent:devpass@postgres:5432/platform_config
+    environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8001" }
     ports: ["8001:8001"]
     depends_on:
-      postgres:
-        condition: service_healthy
+      dev-config: { condition: service_completed_successfully }
 
   command-mcp:
     build: { context: ., dockerfile: mcp_servers/Dockerfile }
     command: ["python", "mcp_servers/command_mcp/server.py"]
-    environment:
-      CONFIG_DB_DSN: postgresql://agent:devpass@postgres:5432/platform_config
+    environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8002" }
     ports: ["8002:8002"]
     depends_on:
-      postgres:
-        condition: service_healthy
+      dev-config: { condition: service_completed_successfully }
 
   voc-mcp:
     build: { context: ., dockerfile: mcp_servers/Dockerfile }
     command: ["python", "mcp_servers/voc_mcp/server.py"]
-    environment:
-      CONFIG_DB_DSN: postgresql://agent:devpass@postgres:5432/platform_config
+    environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8003" }
     ports: ["8003:8003"]
     depends_on:
-      postgres:
-        condition: service_healthy
+      dev-config: { condition: service_completed_successfully }
 
   system-mcp:
     build: { context: ., dockerfile: mcp_servers/Dockerfile }
     command: ["python", "mcp_servers/system_mcp/server.py"]
-    environment:
-      CONFIG_DB_DSN: postgresql://agent:devpass@postgres:5432/platform_config
+    environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8004" }
     ports: ["8004:8004"]
     depends_on:
-      postgres:
-        condition: service_healthy
+      dev-config: { condition: service_completed_successfully }
 
   agent-server:
     build: { context: ., dockerfile: agent_server/Dockerfile }
     environment:
-      CONFIG_DB_DSN: postgresql://agent:devpass@postgres:5432/platform_config
+      CONFIG_DB_DSN: *configdsn
       # LANGFUSE 키 없음 -> 트레이싱 자동 비활성화
     ports: ["8000:8000"]
     depends_on:
-      postgres:
-        condition: service_healthy
-      mock-vllm:
-        condition: service_started
-      manual-mcp:
-        condition: service_started
-      command-mcp:
-        condition: service_started
-      voc-mcp:
-        condition: service_started
-      system-mcp:
-        condition: service_started
+      dev-config: { condition: service_completed_successfully }
+      mock-vllm: { condition: service_started }
+      manual-mcp: { condition: service_started }
+      command-mcp: { condition: service_started }
+      voc-mcp: { condition: service_started }
+      system-mcp: { condition: service_started }
 
   admin-console:
-    build:
-      context: .
-      dockerfile: dev/Dockerfile.admin-dev
+    build: { context: ., dockerfile: dev/Dockerfile.admin-dev }
     environment:
-      CONFIG_DB_DSN: postgresql://agent:devpass@postgres:5432/platform_config
+      CONFIG_DB_DSN: *configdsn
       ADMIN_USER: admin
       ADMIN_PASSWORD: admin
     ports: ["8080:8080"]
     depends_on:
-      postgres:
-        condition: service_healthy
-      mock-vllm:
-        condition: service_started
+      dev-config: { condition: service_completed_successfully }
 
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main
+    image: ghcr.io/open-webui/open-webui:v0.6.5
     environment:
       OPENAI_API_BASE_URL: http://agent-server:8000/v1
       OPENAI_API_KEY: not-needed
       WEBUI_AUTH: "false"
     ports: ["3000:8080"]
     depends_on:
-      agent-server:
-        condition: service_started
+      agent-server: { condition: service_started }

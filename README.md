@@ -60,7 +60,13 @@ Google ADK 에이전트가 4개의 MCP 서버(매뉴얼 RAG, 커맨드 카탈로
 - **하이브리드 검색**: Manual/VOC MCP는 벡터 검색과 전문검색(tsvector)을 RRF로 융합한다.
   의미 질문과 정확한 키워드/에러코드 질문 모두에 강하다.
 - **System MCP 안전성**: `whitelist.py`에 등록된 함수만 노출되고 임의 셸 실행 경로가 없다.
-  실행 가능 여부는 관리자 콘솔에서 재배포 없이 토글되며 모든 실행은 `job_logs`에 감사 기록된다.
+  `functools.wraps`로 원본 시그니처를 보존해 MCP input schema에 실제 파라미터가 정확히
+  노출된다. 실행 가능 여부는 콘솔에서 재배포 없이 토글되고, 모든 실행은 호출자(사용자 ID·
+  대화 ID·요청 ID)와 함께 `job_logs`에 감사 기록된다. 항목별 `required_roles`로 역할 검증도 가능.
+- **장애 격리**: 리랭커·임베딩·Redis 장애가 검색 전체를 막지 않는다. 리랭커 실패는 RRF 순위로,
+  임베딩 실패는 키워드 전용 검색으로 fallback한다.
+- **문서 무결성**: 발행된 문서의 청크는 수정·삭제할 수 없다(백엔드·프론트 양쪽 차단).
+  수정은 새 버전 업로드로만 가능하다.
 
 ## 빠르게 로컬에서 확인 (GPU 불필요)
 
@@ -90,9 +96,17 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-`postgres` 최초 기동 시 `shared/init-db/*.sql`이 순서대로 실행되어 DB들(platform_config,
-manual_db, voc_db, command_db, system_db, agent_sessions_db, langfuse)과 스키마, 기본
-설정값이 생성됩니다.
+기동 순서: `postgres`(healthy) → `db-init`(스키마 마이그레이션 + 설정 부트스트랩 완료) →
+나머지 서비스. `db-init`은 매 기동 시 멱등하게 실행되며,
+
+- DB/Redis 접속 정보를 `.env`의 `POSTGRES_PASSWORD`/`REDIS_PASSWORD`로부터 만들어 주입합니다.
+  즉 비밀번호를 바꾸면 각 MCP의 DSN이 **자동으로 맞춰집니다**(SQL에 credential 하드코딩 없음).
+- 버전별 마이그레이션(`shared/migrations.py`의 `MIGRATIONS`)을 적용하므로, 최초 설치뿐 아니라
+  **기존 DB 업그레이드에도 스키마·신규 설정이 반영**됩니다.
+- 운영자가 콘솔에서 편집한 설정값은 재기동해도 덮어쓰지 않습니다.
+
+내부 서비스(PostgreSQL·Redis·MCP·Agent Server)는 호스트 포트를 열지 않고, 웹 3개만
+`127.0.0.1`에 바인딩됩니다. 외부 공개는 reverse proxy를 통해서만 하세요.
 
 ### 3. 설정 채우기 (중요)
 
@@ -138,3 +152,17 @@ pip install docling
 python -c "from docling.document_converter import DocumentConverter; DocumentConverter()"
 # ~/.cache/docling 를 이미지에 COPY (admin_console/Dockerfile에 COPY 한 줄 추가)
 ```
+
+
+## 테스트
+
+```bash
+pip install pytest
+DISABLE_DOCLING=1 CONFIG_DB_DSN=postgresql://x:x@localhost/x \
+  PYTHONPATH=shared:admin_console/backend python -m pytest tests/ -v
+```
+
+리뷰에서 지적된 버그를 고정하는 회귀 테스트가 들어 있습니다: 정제가 `<user>`/`<namespace>`
+같은 인프라 placeholder를 지우지 않는지, PPT 표·그룹 도형 텍스트가 누락되지 않는지,
+리랭커가 어떤 실패에도 안전하게 fallback하는지, System MCP 툴 스키마에 실제 파라미터가
+노출되는지 등입니다.

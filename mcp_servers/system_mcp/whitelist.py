@@ -33,18 +33,24 @@ async def get_scheduler_queue_status() -> dict:
         return resp.json()
 
 
-# name -> (handler, description, params_schema)
+# name -> 실행 핸들러와 메타데이터.
+#  - enabled: 최초 기동 시 기본 활성 여부 (이후 관리자 콘솔 토글이 우선)
+#  - required_roles: 지정하면 해당 역할을 가진 호출자만 실행 가능(빈 값이면 제한 없음).
+#    Agent Server가 X-User-Roles 헤더로 전달한다.
+#  - 상태를 바꾸는 툴을 추가할 때는 반드시 required_roles를 지정할 것.
 WHITELIST = {
     "get_scheduler_job_info": {
         "handler": get_scheduler_job_info,
         "description": "s2 스케줄러에 등록된 특정 사용자의 job 정보를 조회한다.",
         "params": {"user_id": "str"},
         "enabled": True,
+        "required_roles": [],      # 조회 전용 -> 제한 없음
     },
     "get_scheduler_queue_status": {
         "handler": get_scheduler_queue_status,
         "description": "s2 스케줄러 큐의 전체 대기/실행 상태를 조회한다.",
         "params": {},
         "enabled": True,
+        "required_roles": [],
     },
 }

@@ -46,7 +46,8 @@ class ParsedChunk:
 SUPPORTED_EXTS = {".docx", ".pptx", ".pdf", ".txt", ".md"}
 
 
-def parse_file(filepath: str, opts: CleanOptions | None = None) -> list[ParsedChunk]:
+def parse_file(filepath: str, opts: CleanOptions | None = None,
+               include_speaker_notes: bool = False) -> list[ParsedChunk]:
     """확장자에 따라 알맞은 파서로 분기한다. opts로 정제 강도를 지정한다."""
     opts = opts or CleanOptions()
     ext = os.path.splitext(filepath)[1].lower()
@@ -54,7 +55,7 @@ def parse_file(filepath: str, opts: CleanOptions | None = None) -> list[ParsedCh
     if ext in (".txt", ".md"):
         raw_sections = _parse_text_file(filepath)
     elif ext == ".pptx":
-        raw_sections = _parse_pptx(filepath)
+        raw_sections = _parse_pptx(filepath, include_speaker_notes)
     elif ext in (".docx", ".pdf"):
         raw_sections = _parse_via_docling(filepath)
     else:
@@ -83,39 +84,81 @@ def _parse_text_file(filepath: str) -> list[tuple[str | None, int | None, str]]:
 
 
 # ---- pptx (슬라이드 단위) ------------------------------------------------------
-def _parse_pptx(filepath: str) -> list[tuple[str | None, int | None, str]]:
-    """python-pptx로 슬라이드별 텍스트를 모은다. 슬라이드 제목이 있으면 section_title로.
-    page_no에는 슬라이드 번호를 넣는다."""
+def _iter_shape_texts(shape, out: list[str]) -> None:
+    """도형에서 텍스트를 재귀적으로 수집한다.
+    - 그룹 도형: 내부 도형을 재귀 순회 (안 하면 그룹 안 텍스트가 통째로 누락된다)
+    - 표: 셀 텍스트를 행 단위로 추출 (커맨드 표 등 핵심 정보가 표에 있는 경우가 많다)
+    """
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    # 그룹 도형 재귀
+    if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+        for sub in shape.shapes:
+            _iter_shape_texts(sub, out)
+        return
+
+    # 표
+    if getattr(shape, "has_table", False):
+        try:
+            rows = []
+            for row in shape.table.rows:
+                cells = [c.text.strip() for c in row.cells]
+                if any(cells):
+                    rows.append(" | ".join(cells))
+            if rows:
+                out.append("\n".join(rows))
+        except Exception:  # noqa: BLE001
+            pass
+        return
+
+    # 일반 텍스트 프레임
+    if getattr(shape, "has_text_frame", False):
+        txt = "\n".join(p.text for p in shape.text_frame.paragraphs if p.text)
+        if txt.strip():
+            out.append(txt)
+
+
+def _parse_pptx(filepath: str, include_speaker_notes: bool = False
+                ) -> list[tuple[str | None, int | None, str]]:
+    """슬라이드별로 텍스트를 모은다. 슬라이드 제목은 section_title이자 본문 앞머리에도 포함해
+    임베딩/전문검색/리랭커가 제목 문맥을 함께 보도록 한다.
+
+    발표자 노트는 기본적으로 제외한다(사내 배포 자료에서 노트는 발표용 메모라
+    검색 품질을 떨어뜨리는 경우가 많다). 필요하면 include_speaker_notes=True.
+    """
     from pptx import Presentation
 
     prs = Presentation(filepath)
     sections: list[tuple[str | None, int | None, str]] = []
     for idx, slide in enumerate(prs.slides, start=1):
         title = None
+        try:
+            if slide.shapes.title is not None and slide.shapes.title.text.strip():
+                title = slide.shapes.title.text.strip()
+        except Exception:  # noqa: BLE001
+            pass
+
         texts: list[str] = []
         for shape in slide.shapes:
-            if not shape.has_text_frame:
-                continue
-            shape_text = "\n".join(p.text for p in shape.text_frame.paragraphs if p.text)
-            if not shape_text.strip():
-                continue
-            # 제목 placeholder면 title로 사용
-            if title is None and getattr(shape, "is_placeholder", False):
-                try:
-                    if shape.placeholder_format and shape.placeholder_format.idx == 0:
-                        title = shape_text.strip()
-                        continue
-                except Exception:  # noqa: BLE001
-                    pass
-            texts.append(shape_text)
-        # 발표자 노트도 포함(있으면)
-        if slide.has_notes_slide and slide.notes_slide.notes_text_frame:
+            # 제목 도형은 title로 이미 뽑았으므로 본문에서 중복 수집하지 않는다
+            try:
+                if title and shape == slide.shapes.title:
+                    continue
+            except Exception:  # noqa: BLE001
+                pass
+            _iter_shape_texts(shape, texts)
+
+        if include_speaker_notes and slide.has_notes_slide and slide.notes_slide.notes_text_frame:
             note = slide.notes_slide.notes_text_frame.text
             if note and note.strip():
                 texts.append(f"[슬라이드 노트]\n{note.strip()}")
+
         body = "\n".join(texts).strip()
-        if body:
-            sections.append((title or f"슬라이드 {idx}", idx, body))
+        if not body and not title:
+            continue
+        # 제목을 본문 앞에 포함 -> 검색 대상 텍스트에 제목 문맥이 들어간다
+        full = f"{title}\n{body}".strip() if title else body
+        sections.append((title or f"슬라이드 {idx}", idx, full))
     return sections
 
 

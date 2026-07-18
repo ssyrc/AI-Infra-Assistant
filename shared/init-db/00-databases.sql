@@ -1,6 +1,7 @@
--- MCP마다 완전히 분리된 DB. 같은 Postgres 인스턴스 안이지만 물리적으로 다른 DB이므로
--- 서로 다른 스키마 진화, 백업/권한 분리가 가능하다. 필요하면 각 DSN을
--- (관리자 콘솔 > 설정에서) 완전히 다른 Postgres 서버 주소로 바꿔도 코드 변경이 필요없다.
+-- Postgres 최초 기동 시 DB만 생성한다.
+-- 스키마와 설정 시드는 shared/migrations.py(db-init 서비스)가 담당한다.
+--   - credential을 SQL에 하드코딩하지 않기 위해(환경변수 기반 주입)
+--   - init-db는 최초 1회만 실행되므로 이후 스키마 변경을 반영할 수 없기 때문
 CREATE DATABASE platform_config;
 CREATE DATABASE manual_db;
 CREATE DATABASE voc_db;
