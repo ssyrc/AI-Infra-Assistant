@@ -5,14 +5,10 @@
 '발행(publish)'하면 해당 행의 미임베딩 청크만 임베딩하고 status=published로 바꾸며,
 같은 title의 기존 published 행은 archived로 내려간다.
 '롤백'은 과거 archived 버전을 다시 publish 호출하는 것과 동일하다(이미 임베딩되어 있어 즉시 반영).
-"""
-import os
-import re
-import uuid
-import json
-import tempfile
-from datetime import datetime, timezone
+'발행취소(unpublish)'는 published 버전을 draft로 내려 즉시 검색에서 제외한다.
 
+업로드 세션/엑셀 읽기/정제는 공통 모듈(uploads, spreadsheet, cleaning)을 공유한다.
+"""
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
@@ -22,15 +18,20 @@ from config_store import get_config
 from db import get_pool, embed_text, vector_literal
 from parser import parse_file, SUPPORTED_EXTS
 from cleaning import clean_text, clean_options_from_dict, CleanOptions
+from spreadsheet import read_excel_meta, load_excel_rows
+from uploads import (
+    read_upload, create_upload_session, get_upload_session,
+    delete_upload_session, load_options,
+)
 
 router = APIRouter(prefix="/api/manuals", tags=["manuals"])
 
-_TMP_DIR = tempfile.gettempdir()
+_DSN = "manual_db_dsn"
 
 
 @router.get("")
 async def list_manuals(admin: str = Depends(require_admin)):
-    pool = await get_pool("manual_db_dsn")
+    pool = await get_pool(_DSN)
     rows = await pool.fetch(
         """
         SELECT id, title, filename, source_type, version, status, uploaded_by, uploaded_at, published_at
@@ -43,7 +44,7 @@ async def list_manuals(admin: str = Depends(require_admin)):
 
 @router.get("/{manual_id}")
 async def get_manual(manual_id: int, admin: str = Depends(require_admin)):
-    pool = await get_pool("manual_db_dsn")
+    pool = await get_pool(_DSN)
     file_row = await pool.fetchrow("SELECT * FROM manual_files WHERE id = $1", manual_id)
     if not file_row:
         raise HTTPException(404, "문서를 찾을 수 없습니다.")
@@ -57,7 +58,7 @@ async def get_manual(manual_id: int, admin: str = Depends(require_admin)):
 
 @router.get("/{manual_id}/versions")
 async def list_versions(manual_id: int, admin: str = Depends(require_admin)):
-    pool = await get_pool("manual_db_dsn")
+    pool = await get_pool(_DSN)
     title_row = await pool.fetchrow("SELECT title FROM manual_files WHERE id = $1", manual_id)
     if not title_row:
         raise HTTPException(404, "문서를 찾을 수 없습니다.")
@@ -72,7 +73,7 @@ async def list_versions(manual_id: int, admin: str = Depends(require_admin)):
 async def _insert_draft(title: str, filename: str, source_type: str, uploaded_by: str,
                         chunks: list) -> dict:
     """청크 리스트를 새 draft 버전으로 저장하는 공통 헬퍼. chunks는 (section_title, page_no, text) 튜플."""
-    pool = await get_pool("manual_db_dsn")
+    pool = await get_pool(_DSN)
     async with pool.acquire() as conn:
         async with conn.transaction():
             next_version = await conn.fetchval(
@@ -97,105 +98,6 @@ async def _insert_draft(title: str, filename: str, source_type: str, uploaded_by
     return {"manual_file_id": file_id, "version": next_version, "chunk_count": len(chunks)}
 
 
-async def _create_upload_session(owner: str, filename: str, ext: str, kind: str,
-                                 content: bytes, options: dict) -> str:
-    """업로드 파일을 서버가 정한 경로에 저장하고 세션을 DB에 기록한다.
-    클라이언트는 upload_id만 알 뿐 경로·확장자·옵션을 결정하지 못한다."""
-    pool = await get_pool("manual_db_dsn")
-    try:
-        ttl_min = int(await get_config("upload_session_ttl_minutes", "60"))
-    except (TypeError, ValueError):
-        ttl_min = 60
-
-    upload_id = uuid.uuid4().hex
-    saved_path = os.path.join(_TMP_DIR, f"upload-{upload_id}{ext}")
-    with open(saved_path, "wb") as f:
-        f.write(content)
-
-    await pool.execute(
-        """
-        INSERT INTO upload_sessions (upload_id, owner, filename, ext, saved_path, kind, options, expires_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb, now() + ($8 || ' minutes')::interval)
-        """,
-        upload_id, owner, filename, ext, saved_path, kind,
-        json.dumps(options, ensure_ascii=False), str(ttl_min),
-    )
-    await _cleanup_expired_sessions(pool)
-    return upload_id
-
-
-async def _get_upload_session(upload_id: str, owner: str, expected_kind: str) -> dict:
-    """소유자·만료·종류를 검증하고 세션을 돌려준다."""
-    if not re.fullmatch(r"[0-9a-f]{32}", upload_id or ""):
-        raise HTTPException(400, "잘못된 upload_id 형식입니다.")
-    pool = await get_pool("manual_db_dsn")
-    row = await pool.fetchrow(
-        "SELECT * FROM upload_sessions WHERE upload_id = $1", upload_id
-    )
-    if not row:
-        raise HTTPException(404, "업로드 세션이 없거나 만료되었습니다. 다시 업로드하세요.")
-    if row["owner"] != owner:
-        raise HTTPException(403, "다른 사용자의 업로드 세션입니다.")
-    if row["expires_at"] < datetime.now(timezone.utc):
-        await _delete_upload_session(upload_id)
-        raise HTTPException(404, "업로드 세션이 만료되었습니다. 다시 업로드하세요.")
-    if row["kind"] != expected_kind:
-        raise HTTPException(400, "업로드 종류가 일치하지 않습니다.")
-    if not os.path.exists(row["saved_path"]):
-        await _delete_upload_session(upload_id)
-        raise HTTPException(404, "임시 파일이 정리되었습니다. 다시 업로드하세요.")
-    return dict(row)
-
-
-async def _delete_upload_session(upload_id: str):
-    pool = await get_pool("manual_db_dsn")
-    row = await pool.fetchrow("SELECT saved_path FROM upload_sessions WHERE upload_id = $1", upload_id)
-    if row and os.path.exists(row["saved_path"]):
-        try:
-            os.unlink(row["saved_path"])
-        except OSError:
-            pass
-    await pool.execute("DELETE FROM upload_sessions WHERE upload_id = $1", upload_id)
-
-
-async def _cleanup_expired_sessions(pool):
-    """만료된 미사용 preview 파일을 정리한다."""
-    rows = await pool.fetch("SELECT upload_id, saved_path FROM upload_sessions WHERE expires_at < now()")
-    for r in rows:
-        if os.path.exists(r["saved_path"]):
-            try:
-                os.unlink(r["saved_path"])
-            except OSError:
-                pass
-    if rows:
-        await pool.execute("DELETE FROM upload_sessions WHERE expires_at < now()")
-
-
-async def _read_upload(file: UploadFile, allowed_exts: set[str]) -> tuple[str, bytes]:
-    """확장자·크기·빈 파일을 검증하고 내용을 읽는다."""
-    ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in allowed_exts:
-        raise HTTPException(422, f"지원하지 않는 형식입니다. 지원: {', '.join(sorted(allowed_exts))}")
-    try:
-        max_mb = int(await get_config("upload_max_mb", "50"))
-    except (TypeError, ValueError):
-        max_mb = 50
-    limit = max_mb * 1024 * 1024
-
-    content = await file.read(limit + 1)
-    if len(content) > limit:
-        raise HTTPException(413, f"파일이 너무 큽니다(최대 {max_mb}MB).")
-    if not content:
-        raise HTTPException(422, "빈 파일입니다.")
-
-    # 컨테이너 계열(xlsx/docx/pptx)은 실제 zip인지 매직바이트로 확인
-    if ext in (".xlsx", ".docx", ".pptx") and not content.startswith(b"PK"):
-        raise HTTPException(422, "파일이 손상되었거나 형식이 올바르지 않습니다.")
-    if ext == ".pdf" and not content.startswith(b"%PDF"):
-        raise HTTPException(422, "PDF 파일이 손상되었거나 형식이 올바르지 않습니다.")
-    return ext, content
-
-
 @router.post("/preview")
 async def preview_document(
     file: UploadFile = File(...),
@@ -207,24 +109,24 @@ async def preview_document(
 ):
     """docx/pptx/pdf/txt/md 전처리 미리보기. 아직 DB에 저장하지 않는다.
     정제 옵션은 서버가 세션에 저장하고, commit 때 그 옵션을 그대로 사용한다."""
-    ext, content = await _read_upload(file, SUPPORTED_EXTS)
+    ext, content = await read_upload(file, SUPPORTED_EXTS)
     options = {
         "strip_html": strip_html, "collapse_space": collapse_space,
         "drop_urls": drop_urls, "include_speaker_notes": include_speaker_notes,
     }
-    upload_id = await _create_upload_session(admin, file.filename, ext, "document", content, options)
-    session = await _get_upload_session(upload_id, admin, "document")
+    upload_id = await create_upload_session(_DSN, admin, file.filename, ext, "document", content, options)
+    session = await get_upload_session(_DSN, upload_id, admin, "document")
 
     opts = CleanOptions(strip_html=strip_html, collapse_space=collapse_space, drop_urls=drop_urls)
     try:
         chunks = await run_in_threadpool(
             parse_file, session["saved_path"], opts, include_speaker_notes)
     except Exception as e:  # noqa: BLE001
-        await _delete_upload_session(upload_id)
+        await delete_upload_session(_DSN, upload_id)
         raise HTTPException(422, f"전처리 실패: {e}")
 
     if not chunks:
-        await _delete_upload_session(upload_id)
+        await delete_upload_session(_DSN, upload_id)
         raise HTTPException(422, "문서에서 추출된 내용이 없습니다.")
 
     preview = [
@@ -245,8 +147,8 @@ class DocCommitIn(BaseModel):
 async def commit_document(body: DocCommitIn, uploaded_by: str = Depends(require_admin)):
     """preview에서 확인한 문서를 draft로 저장한다.
     확장자·경로·정제 옵션은 모두 서버 세션에서 가져오므로 미리보기 결과와 반드시 일치한다."""
-    session = await _get_upload_session(body.upload_id, uploaded_by, "document")
-    saved_options = session["options"] if isinstance(session["options"], dict) else json.loads(session["options"])
+    session = await get_upload_session(_DSN, body.upload_id, uploaded_by, "document")
+    saved_options = load_options(session)
     opts = clean_options_from_dict(saved_options)
 
     try:
@@ -254,7 +156,7 @@ async def commit_document(body: DocCommitIn, uploaded_by: str = Depends(require_
             parse_file, session["saved_path"], opts,
             bool(saved_options.get("include_speaker_notes", False)))
     finally:
-        await _delete_upload_session(body.upload_id)
+        await delete_upload_session(_DSN, body.upload_id)
 
     if not parsed:
         raise HTTPException(422, "문서에서 추출된 내용이 없습니다.")
@@ -271,39 +173,19 @@ async def preview_excel(
     admin: str = Depends(require_admin),
 ):
     """엑셀 컬럼 목록과 샘플 행, 전체 행 수를 반환한다."""
-    ext, content = await _read_upload(file, {".xlsx", ".xls"})
+    ext, content = await read_upload(file, {".xlsx", ".xls"})
     options = {"strip_html": strip_html, "collapse_space": collapse_space, "drop_urls": drop_urls}
-    upload_id = await _create_upload_session(admin, file.filename, ext, "spreadsheet", content, options)
-    session = await _get_upload_session(upload_id, admin, "spreadsheet")
-
-    def _read_header(path: str):
-        import openpyxl
-        wb = openpyxl.load_workbook(path, read_only=True)
-        ws = wb.active
-        it = ws.iter_rows(values_only=True)
-        try:
-            header_row = next(it)
-        except StopIteration:
-            wb.close()
-            return None, None, [], 0
-        header = [str(v).strip() if v is not None else f"column_{i}" for i, v in enumerate(header_row)]
-        sample, total = [], 0
-        for i, row in enumerate(it):
-            total += 1
-            if i < 5:
-                sample.append([("" if v is None else str(v)) for v in row])
-        sheet = ws.title
-        wb.close()
-        return sheet, header, sample, total
+    upload_id = await create_upload_session(_DSN, admin, file.filename, ext, "spreadsheet", content, options)
+    session = await get_upload_session(_DSN, upload_id, admin, "spreadsheet")
 
     try:
-        sheet, header, sample, total = await run_in_threadpool(_read_header, session["saved_path"])
+        sheet, header, sample, total = await run_in_threadpool(read_excel_meta, session["saved_path"])
     except Exception as e:  # noqa: BLE001
-        await _delete_upload_session(upload_id)
+        await delete_upload_session(_DSN, upload_id)
         raise HTTPException(422, f"엑셀을 읽을 수 없습니다: {e}")
 
     if not header:
-        await _delete_upload_session(upload_id)
+        await delete_upload_session(_DSN, upload_id)
         raise HTTPException(422, "빈 엑셀 파일입니다.")
 
     return {"upload_id": upload_id, "filename": file.filename, "sheet": sheet,
@@ -321,26 +203,17 @@ class ExcelCommitIn(BaseModel):
 async def commit_excel(body: ExcelCommitIn, uploaded_by: str = Depends(require_admin)):
     """선택한 컬럼들로 행 단위 청크를 만들어 draft로 등록한다.
     정제 옵션은 preview 당시 서버에 저장된 값을 사용한다."""
-    session = await _get_upload_session(body.upload_id, uploaded_by, "spreadsheet")
-    saved_options = session["options"] if isinstance(session["options"], dict) else json.loads(session["options"])
-    opts = clean_options_from_dict(saved_options)
+    session = await get_upload_session(_DSN, body.upload_id, uploaded_by, "spreadsheet")
+    opts = clean_options_from_dict(load_options(session))
 
     def _build(path: str):
-        import openpyxl
-        wb = openpyxl.load_workbook(path, read_only=True)
-        ws = wb.active
-        it = ws.iter_rows(values_only=True)
-        header = [str(v).strip() if v is not None else f"column_{i}" for i, v in enumerate(next(it))]
-        col_idx = {name: i for i, name in enumerate(header)}
+        header, col_idx, rows = load_excel_rows(path)
         for c in body.content_columns:
             if c not in col_idx:
-                wb.close()
                 raise ValueError(f"존재하지 않는 컬럼입니다: {c}")
 
         built = []
-        for row in it:
-            if all(v is None for v in row):
-                continue
+        for row in rows:
             parts = []
             for c in body.content_columns:
                 val = row[col_idx[c]]
@@ -357,7 +230,6 @@ async def commit_excel(body: ExcelCommitIn, uploaded_by: str = Depends(require_a
                 tv = row[col_idx[body.title_column]]
                 section_title = clean_text(str(tv), opts) if tv is not None else None
             built.append((section_title or None, None, content))
-        wb.close()
         return built
 
     try:
@@ -365,7 +237,7 @@ async def commit_excel(body: ExcelCommitIn, uploaded_by: str = Depends(require_a
     except ValueError as e:
         raise HTTPException(422, str(e))
     finally:
-        await _delete_upload_session(body.upload_id)
+        await delete_upload_session(_DSN, body.upload_id)
 
     if not chunks:
         raise HTTPException(422, "선택한 컬럼으로 만들어진 내용이 없습니다.")
@@ -390,14 +262,14 @@ async def _assert_chunk_editable(pool, chunk_id: int) -> None:
         raise HTTPException(
             409,
             f"'{row['status']}' 상태의 문서는 수정할 수 없습니다. "
-            "같은 제목으로 새 버전을 업로드해 수정하세요.",
+            "발행취소하거나 같은 제목으로 새 버전을 업로드해 수정하세요.",
         )
 
 
 @router.patch("/chunks/{chunk_id}")
 async def update_chunk(chunk_id: int, chunk_text: str = Form(...), admin: str = Depends(require_admin)):
     """운영자가 자동 추출된 청크를 직접 교정한다. draft 상태에서만 허용된다."""
-    pool = await get_pool("manual_db_dsn")
+    pool = await get_pool(_DSN)
     await _assert_chunk_editable(pool, chunk_id)
     await pool.execute(
         "UPDATE manual_chunks SET chunk_text = $1, embedding = NULL WHERE id = $2",
@@ -408,7 +280,7 @@ async def update_chunk(chunk_id: int, chunk_text: str = Form(...), admin: str = 
 
 @router.delete("/chunks/{chunk_id}")
 async def delete_chunk(chunk_id: int, admin: str = Depends(require_admin)):
-    pool = await get_pool("manual_db_dsn")
+    pool = await get_pool(_DSN)
     await _assert_chunk_editable(pool, chunk_id)
     await pool.execute("DELETE FROM manual_chunks WHERE id = $1", chunk_id)
     return {"ok": True}
@@ -422,7 +294,7 @@ async def publish_manual(manual_id: int, admin: str = Depends(require_admin)):
     동시성: 같은 title에 대해 두 사람이 동시에 발행하면 published가 2개가 될 수 있으므로
     title 기준 advisory lock으로 직렬화한다.
     임베딩이 하나라도 실패하면 상태를 바꾸지 않는다(부분 발행 방지)."""
-    pool = await get_pool("manual_db_dsn")
+    pool = await get_pool(_DSN)
     file_row = await pool.fetchrow("SELECT * FROM manual_files WHERE id = $1", manual_id)
     if not file_row:
         raise HTTPException(404, "문서를 찾을 수 없습니다.")
@@ -477,13 +349,32 @@ async def publish_manual(manual_id: int, admin: str = Depends(require_admin)):
     return {"ok": True, "embedded_chunks": embedded_count}
 
 
+@router.post("/{manual_id}/unpublish")
+async def unpublish_manual(manual_id: int, admin: str = Depends(require_admin)):
+    """발행 중인 버전을 즉시 검색 대상에서 제외한다(draft로 내림).
+    manual MCP는 status='published'인 문서만 검색하므로, 이 호출 즉시 반영된다.
+    이후 이 버전은 청크를 교정하거나 삭제할 수 있고, 다시 발행하면 즉시 복귀한다
+    (임베딩은 유지되므로 재임베딩 없이 빠르게 재발행된다)."""
+    pool = await get_pool(_DSN)
+    row = await pool.fetchrow("SELECT status FROM manual_files WHERE id = $1", manual_id)
+    if not row:
+        raise HTTPException(404, "문서를 찾을 수 없습니다.")
+    if row["status"] != "published":
+        raise HTTPException(400, "발행 중인 버전만 발행취소할 수 있습니다.")
+    await pool.execute(
+        "UPDATE manual_files SET status = 'draft', published_at = NULL WHERE id = $1",
+        manual_id,
+    )
+    return {"ok": True}
+
+
 @router.delete("/{manual_id}")
 async def delete_manual(manual_id: int, admin: str = Depends(require_admin)):
-    pool = await get_pool("manual_db_dsn")
+    pool = await get_pool(_DSN)
     status_row = await pool.fetchrow("SELECT status FROM manual_files WHERE id = $1", manual_id)
     if not status_row:
         raise HTTPException(404, "문서를 찾을 수 없습니다.")
     if status_row["status"] == "published":
-        raise HTTPException(400, "발행 중인 버전은 삭제할 수 없습니다. 먼저 다른 버전을 발행하세요.")
+        raise HTTPException(400, "발행 중인 버전은 삭제할 수 없습니다. 먼저 발행취소하세요.")
     await pool.execute("DELETE FROM manual_files WHERE id = $1", manual_id)
     return {"ok": True}

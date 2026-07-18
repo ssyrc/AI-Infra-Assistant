@@ -153,6 +153,38 @@ MIGRATIONS: list[tuple[str, int, str]] = [
         ALTER TABLE voc_records ADD COLUMN IF NOT EXISTS embed_model TEXT;
         ALTER TABLE voc_records ADD COLUMN IF NOT EXISTS embed_dim INT;
     """),
+    # v2: 커맨드 카탈로그를 의미 검색(임베딩+FTS 하이브리드) 대상으로 승격.
+    #     사용자가 "완전 일치" 키워드가 아니라 설명형으로 물어도 적절한 커맨드를 찾게 한다.
+    ("command_db", 2, """
+        CREATE EXTENSION IF NOT EXISTS vector;
+        ALTER TABLE command_catalog ADD COLUMN IF NOT EXISTS embedding vector(1024);
+        ALTER TABLE command_catalog ADD COLUMN IF NOT EXISTS embed_model TEXT;
+        ALTER TABLE command_catalog ADD COLUMN IF NOT EXISTS embed_dim INT;
+        ALTER TABLE command_catalog ADD COLUMN IF NOT EXISTS tsv tsvector
+            GENERATED ALWAYS AS (
+                to_tsvector('simple',
+                    coalesce(name, '') || ' ' || coalesce(description, '') || ' ' || coalesce(usage, ''))
+            ) STORED;
+        CREATE INDEX IF NOT EXISTS command_catalog_embedding_idx
+            ON command_catalog USING hnsw (embedding vector_cosine_ops);
+        CREATE INDEX IF NOT EXISTS command_catalog_tsv_idx
+            ON command_catalog USING gin (tsv);
+    """),
+    # v3: 커맨드 탭도 엑셀 업로드 미리보기 세션을 사용한다(매뉴얼과 동일한 보안 모델).
+    ("command_db", 3, """
+        CREATE TABLE IF NOT EXISTS upload_sessions (
+            upload_id   TEXT PRIMARY KEY,
+            owner       TEXT NOT NULL,
+            filename    TEXT NOT NULL,
+            ext         TEXT NOT NULL,
+            saved_path  TEXT NOT NULL,
+            kind        TEXT NOT NULL,
+            options     JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+            expires_at  TIMESTAMPTZ NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS command_upload_sessions_expires_idx ON upload_sessions (expires_at);
+    """),
 ]
 
 

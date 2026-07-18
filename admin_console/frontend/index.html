@@ -223,6 +223,11 @@ function ManualsPanel() {
     openDetail(detail.file.id);
   };
   const publish = async (id) => { await api(`/api/manuals/${id}/publish`, { method: "POST" }); await load(); openDetail(id); };
+  const unpublish = async (id) => {
+    if (!confirm("발행을 취소하면 즉시 검색·조회에서 제외됩니다. 계속할까요?")) return;
+    try { await api(`/api/manuals/${id}/unpublish`, { method: "POST" }); await load(); openDetail(id); }
+    catch (e) { alert(e.message); }
+  };
   const remove = async (id) => {
     if (!confirm("이 버전을 삭제할까요?")) return;
     try { await api(`/api/manuals/${id}`, { method: "DELETE" }); setDetail(null); await load(); }
@@ -329,6 +334,7 @@ function ManualsPanel() {
             <div><strong>{detail.file.title}</strong> · v{detail.file.version} <Badge value={detail.file.status} /></div>
             <div className="row-actions">
               {detail.file.status !== "published" && <button className="primary" onClick={() => publish(detail.file.id)}>발행</button>}
+              {detail.file.status === "published" && <button className="danger" onClick={() => unpublish(detail.file.id)}>발행취소</button>}
               {detail.file.status !== "published" && <button className="danger" onClick={() => remove(detail.file.id)}>삭제</button>}
               <button onClick={() => setDetail(null)}>닫기</button>
             </div>
@@ -346,8 +352,9 @@ function ManualsPanel() {
           <div style={{marginTop: 12}}>
             {detail.file.status !== "draft" && (
               <div className="subtitle" style={{color: "var(--warn)"}}>
-                {detail.file.status === "published" ? "발행 중인" : "보관된"} 버전은 읽기 전용입니다.
-                내용을 바꾸려면 같은 제목으로 새 파일을 업로드해 새 버전을 만드세요.
+                {detail.file.status === "published"
+                  ? "발행 중인 버전은 읽기 전용입니다. 내용을 바꾸려면 발행취소 후 교정하거나, 같은 제목으로 새 버전을 업로드하세요."
+                  : "보관된 버전은 읽기 전용입니다. 다시 발행(롤백)하거나 같은 제목으로 새 버전을 업로드하세요."}
               </div>
             )}
             {detail.chunks.map(c => (
@@ -463,6 +470,11 @@ function CommandsPanel() {
   const [items, setItems] = useState([]);
   const [form, setForm] = useState({ name: "", description: "", usage: "", category: "" });
   const [editingId, setEditingId] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  // 엑셀 미리보기 + 열 매핑 상태
+  const [excel, setExcel] = useState(null); // {upload_id, filename, columns, sample_rows, total_rows}
+  const [map, setMap] = useState({ name_column: "", description_column: "", usage_column: "", category_column: "" });
 
   const load = useCallback(async () => setItems(await api("/api/commands")), []);
   useEffect(() => { load(); }, [load]);
@@ -481,10 +493,67 @@ function CommandsPanel() {
   const edit = (row) => { setForm(row); setEditingId(row.id); };
   const remove = async (id) => { if (confirm("삭제할까요?")) { await api(`/api/commands/${id}`, { method: "DELETE" }); load(); } };
 
+  const analyzeExcel = async (f) => {
+    if (!f) return;
+    setBusy(true);
+    setExcel(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      const r = await fetch("/api/commands/excel/preview", { method: "POST", body: fd });
+      if (!r.ok) throw new Error(await r.text());
+      const data = await r.json();
+      setExcel(data);
+      // 열 이름 자동 추정
+      const guess = (cands) => data.columns.find(c => cands.some(k => c.toLowerCase().includes(k))) || "";
+      setMap({
+        name_column: guess(["name", "이름", "커맨드", "command", "명령"]),
+        description_column: guess(["desc", "설명", "내용"]),
+        usage_column: guess(["usage", "사용", "예시", "example"]),
+        category_column: guess(["cat", "분류", "카테고리"]),
+      });
+    } catch (e) { alert("전처리 실패: " + e.message); }
+    setBusy(false);
+  };
+
+  const commitExcel = async () => {
+    if (!map.name_column || !map.description_column) return alert("이름/설명 열을 지정하세요.");
+    setBusy(true);
+    try {
+      const data = await api("/api/commands/excel/commit", {
+        method: "POST",
+        body: JSON.stringify({
+          upload_id: excel.upload_id,
+          name_column: map.name_column,
+          description_column: map.description_column,
+          usage_column: map.usage_column || null,
+          category_column: map.category_column || null,
+        }),
+      });
+      setExcel(null);
+      await load();
+      alert(`엑셀 반영 완료 · 신규 ${data.inserted}건, 갱신 ${data.updated}건`);
+    } catch (e) { alert("등록 실패: " + e.message); }
+    setBusy(false);
+  };
+
+  const colSelect = (field, label, required) => (
+    <label style={{fontSize: 12.5, display: "flex", flexDirection: "column", gap: 4}}>
+      <span style={{color: "var(--muted)"}}>{label}{required ? " *" : ""}</span>
+      <select value={map[field]} onChange={e => setMap({...map, [field]: e.target.value})}>
+        <option value="">(선택 안 함)</option>
+        {excel.columns.map(c => <option key={c} value={c}>{c}</option>)}
+      </select>
+    </label>
+  );
+
   return (
     <div>
       <h2>커맨드 카탈로그</h2>
-      <div className="subtitle">Command MCP가 조회하는 시스템 활용 커맨드 목록 (정보 제공용, 실행은 System MCP 담당).</div>
+      <div className="subtitle">
+        Command MCP가 조회하는 시스템 활용 커맨드 목록 (정보 제공용, 실행은 System MCP 담당).
+        등록 시 의미 검색용 임베딩이 생성되어, 사용자가 설명형으로 물어도 적절한 커맨드를 찾습니다.
+      </div>
 
       <div className="card">
         <div className="toolbar">
@@ -496,17 +565,53 @@ function CommandsPanel() {
         <div className="toolbar" style={{marginTop: 8}}>
           <button className="primary" onClick={submit}>{editingId ? "수정 저장" : "등록"}</button>
           {editingId && <button onClick={() => { setEditingId(null); setForm({ name: "", description: "", usage: "", category: "" }); }}>취소</button>}
+          <span style={{marginLeft: "auto"}}>
+            <input type="file" accept=".xlsx,.xls" disabled={busy}
+                   onChange={e => { analyzeExcel(e.target.files[0]); e.target.value = ""; }} />
+            <span style={{fontSize: 11.5, color: "var(--muted)", marginLeft: 6}}>엑셀 일괄 업로드 (열 매핑)</span>
+          </span>
         </div>
       </div>
 
+      {/* 엑셀 열 매핑 */}
+      {excel && (
+        <div className="card">
+          <div style={{marginBottom: 8}}><strong>엑셀 열 매핑</strong> · {excel.filename} · 시트 {excel.sheet} · {excel.total_rows}행</div>
+          <div className="subtitle">각 항목에 대응하는 엑셀 열을 고르세요. 이름 기준으로 등록/갱신(upsert)됩니다.</div>
+          <div style={{display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12}}>
+            {colSelect("name_column", "이름(name)", true)}
+            {colSelect("description_column", "설명(description)", true)}
+            {colSelect("usage_column", "사용법(usage)", false)}
+            {colSelect("category_column", "카테고리(category)", false)}
+          </div>
+          {excel.sample_rows.length > 0 && (
+            <table style={{marginBottom: 12}}>
+              <thead><tr>{excel.columns.map(c => <th key={c}>{c}</th>)}</tr></thead>
+              <tbody>
+                {excel.sample_rows.map((r, i) => (
+                  <tr key={i}>{excel.columns.map((c, j) => (
+                    <td key={j} style={{color: "var(--muted)", fontSize: 12, maxWidth: 220}}>{r[j]}</td>
+                  ))}</tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <div className="row-actions">
+            <button className="primary" disabled={busy} onClick={commitExcel}>매핑대로 일괄 등록</button>
+            <button onClick={() => setExcel(null)}>취소</button>
+          </div>
+        </div>
+      )}
+
       <table>
-        <thead><tr><th>이름</th><th>설명</th><th>카테고리</th><th>수정일</th><th></th></tr></thead>
+        <thead><tr><th>이름</th><th>설명</th><th>카테고리</th><th>검색</th><th>수정일</th><th></th></tr></thead>
         <tbody>
           {items.map(c => (
             <tr key={c.id}>
               <td style={{fontFamily: "var(--mono)"}}>{c.name}</td>
               <td>{c.description}</td>
               <td>{c.category || "-"}</td>
+              <td style={{fontSize: 11.5, color: "var(--muted)"}}>{c.embedded ? "의미+키워드" : "키워드만"}</td>
               <td>{new Date(c.updated_at).toLocaleDateString()}</td>
               <td className="row-actions">
                 <button onClick={() => edit(c)}>편집</button>
@@ -514,7 +619,7 @@ function CommandsPanel() {
               </td>
             </tr>
           ))}
-          {items.length === 0 && <tr><td colSpan="5" className="empty">등록된 커맨드가 없습니다.</td></tr>}
+          {items.length === 0 && <tr><td colSpan="6" className="empty">등록된 커맨드가 없습니다.</td></tr>}
         </tbody>
       </table>
     </div>
