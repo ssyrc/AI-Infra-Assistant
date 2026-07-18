@@ -33,6 +33,17 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # 주소류 부트스트랩 기본값(.env 단일 관리). 최초 1회만 platform_settings에 주입되고,
+      # 이후에는 관리자 콘솔 '설정' 탭이 런타임 단일 소스가 된다.
+      VLLM_LLM_BASE_URL: ${VLLM_LLM_BASE_URL:-http://CHANGE-ME:8000/v1}
+      VLLM_LLM_MODEL: ${VLLM_LLM_MODEL:-qwen3-32b}
+      VLLM_EMBED_BASE_URL: ${VLLM_EMBED_BASE_URL:-http://CHANGE-ME:8010/v1}
+      VLLM_EMBED_MODEL: ${VLLM_EMBED_MODEL:-bge-m3}
+      EMBED_DIM: ${EMBED_DIM:-1024}
+      RERANK_PROVIDER: ${RERANK_PROVIDER:-tei}
+      RERANK_BASE_URL: ${RERANK_BASE_URL:-}
+      RERANK_MODEL: ${RERANK_MODEL:-bge-reranker-v2-m3}
+      SCHEDULER_API_BASE_URL: ${SCHEDULER_API_BASE_URL:-http://s2-scheduler:9000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,6 +96,15 @@ services:
       db-init:
         condition: service_completed_successfully
     restart: unless-stopped
+    # 리눅스 실행 툴(whitelist.py)은 기본 비활성이다. 실제로 켜려면 이 컨테이너가 호스트의
+    # 사용자 계정으로 setuid할 수 있어야 한다(root + 호스트 사용자/파일시스템 접근). 그 경우
+    # 아래 같은 설정이 추가로 필요하다(환경에 맞게 검토 후 적용):
+    #   user: "0:0"            # root로 실행(setuid 권한)
+    #   pid: "host"            # 호스트 프로세스/시스템 정보 조회 시
+    #   volumes:
+    #     - /etc/passwd:/etc/passwd:ro
+    #     - /etc/group:/etc/group:ro
+    #   # 또는 LDAP/SSSD로 호스트 계정 해석. 조회 대상 파일시스템도 마운트 필요.
 
   agent-server:
     build: { context: ., dockerfile: agent_server/Dockerfile }
@@ -125,6 +145,9 @@ services:
     environment:
       OPENAI_API_BASE_URL: http://agent-server:8000/v1
       OPENAI_API_KEY: not-needed
+      # 로그인 사용자 정보를 X-OpenWebUI-User-Id/-Email/-Role/-Chat-Id 헤더로 agent-server에
+      # 전달한다. user_scoped 툴의 본인 식별과 역할 검증에 필요하다.
+      ENABLE_FORWARD_USER_INFO_HEADERS: "true"
     volumes:
       - open_webui_data:/app/backend/data
     ports:

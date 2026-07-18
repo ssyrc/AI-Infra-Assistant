@@ -13,8 +13,8 @@ Google ADK 에이전트가 4개의 MCP 서버(매뉴얼 RAG, 커맨드 카탈로
               ┌───────────────┬──────────────┼───────────────┐
               ▼               ▼               ▼               ▼
           Manual MCP     Command MCP       VOC MCP        System MCP
-          (하이브리드    (커맨드 카탈로그) (하이브리드    (화이트리스트
-           RAG 검색)                        이력 검색)      실행만)
+          (하이브리드    (카탈로그검색+    (하이브리드    (리눅스 read-only
+           RAG 검색)      본인 job 실행)    이력 검색)      명령, 본인권한)
               │               │               │               │
           manual_db       command_db       voc_db          system_db      ← MCP별 분리된 DB
               ▲
@@ -33,9 +33,9 @@ Google ADK 에이전트가 4개의 MCP 서버(매뉴얼 RAG, 커맨드 카탈로
 ├─ agent_server/      # FastAPI + ADK, OpenAI 호환 엔드포인트 (Open WebUI가 붙는 곳)
 ├─ mcp_servers/
 │  ├─ manual_mcp/      # 매뉴얼 하이브리드 RAG 검색
-│  ├─ command_mcp/     # 커맨드 카탈로그 조회
+│  ├─ command_mcp/     # 커맨드 카탈로그 검색 + 본인 스케줄러 job 실행(user_scoped)
 │  ├─ voc_mcp/         # VOC 이력 하이브리드 검색
-│  └─ system_mcp/      # 화이트리스트 실행 (whitelist.py) + 감사로그
+│  └─ system_mcp/      # 리눅스 read-only 명령을 호출자 권한으로 실행 (whitelist.py) + 감사로그
 ├─ admin_console/
 │  ├─ backend/         # 업로드·파싱·발행·버전관리·화이트리스트 토글·설정·로그 API
 │  └─ frontend/        # 단일 HTML + React(UMD, 폐쇄망 vendor) 운영 콘솔
@@ -57,16 +57,33 @@ Google ADK 에이전트가 4개의 MCP 서버(매뉴얼 RAG, 커맨드 카탈로
 - **MCP별 DB 분리**: `manual_db`, `voc_db`, `command_db`, `system_db`로 물리적으로 분리.
   스키마 진화·백업·권한을 독립적으로 가져갈 수 있고, 필요하면 각 DSN을 서로 다른 Postgres
   서버로 바꿔도 코드 변경이 없다.
-- **하이브리드 검색**: Manual/VOC MCP는 벡터 검색과 전문검색(tsvector)을 RRF로 융합한다.
-  의미 질문과 정확한 키워드/에러코드 질문 모두에 강하다.
-- **System MCP 안전성**: `whitelist.py`에 등록된 함수만 노출되고 임의 셸 실행 경로가 없다.
+- **하이브리드 검색**: Manual/VOC/Command MCP는 벡터 검색과 전문검색(tsvector)을 RRF로 융합한다.
+  의미 질문과 정확한 키워드/에러코드 질문 모두에 강하다. 커맨드도 정확한 이름을 몰라도
+  "무엇을 하고 싶은지" 설명형으로 물으면 의미상 가까운 커맨드를 찾는다.
+- **System MCP 리눅스 실행 안전성**: `whitelist.py`에 등록된 read-only 명령만, 타입이 정해진
+  파라미터로만 노출된다(원시 셸/플래그를 LLM에 주지 않음). 실행은 **셸 없이 argv**로만 하므로
+  `;`·`|`·`$()` 같은 명령 주입이 불가능하고, `find`의 `-exec/-delete` 등 실행·삭제 프레디킷은
+  금지된다. 실행 직전 **호출자(user_id) 권한으로 setuid 강등**하며(그래서 남의 권한으로 못 봄),
+  root가 아니면 강등 실패로 실행이 중단된다. 타임아웃·출력 상한이 걸리고 `rm` 등 파괴적 명령은
+  아예 등록하지 않는다. 이 툴들은 **기본 비활성(disabled)**이며, 아래 인프라 요건이 갖춰진 뒤
+  관리자 콘솔에서 켠다.
+  - 인프라 요건: system-mcp가 **root로, 호스트의 사용자 계정·파일시스템**에 접근할 수 있어야
+    한다(베어메탈 또는 호스트 네임스페이스 공유 + LDAP/SSSD). 일반 컨테이너에는 직원 OS
+    계정이 없어 `pwd` 조회가 실패하고 실행이 거부된다.
   `functools.wraps`로 원본 시그니처를 보존해 MCP input schema에 실제 파라미터가 정확히
-  노출된다. 실행 가능 여부는 콘솔에서 재배포 없이 토글되고, 모든 실행은 호출자(사용자 ID·
-  대화 ID·요청 ID)와 함께 `job_logs`에 감사 기록된다. 항목별 `required_roles`로 역할 검증도 가능.
+  노출된다. 실행 가능 여부(enabled)와 필요 역할(required_roles)은 콘솔에서 재배포 없이
+  편집되고 실행 시점에 실시간 반영된다(설명 오버라이드는 MCP 재시작 시 반영). 모든 실행은
+  호출자(사용자 ID·대화 ID·요청 ID)와 함께 `job_logs`에 감사 기록된다.
+- **사용자 범위 강제(user_scoped)**: 본인 자원만 다뤄야 하는 툴(예: 스케줄러 job 조회)은
+  `user_id`를 LLM 입력 스키마에서 감추고 호출자 신원(Agent Server가 붙이는 `X-User-Id`)에서
+  강제 주입한다. LLM/사용자가 다른 id를 넣어도 본인 값으로 덮어쓰며, 신뢰된 id가 없으면
+  실행을 거부한다(fail-closed) — 남의 job을 조회할 수 없다.
 - **장애 격리**: 리랭커·임베딩·Redis 장애가 검색 전체를 막지 않는다. 리랭커 실패는 RRF 순위로,
   임베딩 실패는 키워드 전용 검색으로 fallback한다.
 - **문서 무결성**: 발행된 문서의 청크는 수정·삭제할 수 없다(백엔드·프론트 양쪽 차단).
-  수정은 새 버전 업로드로만 가능하다.
+  수정하려면 새 버전을 업로드하거나, "발행취소"로 draft로 내린 뒤 교정한다. 발행취소는
+  즉시 검색 대상에서 제외되고(Manual MCP는 `status='published'`만 검색), 재발행 시 임베딩을
+  유지한 채 빠르게 복귀한다.
 
 ## 빠르게 로컬에서 확인 (GPU 불필요)
 
@@ -114,7 +131,7 @@ docker compose up -d --build
 사내 vLLM 서버 주소로 바꿉니다:
 - `vllm_llm_base_url`, `vllm_llm_model` — LLM 서빙 서버
 - `vllm_embed_base_url`, `vllm_embed_model` — 임베딩 서버
-- `scheduler_api_base_url` — System MCP가 호출할 s2 스케줄러 API
+- `scheduler_api_base_url` — Command MCP가 호출할 s2 스케줄러 API
 
 vLLM 주소는 즉시 반영됩니다. (DB DSN을 바꾼 경우 해당 서비스만 `docker compose restart`)
 
@@ -123,10 +140,17 @@ vLLM 주소는 즉시 반영됩니다. (DB DSN을 바꾼 경우 해당 서비스
 - **매뉴얼 탭**: docx/pptx/pdf는 업로드 시 Docling이 자동 청크화. 엑셀(xlsx)은 업로드하면
   컬럼 선택 화면이 뜨고, 내용으로 쓸 컬럼(과 제목 컬럼)을 골라 등록. 청크를 교정한 뒤
   "발행"하면 그 시점에 임베딩되어 검색 대상이 됨. 같은 제목 재업로드→새 버전, 발행 시 이전
-  버전 자동 archived, archived를 다시 발행하면 롤백.
+  버전 자동 archived, archived를 다시 발행하면 롤백. "발행취소"를 누르면 즉시 검색에서 빠지고
+  다시 교정·삭제할 수 있음(파일 단위 관리: 파일을 지우면 소속 청크가 함께 삭제됨).
 - **VOC 탭**: 개별 등록/수정/삭제, 또는 `question`/`answer`/`department`/`resolved` 엑셀 일괄 등록.
-- **커맨드 카탈로그 탭**: Command MCP가 조회하는 커맨드 CRUD.
-- **System MCP 탭**: 화이트리스트 함수 on/off 토글 + 실행 감사로그.
+- **커맨드 카탈로그 탭**: Command MCP가 조회하는 커맨드 CRUD (Command MCP는 이 카탈로그 검색과
+  함께 본인 스케줄러 job 조회도 담당). 개별 등록 외에 엑셀 일괄 업로드
+  지원 — 업로드하면 열 매핑 화면이 뜨고 name/description/usage/category에 대응할 열을 골라
+  이름 기준 upsert. 등록/갱신 시 정제·임베딩이 적용되어 의미 검색 대상이 됨.
+- **System MCP 탭**: 리눅스 read-only 명령 툴의 on/off 토글, 설명·필요 역할 편집, 실행 감사로그.
+  이 툴들은 기본 비활성이며 인프라 요건(위 참고)이 갖춰진 뒤 켠다. "사용자 범위" 배지 툴은
+  호출자 본인 권한으로만 실행됨. 역할은 이제 Open WebUI 로그인 역할이 전달되므로
+  (`ENABLE_FORWARD_USER_INFO_HEADERS`) 지정한 역할 보유자만 실행하도록 제한할 수 있음.
 - **설정 탭**: 위 3번의 모든 주소/모델/지시문 관리.
 
 ### 5. Langfuse (모니터링)
@@ -134,6 +158,29 @@ vLLM 주소는 즉시 반영됩니다. (DB DSN을 바꾼 경우 해당 서비스
 http://서버:3001 접속 → 계정/프로젝트 생성 → API 키 발급 → `.env`의 `LANGFUSE_PUBLIC_KEY`,
 `LANGFUSE_SECRET_KEY`에 넣고 `docker compose up -d agent-server` 재기동. 이후 모든 LLM 호출과
 MCP 툴 호출이 트레이스로 쌓입니다. (키가 없으면 에이전트는 트레이싱 없이 정상 동작)
+
+## 상위 agent 연동 + 사용자 장기 메모리
+
+Open WebUI 외에, 상위 통합 agent(예: VOC agent)가 AI-Infra 질문을 **API로 위임**할 수 있다.
+
+```
+POST /v1/agent/query            # 내부망 전용(인증 없음)
+{ "user_id": "hong.gildong", "message": "...", "conversation_id": "voc-123",
+  "source": "voc-agent", "roles": ["user"], "use_memory": true, "stream": false }
+→ { "answer": "...", "conversation_id": "voc-123", "request_id": "..." }
+```
+
+- **단일 user_id 메모리**: user_id는 이메일이면 `@` 앞부분으로 정규화된다. 채널(Open WebUI/
+  VOC)이 달라도 같은 user_id면 **하나의 장기 메모리를 공유**한다.
+- **동작**: 요청 시 (1) 해당 대화의 최근 N턴 + (2) user_id의 장기기억을 질문 임베딩으로 의미검색해
+  시스템 지시문/대화 이력에 주입한다. 응답 후 대화 턴을 저장하고, 턴이 임계치(`memory_summarize_every`)만큼
+  쌓이면 오래된 대화를 vLLM으로 **요약·증류**해 `user_memory`(장기기억)로 승격한다(백그라운드).
+- **저장소**: 전용 `memory_db`(pgvector). `memory_turns`(원장)/`user_memory`(증류된 장기기억)/
+  `conversation_state`(요약 진행). 파라미터는 설정 탭의 `memory_*` 키로 조절.
+- **관리 API**: `GET /v1/memory/{user_id}`(조회), `POST /v1/memory/{user_id}`(수동 추가),
+  `DELETE /v1/memory/{user_id}`(개별 `?memory_id=` 또는 전체 삭제=잊힐 권리).
+- 주의: 이 엔드포인트들은 인증이 없으므로 **agent-server를 내부망에서만** 접근 가능하게 둔다
+  (compose 기본은 호스트 미노출). 외부 노출 시 reverse proxy에서 접근 제한 필요.
 
 ## 에이전트가 보는 MCP 목적/기능을 바꾸려면
 

@@ -223,6 +223,11 @@ function ManualsPanel() {
     openDetail(detail.file.id);
   };
   const publish = async (id) => { await api(`/api/manuals/${id}/publish`, { method: "POST" }); await load(); openDetail(id); };
+  const unpublish = async (id) => {
+    if (!confirm("발행을 취소하면 즉시 검색·조회에서 제외됩니다. 계속할까요?")) return;
+    try { await api(`/api/manuals/${id}/unpublish`, { method: "POST" }); await load(); openDetail(id); }
+    catch (e) { alert(e.message); }
+  };
   const remove = async (id) => {
     if (!confirm("이 버전을 삭제할까요?")) return;
     try { await api(`/api/manuals/${id}`, { method: "DELETE" }); setDetail(null); await load(); }
@@ -329,6 +334,7 @@ function ManualsPanel() {
             <div><strong>{detail.file.title}</strong> · v{detail.file.version} <Badge value={detail.file.status} /></div>
             <div className="row-actions">
               {detail.file.status !== "published" && <button className="primary" onClick={() => publish(detail.file.id)}>발행</button>}
+              {detail.file.status === "published" && <button className="danger" onClick={() => unpublish(detail.file.id)}>발행취소</button>}
               {detail.file.status !== "published" && <button className="danger" onClick={() => remove(detail.file.id)}>삭제</button>}
               <button onClick={() => setDetail(null)}>닫기</button>
             </div>
@@ -346,8 +352,9 @@ function ManualsPanel() {
           <div style={{marginTop: 12}}>
             {detail.file.status !== "draft" && (
               <div className="subtitle" style={{color: "var(--warn)"}}>
-                {detail.file.status === "published" ? "발행 중인" : "보관된"} 버전은 읽기 전용입니다.
-                내용을 바꾸려면 같은 제목으로 새 파일을 업로드해 새 버전을 만드세요.
+                {detail.file.status === "published"
+                  ? "발행 중인 버전은 읽기 전용입니다. 내용을 바꾸려면 발행취소 후 교정하거나, 같은 제목으로 새 버전을 업로드하세요."
+                  : "보관된 버전은 읽기 전용입니다. 다시 발행(롤백)하거나 같은 제목으로 새 버전을 업로드하세요."}
               </div>
             )}
             {detail.chunks.map(c => (
@@ -463,6 +470,11 @@ function CommandsPanel() {
   const [items, setItems] = useState([]);
   const [form, setForm] = useState({ name: "", description: "", usage: "", category: "" });
   const [editingId, setEditingId] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  // 엑셀 미리보기 + 열 매핑 상태
+  const [excel, setExcel] = useState(null); // {upload_id, filename, columns, sample_rows, total_rows}
+  const [map, setMap] = useState({ name_column: "", description_column: "", usage_column: "", category_column: "" });
 
   const load = useCallback(async () => setItems(await api("/api/commands")), []);
   useEffect(() => { load(); }, [load]);
@@ -481,10 +493,67 @@ function CommandsPanel() {
   const edit = (row) => { setForm(row); setEditingId(row.id); };
   const remove = async (id) => { if (confirm("삭제할까요?")) { await api(`/api/commands/${id}`, { method: "DELETE" }); load(); } };
 
+  const analyzeExcel = async (f) => {
+    if (!f) return;
+    setBusy(true);
+    setExcel(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      const r = await fetch("/api/commands/excel/preview", { method: "POST", body: fd });
+      if (!r.ok) throw new Error(await r.text());
+      const data = await r.json();
+      setExcel(data);
+      // 열 이름 자동 추정
+      const guess = (cands) => data.columns.find(c => cands.some(k => c.toLowerCase().includes(k))) || "";
+      setMap({
+        name_column: guess(["name", "이름", "커맨드", "command", "명령"]),
+        description_column: guess(["desc", "설명", "내용"]),
+        usage_column: guess(["usage", "사용", "예시", "example"]),
+        category_column: guess(["cat", "분류", "카테고리"]),
+      });
+    } catch (e) { alert("전처리 실패: " + e.message); }
+    setBusy(false);
+  };
+
+  const commitExcel = async () => {
+    if (!map.name_column || !map.description_column) return alert("이름/설명 열을 지정하세요.");
+    setBusy(true);
+    try {
+      const data = await api("/api/commands/excel/commit", {
+        method: "POST",
+        body: JSON.stringify({
+          upload_id: excel.upload_id,
+          name_column: map.name_column,
+          description_column: map.description_column,
+          usage_column: map.usage_column || null,
+          category_column: map.category_column || null,
+        }),
+      });
+      setExcel(null);
+      await load();
+      alert(`엑셀 반영 완료 · 신규 ${data.inserted}건, 갱신 ${data.updated}건`);
+    } catch (e) { alert("등록 실패: " + e.message); }
+    setBusy(false);
+  };
+
+  const colSelect = (field, label, required) => (
+    <label style={{fontSize: 12.5, display: "flex", flexDirection: "column", gap: 4}}>
+      <span style={{color: "var(--muted)"}}>{label}{required ? " *" : ""}</span>
+      <select value={map[field]} onChange={e => setMap({...map, [field]: e.target.value})}>
+        <option value="">(선택 안 함)</option>
+        {excel.columns.map(c => <option key={c} value={c}>{c}</option>)}
+      </select>
+    </label>
+  );
+
   return (
     <div>
       <h2>커맨드 카탈로그</h2>
-      <div className="subtitle">Command MCP가 조회하는 시스템 활용 커맨드 목록 (정보 제공용, 실행은 System MCP 담당).</div>
+      <div className="subtitle">
+        Command MCP가 조회하는 시스템 활용 커맨드 목록 (정보 제공용, 실행은 System MCP 담당).
+        등록 시 의미 검색용 임베딩이 생성되어, 사용자가 설명형으로 물어도 적절한 커맨드를 찾습니다.
+      </div>
 
       <div className="card">
         <div className="toolbar">
@@ -496,17 +565,53 @@ function CommandsPanel() {
         <div className="toolbar" style={{marginTop: 8}}>
           <button className="primary" onClick={submit}>{editingId ? "수정 저장" : "등록"}</button>
           {editingId && <button onClick={() => { setEditingId(null); setForm({ name: "", description: "", usage: "", category: "" }); }}>취소</button>}
+          <span style={{marginLeft: "auto"}}>
+            <input type="file" accept=".xlsx,.xls" disabled={busy}
+                   onChange={e => { analyzeExcel(e.target.files[0]); e.target.value = ""; }} />
+            <span style={{fontSize: 11.5, color: "var(--muted)", marginLeft: 6}}>엑셀 일괄 업로드 (열 매핑)</span>
+          </span>
         </div>
       </div>
 
+      {/* 엑셀 열 매핑 */}
+      {excel && (
+        <div className="card">
+          <div style={{marginBottom: 8}}><strong>엑셀 열 매핑</strong> · {excel.filename} · 시트 {excel.sheet} · {excel.total_rows}행</div>
+          <div className="subtitle">각 항목에 대응하는 엑셀 열을 고르세요. 이름 기준으로 등록/갱신(upsert)됩니다.</div>
+          <div style={{display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12}}>
+            {colSelect("name_column", "이름(name)", true)}
+            {colSelect("description_column", "설명(description)", true)}
+            {colSelect("usage_column", "사용법(usage)", false)}
+            {colSelect("category_column", "카테고리(category)", false)}
+          </div>
+          {excel.sample_rows.length > 0 && (
+            <table style={{marginBottom: 12}}>
+              <thead><tr>{excel.columns.map(c => <th key={c}>{c}</th>)}</tr></thead>
+              <tbody>
+                {excel.sample_rows.map((r, i) => (
+                  <tr key={i}>{excel.columns.map((c, j) => (
+                    <td key={j} style={{color: "var(--muted)", fontSize: 12, maxWidth: 220}}>{r[j]}</td>
+                  ))}</tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <div className="row-actions">
+            <button className="primary" disabled={busy} onClick={commitExcel}>매핑대로 일괄 등록</button>
+            <button onClick={() => setExcel(null)}>취소</button>
+          </div>
+        </div>
+      )}
+
       <table>
-        <thead><tr><th>이름</th><th>설명</th><th>카테고리</th><th>수정일</th><th></th></tr></thead>
+        <thead><tr><th>이름</th><th>설명</th><th>카테고리</th><th>검색</th><th>수정일</th><th></th></tr></thead>
         <tbody>
           {items.map(c => (
             <tr key={c.id}>
               <td style={{fontFamily: "var(--mono)"}}>{c.name}</td>
               <td>{c.description}</td>
               <td>{c.category || "-"}</td>
+              <td style={{fontSize: 11.5, color: "var(--muted)"}}>{c.embedded ? "의미+키워드" : "키워드만"}</td>
               <td>{new Date(c.updated_at).toLocaleDateString()}</td>
               <td className="row-actions">
                 <button onClick={() => edit(c)}>편집</button>
@@ -514,7 +619,7 @@ function CommandsPanel() {
               </td>
             </tr>
           ))}
-          {items.length === 0 && <tr><td colSpan="5" className="empty">등록된 커맨드가 없습니다.</td></tr>}
+          {items.length === 0 && <tr><td colSpan="6" className="empty">등록된 커맨드가 없습니다.</td></tr>}
         </tbody>
       </table>
     </div>
@@ -526,20 +631,42 @@ function SystemPanel() {
   const [whitelist, setWhitelist] = useState([]);
   const [logs, setLogs] = useState([]);
   const [tab, setTab] = useState("whitelist");
+  const [edits, setEdits] = useState({}); // tool_name -> {description, roles}
 
   const loadWhitelist = useCallback(async () => setWhitelist(await api("/api/system/whitelist")), []);
   const loadLogs = useCallback(async () => setLogs(await api("/api/system/logs")), []);
   useEffect(() => { loadWhitelist(); loadLogs(); }, [loadWhitelist, loadLogs]);
 
-  const toggle = async (name, enabled) => {
-    await api(`/api/system/whitelist/${encodeURIComponent(name)}`, { method: "PATCH", body: JSON.stringify({ enabled }) });
-    loadWhitelist();
+  const patch = async (name, body) => {
+    await api(`/api/system/whitelist/${encodeURIComponent(name)}`, { method: "PATCH", body: JSON.stringify(body) });
+    await loadWhitelist();
+  };
+  const toggle = (name, enabled) => patch(name, { enabled });
+
+  const baseEdit = (w) => ({
+    description: w.description_override || "",
+    roles: (w.required_roles || []).join(", "),
+  });
+  const editOf = (w) => edits[w.tool_name] || baseEdit(w);
+  const setEdit = (name, patchObj) =>
+    setEdits(p => {
+      const w = whitelist.find(x => x.tool_name === name);
+      const base = p[name] || baseEdit(w);
+      return { ...p, [name]: { ...base, ...patchObj } };
+    });
+
+  const saveMeta = async (w) => {
+    const e = editOf(w);
+    const roles = e.roles.split(",").map(s => s.trim()).filter(Boolean);
+    await patch(w.tool_name, { description: e.description, required_roles: roles });
+    setEdits(p => { const n = { ...p }; delete n[w.tool_name]; return n; });
+    alert("저장했습니다. (설명 변경은 System MCP 재시작 후 에이전트에 반영됩니다)");
   };
 
   return (
     <div>
       <h2>System MCP</h2>
-      <div className="subtitle">화이트리스트 등록 함수의 활성/비활성 토글과 실행 감사로그. 새 함수 자체 추가는 System MCP 코드 배포가 필요합니다.</div>
+      <div className="subtitle">화이트리스트 함수의 활성/비활성·설명·필요 역할을 편집하고 실행 감사로그를 봅니다. 새 함수 자체 추가는 System MCP 코드 배포가 필요합니다.</div>
 
       <div className="toolbar">
         <button className={tab === "whitelist" ? "primary" : ""} onClick={() => setTab("whitelist")}>화이트리스트</button>
@@ -547,25 +674,51 @@ function SystemPanel() {
       </div>
 
       {tab === "whitelist" && (
-        <table>
-          <thead><tr><th>툴 이름</th><th>설명</th><th>상태</th><th>변경자/시각</th></tr></thead>
-          <tbody>
-            {whitelist.map(w => (
-              <tr key={w.tool_name}>
-                <td style={{fontFamily: "var(--mono)"}}>{w.tool_name}</td>
-                <td>{w.description}</td>
-                <td>
-                  <label className="switch">
-                    <input type="checkbox" checked={w.enabled} onChange={e => toggle(w.tool_name, e.target.checked)} />
-                    <span className="track"></span><span className="thumb"></span>
+        <div>
+          <div className="card" style={{fontSize: 12.5, color: "var(--muted)"}}>
+            <div>· <strong style={{color: "var(--accent)"}}>사용자 범위</strong> 툴은 <code>user_id</code>를 LLM에 노출하지 않고 호출자 본인 id로 고정합니다(남의 자원 조회 불가).</div>
+            <div style={{marginTop: 4}}>· <strong style={{color: "var(--warn)"}}>필요 역할</strong>을 지정하면 해당 역할 보유자만 실행할 수 있습니다. 단, 현재 역할 공급원이 없으므로(사용자 id만 전달됨) 역할을 지정하면 그 툴은 전원 실행 거부됩니다. 역할 연동 전에는 비워 두세요.</div>
+          </div>
+          {whitelist.map(w => {
+            const e = editOf(w);
+            const dirty = w.tool_name in edits;
+            return (
+              <div className="card" key={w.tool_name}>
+                <div className="toolbar" style={{justifyContent: "space-between"}}>
+                  <div>
+                    <span style={{fontFamily: "var(--mono)"}}>{w.tool_name}</span>
+                    {w.user_scoped && <span className="badge enabled" style={{marginLeft: 8}}>사용자 범위</span>}
+                  </div>
+                  <div style={{display: "flex", alignItems: "center", gap: 8}}>
+                    <label className="switch">
+                      <input type="checkbox" checked={w.enabled} onChange={ev => toggle(w.tool_name, ev.target.checked)} />
+                      <span className="track"></span><span className="thumb"></span>
+                    </label>
+                    <Badge value={w.enabled} />
+                  </div>
+                </div>
+                <div style={{marginTop: 8, fontSize: 12.5, color: "var(--muted)"}}>설명 (에이전트가 보는 툴 설명)</div>
+                <textarea rows={2} style={{width: "100%", marginTop: 4}}
+                  placeholder={w.code_description}
+                  value={e.description}
+                  onChange={ev => setEdit(w.tool_name, { description: ev.target.value })} />
+                <div style={{display: "flex", gap: 8, alignItems: "flex-end", marginTop: 8, flexWrap: "wrap"}}>
+                  <label style={{fontSize: 12.5, color: "var(--muted)", flex: 1}}>
+                    <div>필요 역할 (쉼표로 구분, 비우면 제한 없음)</div>
+                    <input style={{width: "100%", marginTop: 4}} placeholder="예: ops-admin, sre"
+                      value={e.roles}
+                      onChange={ev => setEdit(w.tool_name, { roles: ev.target.value })} />
                   </label>
-                  <span style={{marginLeft: 8}}><Badge value={w.enabled} /></span>
-                </td>
-                <td style={{fontSize: 11.5, color: "var(--muted)"}}>{w.updated_by ? `${w.updated_by} · ${new Date(w.updated_at).toLocaleString()}` : "-"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  <button className="primary" disabled={!dirty} onClick={() => saveMeta(w)}>저장</button>
+                  {dirty && <button onClick={() => setEdits(p => { const n = { ...p }; delete n[w.tool_name]; return n; })}>되돌리기</button>}
+                </div>
+                <div style={{marginTop: 6, fontSize: 11.5, color: "var(--muted)"}}>
+                  {w.updated_by ? `최근 변경: ${w.updated_by} · ${new Date(w.updated_at).toLocaleString()}` : "변경 이력 없음(코드 기본값)"}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
 
       {tab === "logs" && (
@@ -607,20 +760,33 @@ function SettingsPanel() {
   };
 
   const grouped = {
-    "vLLM / 모델": settings.filter(s => s.key.startsWith("vllm_")),
-    "검색 품질 (리랭커/캐시)": settings.filter(s => s.key.startsWith("rerank_") || s.key === "redis_url" || s.key === "embed_cache_ttl_seconds"),
+    "인프라 주소 (LLM / 리랭커 / 스케줄러)": settings.filter(s =>
+      s.key === "vllm_llm_base_url" || s.key === "vllm_embed_base_url"
+      || s.key === "rerank_base_url" || s.key === "scheduler_api_base_url"),
+    "모델 / 임베딩": settings.filter(s =>
+      s.key === "vllm_llm_model" || s.key === "vllm_embed_model" || s.key === "embed_dim"),
+    "검색 품질 (리랭커/캐시)": settings.filter(s =>
+      (s.key.startsWith("rerank_") && s.key !== "rerank_base_url")
+      || s.key === "embed_cache_ttl_seconds" || s.key === "clean_policy_version"
+      || s.key.startsWith("search_") || s.key.startsWith("upload_")),
     "MCP 엔드포인트": settings.filter(s => s.key.endsWith("_mcp_url")),
-    "데이터베이스 (DSN)": settings.filter(s => s.key.endsWith("_db_dsn")),
-    "System / 에이전트": settings.filter(s => s.key === "scheduler_api_base_url" || s.key === "agent_system_instruction"),
+    "에이전트 지시문": settings.filter(s => s.key === "agent_system_instruction"),
+    "데이터베이스 · 시크릿 (.env로 관리)": settings.filter(s => s.env_managed),
   };
+  const shown = new Set(Object.values(grouped).flat().map(s => s.key));
+  const others = settings.filter(s => !shown.has(s.key));
+  if (others.length) grouped["기타"] = others;
 
   return (
     <div>
       <h2>설정</h2>
       <div className="subtitle">
-        vLLM 주소, 각 MCP DB, MCP 엔드포인트, 에이전트 지시문을 여기서 관리합니다.
-        <span className="badge enabled" style={{marginLeft: 8}}>즉시 반영</span> 표시는 재시작 없이 적용되고,
-        <span className="badge disabled" style={{marginLeft: 6}}>재시작 필요</span> 표시는 해당 서비스 컨테이너를 재시작해야 반영됩니다.
+        LLM·리랭커·스케줄러 주소, MCP 엔드포인트, 에이전트 지시문을 여기서 관리합니다(런타임 단일 소스).
+        <span className="badge enabled" style={{marginLeft: 8}}>즉시 반영</span>은 재시작 없이 적용,
+        <span className="badge disabled" style={{marginLeft: 6}}>재시작 필요</span>는 해당 서비스 재시작 후 반영됩니다.
+        <br />
+        <span className="badge disabled" style={{marginLeft: 0, marginTop: 4, display: "inline-block"}}>.env 관리</span>
+        {" "}표시된 DB/시크릿은 배포 시 <code>.env</code> 한 파일에서 관리되며(부트스트랩), 여기서는 읽기 전용입니다.
       </div>
 
       {Object.entries(grouped).map(([group, rows]) => rows.length > 0 && (
@@ -633,29 +799,38 @@ function SettingsPanel() {
               <div key={s.key} style={{marginBottom: 14}}>
                 <div style={{fontSize: 12.5, marginBottom: 4}}>
                   <span style={{fontFamily: "var(--mono)"}}>{s.key}</span>
-                  <span className={`badge ${s.hot_reload ? "enabled" : "disabled"}`} style={{marginLeft: 8}}>
-                    {s.hot_reload ? "즉시 반영" : "재시작 필요"}
-                  </span>
+                  {s.env_managed
+                    ? <span className="badge disabled" style={{marginLeft: 8}}>.env 관리</span>
+                    : <span className={`badge ${s.hot_reload ? "enabled" : "disabled"}`} style={{marginLeft: 8}}>
+                        {s.hot_reload ? "즉시 반영" : "재시작 필요"}
+                      </span>}
                   {s.description && <span style={{color: "var(--muted)", marginLeft: 8}}>{s.description}</span>}
                 </div>
-                <div style={{display: "flex", gap: 8, alignItems: "flex-start"}}>
-                  {isLong ? (
-                    <textarea
-                      style={{flex: 1}} rows={6}
-                      placeholder={s.is_secret ? `(현재: ${s.value})` : ""}
-                      value={val}
-                      onChange={e => setEdits({ ...edits, [s.key]: e.target.value })}
-                    />
-                  ) : (
-                    <input
-                      style={{flex: 1}}
-                      placeholder={s.is_secret ? `(마스킹됨: ${s.value})` : ""}
-                      value={val}
-                      onChange={e => setEdits({ ...edits, [s.key]: e.target.value })}
-                    />
-                  )}
-                  <button className="primary" disabled={!(s.key in edits)} onClick={() => save(s.key)}>저장</button>
-                </div>
+                {s.env_managed ? (
+                  <div style={{fontFamily: "var(--mono)", fontSize: 12.5, color: "var(--muted)",
+                               padding: "6px 8px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4}}>
+                    {s.value || "(비어 있음)"} <span style={{color: "var(--warn)"}}>· .env에서 수정 후 재시작</span>
+                  </div>
+                ) : (
+                  <div style={{display: "flex", gap: 8, alignItems: "flex-start"}}>
+                    {isLong ? (
+                      <textarea
+                        style={{flex: 1}} rows={10}
+                        placeholder={s.is_secret ? `(현재: ${s.value})` : ""}
+                        value={val}
+                        onChange={e => setEdits({ ...edits, [s.key]: e.target.value })}
+                      />
+                    ) : (
+                      <input
+                        style={{flex: 1}}
+                        placeholder={s.is_secret ? `(마스킹됨: ${s.value})` : ""}
+                        value={val}
+                        onChange={e => setEdits({ ...edits, [s.key]: e.target.value })}
+                      />
+                    )}
+                    <button className="primary" disabled={!(s.key in edits)} onClick={() => save(s.key)}>저장</button>
+                  </div>
+                )}
               </div>
             );
           })}

@@ -8,4 +8,5 @@ CREATE DATABASE voc_db;
 CREATE DATABASE command_db;
 CREATE DATABASE system_db;
 CREATE DATABASE agent_sessions_db;
+CREATE DATABASE memory_db;
 CREATE DATABASE langfuse;

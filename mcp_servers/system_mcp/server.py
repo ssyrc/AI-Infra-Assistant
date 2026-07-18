@@ -1,40 +1,36 @@
 """
-System MCP - 화이트리스트에 등록된 함수만 실행 가능한 MCP 서버.
-whitelist.py에 없는 동작은 절대 수행하지 않는다 (임의 셸 실행 없음).
+System MCP - 화이트리스트(read-only 리눅스 명령)만 실행하는 MCP 서버.
+whitelist.py에 없는 동작은 절대 수행하지 않는다. 각 툴은 셸 없이 argv로 실행되고(주입 불가),
+호출자(user_id) 권한으로 강등되어 실행된다(linux_exec).
 
-보안 설계:
-- functools.wraps로 원본 함수 시그니처를 보존한다. 이렇게 해야 MCP input schema에
-  user_id 같은 실제 파라미터가 정확히 노출되어 LLM이 올바르게 호출할 수 있다.
-- 호출자 정보(사용자 ID/대화 ID/요청 ID)는 HTTP 헤더로 전달받아 감사로그에 남긴다.
-  Agent Server가 X-User-Id / X-Conversation-Id / X-Request-Id 헤더를 붙여준다.
-- 화이트리스트 항목의 required_roles가 지정돼 있으면 호출자 역할(X-User-Roles)을 검증한다.
+호출자 컨텍스트/권한검사/감사로그/ user_id 주입 로직은 shared/mcp_caller로 공통화한다.
+- enabled(활성)/required_roles(필요 역할)는 실행 시점에 system_db에서 실시간으로 읽는다.
+- description_override(LLM에 보이는 설명)는 기동 시 1회 읽어 반영한다(변경은 MCP 재시작 필요).
+- 모든 실행은 job_logs에 호출자와 함께 감사 기록된다.
 """
 import sys
 import os
 import json
-import functools
-import inspect
-from contextvars import ContextVar
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../shared"))
 from db import get_pool  # noqa: E402
+from mcp_caller import (  # noqa: E402
+    get_caller, CallerContextMiddleware, load_overrides_sync, tool_description, build_wrapped,
+)
 from whitelist import WHITELIST  # noqa: E402
 
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("system-mcp", stateless_http=True)
 
-# 요청별 호출자 정보 (ASGI 미들웨어가 채운다)
-_caller: ContextVar[dict] = ContextVar("caller", default={})
-
-
-def get_caller() -> dict:
-    return _caller.get() or {}
+_DSN = "system_db_dsn"
+_STATE = "system_whitelist_state"
+_OVERRIDES = load_overrides_sync(_DSN, _STATE)
 
 
 async def _log_execution(tool_name: str, params: dict, status: str, result):
     caller = get_caller()
-    pool = await get_pool("system_db_dsn")
+    pool = await get_pool(_DSN)
     await pool.execute(
         """
         INSERT INTO job_logs (tool_name, params, requested_by, status, result,
@@ -52,97 +48,34 @@ async def _log_execution(tool_name: str, params: dict, status: str, result):
 
 
 async def _is_enabled(tool_name: str, default: bool) -> bool:
-    """관리자 콘솔에서 토글한 활성/비활성 상태를 실행 시점에 확인한다."""
-    pool = await get_pool("system_db_dsn")
+    pool = await get_pool(_DSN)
     row = await pool.fetchrow(
-        "SELECT enabled FROM system_whitelist_state WHERE tool_name = $1", tool_name
-    )
+        f"SELECT enabled FROM {_STATE} WHERE tool_name = $1", tool_name)
     if row is None:
         await pool.execute(
-            "INSERT INTO system_whitelist_state (tool_name, enabled) VALUES ($1, $2) "
+            f"INSERT INTO {_STATE} (tool_name, enabled) VALUES ($1, $2) "
             "ON CONFLICT (tool_name) DO NOTHING",
-            tool_name, default,
-        )
+            tool_name, default)
         return default
     return row["enabled"]
 
 
-def _check_roles(entry: dict) -> None:
-    required = entry.get("required_roles")
-    if not required:
-        return
-    roles = set(get_caller().get("roles", []))
-    if not roles.intersection(set(required)):
-        raise PermissionError(
-            f"이 툴을 실행할 권한이 없습니다. 필요한 역할: {', '.join(required)}"
-        )
-
-
-def _make_wrapped_tool(name: str, entry: dict):
-    """화이트리스트 항목에 권한 검사·감사로그를 덧씌우되, 원본 시그니처를 보존한다.
-    functools.wraps가 __wrapped__를 설정하므로 inspect.signature가 원본 파라미터를
-    그대로 읽고, FastMCP가 정확한 input schema를 생성한다."""
-    handler = entry["handler"]
-
-    @functools.wraps(handler)
-    async def wrapped(*args, **kwargs):
-        # 로그에는 위치인자도 이름으로 남긴다
-        try:
-            bound = inspect.signature(handler).bind(*args, **kwargs)
-            bound.apply_defaults()
-            params = dict(bound.arguments)
-        except Exception:  # noqa: BLE001
-            params = {"args": list(args), **kwargs}
-
-        if not await _is_enabled(name, entry.get("enabled", False)):
-            await _log_execution(name, params, "blocked", {"reason": "disabled by admin"})
-            raise PermissionError(f"'{name}' 툴은 관리자 콘솔에서 비활성화되어 있습니다.")
-        try:
-            _check_roles(entry)
-        except PermissionError as e:
-            await _log_execution(name, params, "denied", {"reason": str(e)})
-            raise
-
-        try:
-            result = await handler(*args, **kwargs)
-            await _log_execution(name, params, "success", result)
-            return result
-        except PermissionError:
-            raise
-        except Exception as e:  # noqa: BLE001
-            await _log_execution(name, params, "error", {"error": str(e)})
-            raise
-
-    wrapped.__doc__ = entry["description"]
-    return wrapped
+async def _required_roles(tool_name: str, code_default: list) -> list:
+    pool = await get_pool(_DSN)
+    row = await pool.fetchrow(
+        f"SELECT required_roles FROM {_STATE} WHERE tool_name = $1", tool_name)
+    if row and row["required_roles"] is not None:
+        return list(row["required_roles"])
+    return list(code_default or [])
 
 
 for _name, _entry in WHITELIST.items():
-    mcp.add_tool(_make_wrapped_tool(_name, _entry), name=_name, description=_entry["description"])
-
-
-class CallerContextMiddleware:
-    """Agent Server가 붙인 호출자 헤더를 ContextVar에 넣는 ASGI 미들웨어."""
-
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] == "http":
-            headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
-            roles = [r.strip() for r in headers.get("x-user-roles", "").split(",") if r.strip()]
-            token = _caller.set({
-                "user_id": headers.get("x-user-id"),
-                "conversation_id": headers.get("x-conversation-id"),
-                "request_id": headers.get("x-request-id"),
-                "roles": roles,
-            })
-            try:
-                await self.app(scope, receive, send)
-            finally:
-                _caller.reset(token)
-            return
-        await self.app(scope, receive, send)
+    mcp.add_tool(
+        build_wrapped(_name, _entry, is_enabled=_is_enabled,
+                      required_roles=_required_roles, log_execution=_log_execution),
+        name=_name,
+        description=tool_description(_name, _entry, _OVERRIDES),
+    )
 
 
 if __name__ == "__main__":
