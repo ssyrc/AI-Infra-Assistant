@@ -631,20 +631,42 @@ function SystemPanel() {
   const [whitelist, setWhitelist] = useState([]);
   const [logs, setLogs] = useState([]);
   const [tab, setTab] = useState("whitelist");
+  const [edits, setEdits] = useState({}); // tool_name -> {description, roles}
 
   const loadWhitelist = useCallback(async () => setWhitelist(await api("/api/system/whitelist")), []);
   const loadLogs = useCallback(async () => setLogs(await api("/api/system/logs")), []);
   useEffect(() => { loadWhitelist(); loadLogs(); }, [loadWhitelist, loadLogs]);
 
-  const toggle = async (name, enabled) => {
-    await api(`/api/system/whitelist/${encodeURIComponent(name)}`, { method: "PATCH", body: JSON.stringify({ enabled }) });
-    loadWhitelist();
+  const patch = async (name, body) => {
+    await api(`/api/system/whitelist/${encodeURIComponent(name)}`, { method: "PATCH", body: JSON.stringify(body) });
+    await loadWhitelist();
+  };
+  const toggle = (name, enabled) => patch(name, { enabled });
+
+  const baseEdit = (w) => ({
+    description: w.description_override || "",
+    roles: (w.required_roles || []).join(", "),
+  });
+  const editOf = (w) => edits[w.tool_name] || baseEdit(w);
+  const setEdit = (name, patchObj) =>
+    setEdits(p => {
+      const w = whitelist.find(x => x.tool_name === name);
+      const base = p[name] || baseEdit(w);
+      return { ...p, [name]: { ...base, ...patchObj } };
+    });
+
+  const saveMeta = async (w) => {
+    const e = editOf(w);
+    const roles = e.roles.split(",").map(s => s.trim()).filter(Boolean);
+    await patch(w.tool_name, { description: e.description, required_roles: roles });
+    setEdits(p => { const n = { ...p }; delete n[w.tool_name]; return n; });
+    alert("저장했습니다. (설명 변경은 System MCP 재시작 후 에이전트에 반영됩니다)");
   };
 
   return (
     <div>
       <h2>System MCP</h2>
-      <div className="subtitle">화이트리스트 등록 함수의 활성/비활성 토글과 실행 감사로그. 새 함수 자체 추가는 System MCP 코드 배포가 필요합니다.</div>
+      <div className="subtitle">화이트리스트 함수의 활성/비활성·설명·필요 역할을 편집하고 실행 감사로그를 봅니다. 새 함수 자체 추가는 System MCP 코드 배포가 필요합니다.</div>
 
       <div className="toolbar">
         <button className={tab === "whitelist" ? "primary" : ""} onClick={() => setTab("whitelist")}>화이트리스트</button>
@@ -652,25 +674,51 @@ function SystemPanel() {
       </div>
 
       {tab === "whitelist" && (
-        <table>
-          <thead><tr><th>툴 이름</th><th>설명</th><th>상태</th><th>변경자/시각</th></tr></thead>
-          <tbody>
-            {whitelist.map(w => (
-              <tr key={w.tool_name}>
-                <td style={{fontFamily: "var(--mono)"}}>{w.tool_name}</td>
-                <td>{w.description}</td>
-                <td>
-                  <label className="switch">
-                    <input type="checkbox" checked={w.enabled} onChange={e => toggle(w.tool_name, e.target.checked)} />
-                    <span className="track"></span><span className="thumb"></span>
+        <div>
+          <div className="card" style={{fontSize: 12.5, color: "var(--muted)"}}>
+            <div>· <strong style={{color: "var(--accent)"}}>사용자 범위</strong> 툴은 <code>user_id</code>를 LLM에 노출하지 않고 호출자 본인 id로 고정합니다(남의 자원 조회 불가).</div>
+            <div style={{marginTop: 4}}>· <strong style={{color: "var(--warn)"}}>필요 역할</strong>을 지정하면 해당 역할 보유자만 실행할 수 있습니다. 단, 현재 역할 공급원이 없으므로(사용자 id만 전달됨) 역할을 지정하면 그 툴은 전원 실행 거부됩니다. 역할 연동 전에는 비워 두세요.</div>
+          </div>
+          {whitelist.map(w => {
+            const e = editOf(w);
+            const dirty = w.tool_name in edits;
+            return (
+              <div className="card" key={w.tool_name}>
+                <div className="toolbar" style={{justifyContent: "space-between"}}>
+                  <div>
+                    <span style={{fontFamily: "var(--mono)"}}>{w.tool_name}</span>
+                    {w.user_scoped && <span className="badge enabled" style={{marginLeft: 8}}>사용자 범위</span>}
+                  </div>
+                  <div style={{display: "flex", alignItems: "center", gap: 8}}>
+                    <label className="switch">
+                      <input type="checkbox" checked={w.enabled} onChange={ev => toggle(w.tool_name, ev.target.checked)} />
+                      <span className="track"></span><span className="thumb"></span>
+                    </label>
+                    <Badge value={w.enabled} />
+                  </div>
+                </div>
+                <div style={{marginTop: 8, fontSize: 12.5, color: "var(--muted)"}}>설명 (에이전트가 보는 툴 설명)</div>
+                <textarea rows={2} style={{width: "100%", marginTop: 4}}
+                  placeholder={w.code_description}
+                  value={e.description}
+                  onChange={ev => setEdit(w.tool_name, { description: ev.target.value })} />
+                <div style={{display: "flex", gap: 8, alignItems: "flex-end", marginTop: 8, flexWrap: "wrap"}}>
+                  <label style={{fontSize: 12.5, color: "var(--muted)", flex: 1}}>
+                    <div>필요 역할 (쉼표로 구분, 비우면 제한 없음)</div>
+                    <input style={{width: "100%", marginTop: 4}} placeholder="예: ops-admin, sre"
+                      value={e.roles}
+                      onChange={ev => setEdit(w.tool_name, { roles: ev.target.value })} />
                   </label>
-                  <span style={{marginLeft: 8}}><Badge value={w.enabled} /></span>
-                </td>
-                <td style={{fontSize: 11.5, color: "var(--muted)"}}>{w.updated_by ? `${w.updated_by} · ${new Date(w.updated_at).toLocaleString()}` : "-"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  <button className="primary" disabled={!dirty} onClick={() => saveMeta(w)}>저장</button>
+                  {dirty && <button onClick={() => setEdits(p => { const n = { ...p }; delete n[w.tool_name]; return n; })}>되돌리기</button>}
+                </div>
+                <div style={{marginTop: 6, fontSize: 11.5, color: "var(--muted)"}}>
+                  {w.updated_by ? `최근 변경: ${w.updated_by} · ${new Date(w.updated_at).toLocaleString()}` : "변경 이력 없음(코드 기본값)"}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
 
       {tab === "logs" && (

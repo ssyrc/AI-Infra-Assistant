@@ -185,6 +185,14 @@ MIGRATIONS: list[tuple[str, int, str]] = [
         );
         CREATE INDEX IF NOT EXISTS command_upload_sessions_expires_idx ON upload_sessions (expires_at);
     """),
+    # v4: 화이트리스트 설명/권한을 관리자 콘솔에서 편집할 수 있게 오버라이드 컬럼 추가.
+    #     required_roles는 실행 시점에 실시간 반영, description_override는 MCP 재시작 시 반영.
+    ("system_db", 4, """
+        ALTER TABLE system_whitelist_state
+            ADD COLUMN IF NOT EXISTS required_roles TEXT[] NOT NULL DEFAULT '{}';
+        ALTER TABLE system_whitelist_state
+            ADD COLUMN IF NOT EXISTS description_override TEXT;
+    """),
 ]
 
 

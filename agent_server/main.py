@@ -41,15 +41,24 @@ MAX_TOTAL_CHARS = 200000
 state: dict = {}
 
 
+async def _close_toolsets(toolsets: list):
+    """요청 단위로 만든 MCP toolset을 정리한다(연결 누수 방지)."""
+    for ts in toolsets or []:
+        try:
+            await ts.close()
+        except Exception as e:  # noqa: BLE001
+            print(f"[agent] toolset 정리 실패(무시): {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    agent, model_name = await build_agent()
+    # 기동 시 1회: 설정/ MCP 주소 유효성 검증 + 모델명 확보. 실제 실행 에이전트는 요청마다 만든다.
+    _agent, model_name, toolsets = await build_agent()
+    await _close_toolsets(toolsets)
     session_db_dsn = await get_config("agent_session_db_dsn")
     if not session_db_dsn:
         raise RuntimeError("agent_session_db_dsn이 설정되지 않았습니다.")
-    session_service = DatabaseSessionService(db_url=session_db_dsn)
-    state["runner"] = Runner(agent=agent, app_name=APP_NAME, session_service=session_service)
-    state["session_service"] = session_service
+    state["session_service"] = DatabaseSessionService(db_url=session_db_dsn)
     state["model_name"] = model_name
     try:
         yield
@@ -174,7 +183,6 @@ def _event_text(event) -> str:
 @app.post("/v1/chat/completions")
 async def chat_completions(req: ChatCompletionRequest, request: Request):
     convo = _validate(req)
-    runner = state["runner"]
     model_name = state["model_name"]
     user_id = (req.user or "openwebui-user")[:128]
     request_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
@@ -182,6 +190,19 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     history, (_, last_text) = convo[:-1], convo[-1]
     session_id = await _create_session(user_id, history)
     new_message = types.Content(role="user", parts=[types.Part(text=last_text)])
+
+    # 요청 단위로 에이전트를 만들어 호출자 헤더를 MCP에 전달한다.
+    # System MCP는 X-User-Id로 user_scoped 툴(예: 본인 job 조회)의 user_id를 강제 주입한다.
+    caller_headers = {
+        "X-User-Id": user_id,
+        "X-Conversation-Id": session_id,
+        "X-Request-Id": request_id,
+        # 역할 공급원이 아직 없다(Open WebUI는 사용자 id만 제공). 역할 제한을 건 툴은
+        # 이 값이 빌 때 실행 거부된다. 역할 연동 시 여기에 실제 역할을 채운다.
+        "X-User-Roles": "",
+    }
+    agent, _model, toolsets = await build_agent(caller_headers)
+    runner = Runner(agent=agent, app_name=APP_NAME, session_service=state["session_service"])
 
     if not req.stream:
         final_text = ""
@@ -192,6 +213,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                     final_text = _event_text(event) or final_text
         finally:
             await _cleanup_session(user_id, session_id)
+            await _close_toolsets(toolsets)
         return JSONResponse({
             "id": request_id, "object": "chat.completion",
             "created": int(time.time()), "model": model_name,
@@ -233,5 +255,6 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             yield "data: [DONE]\n\n"
         finally:
             await _cleanup_session(user_id, session_id)
+            await _close_toolsets(toolsets)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
