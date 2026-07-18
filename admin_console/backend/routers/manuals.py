@@ -8,6 +8,7 @@
 """
 import os
 import uuid
+import json
 import tempfile
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
@@ -15,9 +16,12 @@ from pydantic import BaseModel
 
 from auth import require_admin
 from db import get_pool, embed_text, vector_literal
-from parser import parse_file
+from parser import parse_file, SUPPORTED_EXTS
+from cleaning import clean_text, clean_options_from_dict, CleanOptions
 
 router = APIRouter(prefix="/api/manuals", tags=["manuals"])
+
+_TMP_DIR = tempfile.gettempdir()
 
 
 @router.get("")
@@ -61,31 +65,9 @@ async def list_versions(manual_id: int, admin: str = Depends(require_admin)):
     return [dict(r) for r in rows]
 
 
-@router.post("/upload")
-async def upload_manual(
-    file: UploadFile = File(...),
-    title: str = Form(...),
-    uploaded_by: str = Depends(require_admin),
-):
-    suffix = os.path.splitext(file.filename)[1].lower()
-    if suffix in (".xlsx", ".xls"):
-        raise HTTPException(
-            422,
-            "엑셀 파일은 /api/manuals/excel/preview 흐름을 사용하세요 "
-            "(컬럼을 선택해서 등록해야 합니다).",
-        )
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(await file.read())
-        tmp_path = tmp.name
-
-    try:
-        chunks = parse_file(tmp_path)
-    finally:
-        os.unlink(tmp_path)
-
-    if not chunks:
-        raise HTTPException(422, "문서에서 추출된 내용이 없습니다.")
-
+async def _insert_draft(title: str, filename: str, source_type: str, uploaded_by: str,
+                        chunks: list) -> dict:
+    """청크 리스트를 새 draft 버전으로 저장하는 공통 헬퍼. chunks는 (section_title, page_no, text) 튜플."""
     pool = await get_pool("manual_db_dsn")
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -95,55 +77,128 @@ async def upload_manual(
             file_id = await conn.fetchval(
                 """
                 INSERT INTO manual_files (title, filename, source_type, uploaded_by, version, status)
-                VALUES ($1, $2, 'document', $3, $4, 'draft')
+                VALUES ($1, $2, $3, $4, $5, 'draft')
                 RETURNING id
                 """,
-                title,
-                file.filename,
-                uploaded_by,
-                next_version,
+                title, filename, source_type, uploaded_by, next_version,
             )
-            for seq, c in enumerate(chunks):
+            for seq, (section_title, page_no, text) in enumerate(chunks):
                 await conn.execute(
                     """
                     INSERT INTO manual_chunks (manual_file_id, seq, section_title, page_no, chunk_text)
                     VALUES ($1, $2, $3, $4, $5)
                     """,
-                    file_id,
-                    seq,
-                    c.section_title,
-                    c.page_no,
-                    c.chunk_text,
+                    file_id, seq, section_title, page_no, text,
                 )
     return {"manual_file_id": file_id, "version": next_version, "chunk_count": len(chunks)}
 
 
-# --- 엑셀 전용 흐름: 업로드 -> 컬럼 미리보기 -> 컬럼 선택 후 커밋 ------------------
-_EXCEL_TMP_DIR = tempfile.gettempdir()
+@router.post("/preview")
+async def preview_document(
+    file: UploadFile = File(...),
+    strip_html: bool = Form(True),
+    collapse_space: bool = Form(True),
+    drop_urls: bool = Form(False),
+    admin: str = Depends(require_admin),
+):
+    """docx/pptx/pdf/txt/md를 업로드하면 선택한 정제 옵션으로 청크를 만들어 미리보기를 반환한다.
+    아직 DB에 저장하지 않는다. 업로드 파일은 임시 저장되고 upload_id로 commit 때 참조된다."""
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext in (".xlsx", ".xls"):
+        raise HTTPException(422, "엑셀은 /api/manuals/excel/preview 흐름을 사용하세요 (컬럼 선택 필요).")
+    if ext not in SUPPORTED_EXTS:
+        raise HTTPException(422, f"지원하지 않는 형식입니다. 지원: {', '.join(sorted(SUPPORTED_EXTS))}, xlsx")
+
+    upload_id = f"manual-doc-{uuid.uuid4().hex[:12]}"
+    saved_path = os.path.join(_TMP_DIR, f"{upload_id}{ext}")
+    with open(saved_path, "wb") as f:
+        f.write(await file.read())
+
+    opts = CleanOptions(strip_html=strip_html, collapse_space=collapse_space, drop_urls=drop_urls)
+    try:
+        chunks = parse_file(saved_path, opts)
+    except Exception as e:  # noqa: BLE001
+        os.path.exists(saved_path) and os.unlink(saved_path)
+        raise HTTPException(422, f"전처리 실패: {e}")
+
+    if not chunks:
+        os.unlink(saved_path)
+        raise HTTPException(422, "문서에서 추출된 내용이 없습니다.")
+
+    preview = [
+        {"seq": i, "section_title": c.section_title, "page_no": c.page_no,
+         "chunk_text": c.chunk_text, "char_count": len(c.chunk_text)}
+        for i, c in enumerate(chunks[:50])  # 미리보기는 최대 50청크
+    ]
+    return {
+        "upload_id": upload_id,
+        "filename": file.filename,
+        "ext": ext,
+        "total_chunks": len(chunks),
+        "preview_chunks": preview,
+        "options": {"strip_html": strip_html, "collapse_space": collapse_space, "drop_urls": drop_urls},
+    }
+
+
+class DocCommitIn(BaseModel):
+    upload_id: str
+    title: str
+    ext: str
+    strip_html: bool = True
+    collapse_space: bool = True
+    drop_urls: bool = False
+
+
+@router.post("/commit")
+async def commit_document(body: DocCommitIn, uploaded_by: str = Depends(require_admin)):
+    """preview에서 확인한 문서를 실제 draft로 저장한다. 저장 시 최종 정제 옵션을 다시 적용해
+    미리보기와 동일한 결과를 보장한다."""
+    saved_path = os.path.join(_TMP_DIR, f"{body.upload_id}{body.ext}")
+    if not os.path.exists(saved_path):
+        raise HTTPException(404, "업로드 세션이 만료되었습니다. 다시 업로드하세요.")
+
+    opts = CleanOptions(strip_html=body.strip_html, collapse_space=body.collapse_space, drop_urls=body.drop_urls)
+    try:
+        parsed = parse_file(saved_path, opts)
+    finally:
+        os.path.exists(saved_path) and os.unlink(saved_path)
+
+    if not parsed:
+        raise HTTPException(422, "문서에서 추출된 내용이 없습니다.")
+
+    chunks = [(c.section_title, c.page_no, c.chunk_text) for c in parsed]
+    return await _insert_draft(body.title, f"{body.title}{body.ext}", "document", uploaded_by, chunks)
 
 
 @router.post("/excel/preview")
 async def preview_excel(file: UploadFile = File(...), admin: str = Depends(require_admin)):
-    """엑셀을 업로드하면 시트의 컬럼 목록과 샘플 행(최대 5개)을 반환한다.
+    """엑셀을 업로드하면 컬럼 목록과 샘플 행(최대 5개), 전체 행 수를 반환한다.
     실제 등록은 /excel/commit에서 컬럼을 선택한 뒤 진행한다."""
     import openpyxl
 
     upload_id = f"manual-xlsx-{uuid.uuid4().hex[:12]}"
-    tmp_path = os.path.join(_EXCEL_TMP_DIR, f"{upload_id}.xlsx")
+    tmp_path = os.path.join(_TMP_DIR, f"{upload_id}.xlsx")
     with open(tmp_path, "wb") as f:
         f.write(await file.read())
 
     wb = openpyxl.load_workbook(tmp_path, read_only=True)
     ws = wb.active
     rows_iter = ws.iter_rows(values_only=True)
-    header = [str(v).strip() if v is not None else f"column_{i}" for i, v in enumerate(next(rows_iter))]
-    sample = []
+    try:
+        header_row = next(rows_iter)
+    except StopIteration:
+        os.unlink(tmp_path)
+        raise HTTPException(422, "빈 엑셀 파일입니다.")
+    header = [str(v).strip() if v is not None else f"column_{i}" for i, v in enumerate(header_row)]
+    sample, total = [], 0
     for i, row in enumerate(rows_iter):
-        if i >= 5:
-            break
-        sample.append(list(row))
-
-    return {"upload_id": upload_id, "filename": file.filename, "columns": header, "sample_rows": sample}
+        total += 1
+        if i < 5:
+            sample.append([("" if v is None else str(v)) for v in row])
+    return {
+        "upload_id": upload_id, "filename": file.filename, "sheet": ws.title,
+        "columns": header, "sample_rows": sample, "total_rows": total,
+    }
 
 
 class ExcelCommitIn(BaseModel):
@@ -151,21 +206,25 @@ class ExcelCommitIn(BaseModel):
     title: str
     content_columns: list[str]
     title_column: str | None = None
+    strip_html: bool = True
+    collapse_space: bool = True
+    drop_urls: bool = False
 
 
 @router.post("/excel/commit")
 async def commit_excel(body: ExcelCommitIn, uploaded_by: str = Depends(require_admin)):
     """preview에서 선택한 컬럼들로 행 단위 청크를 만들어 draft 문서로 등록한다.
-    content_columns에 담긴 값들을 'col: value' 형태로 이어붙여 chunk_text를 구성하고,
-    title_column을 지정하면 그 값이 section_title로 들어가 검색 결과 표시에 쓰인다."""
+    content_columns 각 값에 '컬럼명: 값' 라벨을 붙여 이어붙이고(예: 'question: ...\\nanswer: ...'),
+    title_column을 지정하면 그 값이 section_title이 된다. 모든 셀 값에 정제를 적용한다."""
     import openpyxl
 
-    tmp_path = os.path.join(_EXCEL_TMP_DIR, f"{body.upload_id}.xlsx")
+    tmp_path = os.path.join(_TMP_DIR, f"{body.upload_id}.xlsx")
     if not os.path.exists(tmp_path):
         raise HTTPException(404, "업로드 세션이 만료되었습니다. 다시 업로드하세요.")
     if not body.content_columns:
         raise HTTPException(422, "내용으로 사용할 컬럼을 1개 이상 선택하세요.")
 
+    opts = CleanOptions(strip_html=body.strip_html, collapse_space=body.collapse_space, drop_urls=body.drop_urls)
     wb = openpyxl.load_workbook(tmp_path, read_only=True)
     ws = wb.active
     rows_iter = ws.iter_rows(values_only=True)
@@ -179,50 +238,28 @@ async def commit_excel(body: ExcelCommitIn, uploaded_by: str = Depends(require_a
     for row in rows_iter:
         if all(v is None for v in row):
             continue
-        content = "\n".join(
-            f"{c}: {row[col_idx[c]]}" for c in body.content_columns if row[col_idx[c]] is not None
-        )
+        parts = []
+        for c in body.content_columns:
+            val = row[col_idx[c]]
+            if val is None:
+                continue
+            cleaned = clean_text(str(val), opts)
+            if cleaned:
+                parts.append(f"{c}: {cleaned}")
+        content = "\n".join(parts)
         if not content:
             continue
         section_title = None
         if body.title_column and body.title_column in col_idx:
-            section_title = row[col_idx[body.title_column]]
-            section_title = str(section_title) if section_title is not None else None
-        chunks.append((section_title, content))
-    os.unlink(tmp_path)
+            tv = row[col_idx[body.title_column]]
+            section_title = clean_text(str(tv), opts) if tv is not None else None
+        chunks.append((section_title or None, None, content))
+    os.path.exists(tmp_path) and os.unlink(tmp_path)
 
     if not chunks:
         raise HTTPException(422, "선택한 컬럼으로 만들어진 내용이 없습니다.")
 
-    pool = await get_pool("manual_db_dsn")
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            next_version = await conn.fetchval(
-                "SELECT COALESCE(MAX(version), 0) + 1 FROM manual_files WHERE title = $1", body.title
-            )
-            file_id = await conn.fetchval(
-                """
-                INSERT INTO manual_files (title, filename, source_type, uploaded_by, version, status)
-                VALUES ($1, $2, 'spreadsheet', $3, $4, 'draft')
-                RETURNING id
-                """,
-                body.title,
-                f"{body.title}.xlsx",
-                uploaded_by,
-                next_version,
-            )
-            for seq, (section_title, content) in enumerate(chunks):
-                await conn.execute(
-                    """
-                    INSERT INTO manual_chunks (manual_file_id, seq, section_title, chunk_text)
-                    VALUES ($1, $2, $3, $4)
-                    """,
-                    file_id,
-                    seq,
-                    section_title,
-                    content,
-                )
-    return {"manual_file_id": file_id, "version": next_version, "chunk_count": len(chunks)}
+    return await _insert_draft(body.title, f"{body.title}.xlsx", "spreadsheet", uploaded_by, chunks)
 
 
 @router.patch("/chunks/{chunk_id}")

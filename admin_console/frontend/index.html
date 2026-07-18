@@ -112,165 +112,210 @@ function Badge({ value }) {
 // ---------------------------------------------------------------- Manuals
 function ManualsPanel() {
   const [manuals, setManuals] = useState([]);
-  const [selected, setSelected] = useState(null); // manual_id
   const [detail, setDetail] = useState(null);
   const [versions, setVersions] = useState([]);
   const [title, setTitle] = useState("");
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [excelPreview, setExcelPreview] = useState(null); // {upload_id, columns, sample_rows}
-  const [selectedContentCols, setSelectedContentCols] = useState([]);
-  const [selectedTitleCol, setSelectedTitleCol] = useState("");
+
+  // 정제 옵션 (업로드 시 공통 적용)
+  const [opts, setOpts] = useState({ strip_html: true, collapse_space: true, drop_urls: false });
+
+  // 문서(docx/pptx/pdf/txt/md) 미리보기 결과
+  const [docPreview, setDocPreview] = useState(null); // {upload_id, ext, total_chunks, preview_chunks}
+  // 엑셀 미리보기 결과 + 컬럼 선택 상태
+  const [excelPreview, setExcelPreview] = useState(null); // {upload_id, columns, sample_rows, total_rows}
+  const [contentCols, setContentCols] = useState([]);
+  const [titleCol, setTitleCol] = useState("");
 
   const load = useCallback(async () => setManuals(await api("/api/manuals")), []);
   useEffect(() => { load(); }, [load]);
 
   const openDetail = async (id) => {
-    setSelected(id);
     setDetail(await api(`/api/manuals/${id}`));
     setVersions(await api(`/api/manuals/${id}/versions`));
   };
 
-  const isExcel = (f) => f && /\.(xlsx|xls)$/i.test(f.name);
+  const extOf = (f) => (f ? f.name.slice(f.name.lastIndexOf(".")).toLowerCase() : "");
+  const isExcel = (f) => [".xlsx", ".xls"].includes(extOf(f));
+  const fileKind = (f) => {
+    const e = extOf(f);
+    if ([".xlsx", ".xls"].includes(e)) return "엑셀 (열 선택)";
+    if (e === ".pptx") return "PPT (슬라이드 단위)";
+    if ([".docx", ".pdf"].includes(e)) return "문서 (섹션 단위)";
+    if ([".txt", ".md"].includes(e)) return "텍스트 (문단 단위)";
+    return "";
+  };
 
-  const upload = async () => {
-    if (!file || !title) return alert("제목과 파일을 입력하세요.");
+  const resetPreviews = () => { setDocPreview(null); setExcelPreview(null); setContentCols([]); setTitleCol(""); };
+
+  const analyze = async () => {
+    if (!file || !title) return alert("제목과 파일을 먼저 선택하세요.");
     setBusy(true);
+    resetPreviews();
     try {
       if (isExcel(file)) {
-        // 엑셀: 먼저 컬럼 미리보기를 받아 사용자가 열을 선택하게 한다.
         const fd = new FormData();
         fd.append("file", file);
         const r = await fetch("/api/manuals/excel/preview", { method: "POST", body: fd });
         if (!r.ok) throw new Error(await r.text());
-        const data = await r.json();
-        setExcelPreview(data);
-        setSelectedContentCols([]);
-        setSelectedTitleCol("");
+        setExcelPreview(await r.json());
       } else {
-        // docx/pptx/pdf: 바로 파싱 업로드.
         const fd = new FormData();
         fd.append("file", file);
-        fd.append("title", title);
-        const r = await fetch("/api/manuals/upload", { method: "POST", body: fd });
+        fd.append("strip_html", opts.strip_html);
+        fd.append("collapse_space", opts.collapse_space);
+        fd.append("drop_urls", opts.drop_urls);
+        const r = await fetch("/api/manuals/preview", { method: "POST", body: fd });
         if (!r.ok) throw new Error(await r.text());
-        setTitle(""); setFile(null);
-        await load();
-        alert("업로드 완료. 목록에서 미리보기 후 발행하세요.");
+        setDocPreview(await r.json());
       }
-    } catch (e) { alert("업로드 실패: " + e.message); }
+    } catch (e) { alert("전처리 실패: " + e.message); }
+    setBusy(false);
+  };
+
+  const commitDoc = async () => {
+    setBusy(true);
+    try {
+      await api("/api/manuals/commit", {
+        method: "POST",
+        body: JSON.stringify({
+          upload_id: docPreview.upload_id, title, ext: docPreview.ext,
+          strip_html: opts.strip_html, collapse_space: opts.collapse_space, drop_urls: opts.drop_urls,
+        }),
+      });
+      resetPreviews(); setTitle(""); setFile(null);
+      await load();
+      alert("등록 완료. 목록에서 청크를 확인·교정한 뒤 발행하세요.");
+    } catch (e) { alert("등록 실패: " + e.message); }
     setBusy(false);
   };
 
   const commitExcel = async () => {
-    if (selectedContentCols.length === 0) return alert("내용으로 쓸 컬럼을 1개 이상 선택하세요.");
+    if (contentCols.length === 0) return alert("내용으로 쓸 열을 1개 이상 선택하세요.");
     setBusy(true);
     try {
       await api("/api/manuals/excel/commit", {
         method: "POST",
         body: JSON.stringify({
-          upload_id: excelPreview.upload_id,
-          title,
-          content_columns: selectedContentCols,
-          title_column: selectedTitleCol || null,
+          upload_id: excelPreview.upload_id, title,
+          content_columns: contentCols, title_column: titleCol || null,
+          strip_html: opts.strip_html, collapse_space: opts.collapse_space, drop_urls: opts.drop_urls,
         }),
       });
-      setExcelPreview(null); setTitle(""); setFile(null);
+      resetPreviews(); setTitle(""); setFile(null);
       await load();
-      alert("엑셀 등록 완료. 목록에서 미리보기 후 발행하세요.");
+      alert("엑셀 등록 완료. 목록에서 확인 후 발행하세요.");
     } catch (e) { alert("등록 실패: " + e.message); }
     setBusy(false);
   };
 
-  const toggleContentCol = (col) => {
-    setSelectedContentCols(prev =>
-      prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]
-    );
-  };
+  const toggleContentCol = (c) =>
+    setContentCols((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]));
 
   const saveChunk = async (chunkId, text) => {
     const fd = new FormData();
     fd.append("chunk_text", text);
     await fetch(`/api/manuals/chunks/${chunkId}`, { method: "PATCH", body: fd });
   };
-
   const deleteChunk = async (chunkId) => {
     await api(`/api/manuals/chunks/${chunkId}`, { method: "DELETE" });
-    openDetail(selected);
+    openDetail(detail.file.id);
   };
-
-  const publish = async (id) => {
-    await api(`/api/manuals/${id}/publish`, { method: "POST" });
-    await load();
-    openDetail(id);
-  };
-
+  const publish = async (id) => { await api(`/api/manuals/${id}/publish`, { method: "POST" }); await load(); openDetail(id); };
   const remove = async (id) => {
     if (!confirm("이 버전을 삭제할까요?")) return;
-    try {
-      await api(`/api/manuals/${id}`, { method: "DELETE" });
-      setSelected(null); setDetail(null);
-      await load();
-    } catch (e) { alert(e.message); }
+    try { await api(`/api/manuals/${id}`, { method: "DELETE" }); setDetail(null); await load(); }
+    catch (e) { alert(e.message); }
   };
+
+  const OptToggles = () => (
+    <div style={{display: "flex", gap: 16, fontSize: 12.5, color: "var(--muted)", flexWrap: "wrap"}}>
+      <label><input type="checkbox" checked={opts.strip_html} onChange={e => setOpts({...opts, strip_html: e.target.checked})} /> HTML 태그·엔티티 제거</label>
+      <label><input type="checkbox" checked={opts.collapse_space} onChange={e => setOpts({...opts, collapse_space: e.target.checked})} /> 공백·빈 줄 정리</label>
+      <label><input type="checkbox" checked={opts.drop_urls} onChange={e => setOpts({...opts, drop_urls: e.target.checked})} /> URL 제거</label>
+    </div>
+  );
 
   return (
     <div>
       <h2>매뉴얼 관리</h2>
-      <div className="subtitle">엑셀/워드/PPT 업로드 → 청크 미리보기·교정 → 발행. 같은 제목으로 재업로드하면 새 버전이 생성됩니다.</div>
-
-      <div className="card toolbar">
-        <input placeholder="문서 제목 (버전 그룹핑 키)" value={title} onChange={e => setTitle(e.target.value)} style={{width: 260}} />
-        <input type="file" accept=".xlsx,.xls,.docx,.pptx,.pdf" onChange={e => setFile(e.target.files[0])} />
-        <button className="primary" disabled={busy} onClick={upload}>{busy ? "처리 중..." : (isExcel(file) ? "컬럼 선택하기" : "업로드")}</button>
+      <div className="subtitle">
+        PPT·Word·PDF·txt는 파일 형식에 맞춰 자동 분할되고, 엑셀은 열을 골라 등록합니다.
+        업로드 시 HTML·불필요한 문자는 자동으로 정제됩니다. 같은 제목으로 재업로드하면 새 버전이 생깁니다.
       </div>
 
+      <div className="card">
+        <div className="toolbar">
+          <input placeholder="문서 제목 (버전 그룹핑 키)" value={title} onChange={e => setTitle(e.target.value)} style={{width: 260}} />
+          <input type="file" accept=".xlsx,.xls,.docx,.pptx,.pdf,.txt,.md"
+                 onChange={e => { setFile(e.target.files[0]); resetPreviews(); }} />
+          {file && <span className="badge" style={{borderColor: "var(--muted)", color: "var(--muted)"}}>{fileKind(file)}</span>}
+          <button className="primary" disabled={busy} onClick={analyze}>{busy ? "처리 중..." : "전처리 미리보기"}</button>
+        </div>
+        <div style={{marginTop: 10}}><OptToggles /></div>
+      </div>
+
+      {/* 문서 미리보기 */}
+      {docPreview && (
+        <div className="card">
+          <div className="toolbar" style={{justifyContent: "space-between"}}>
+            <div><strong>미리보기</strong> · {docPreview.filename} · 총 {docPreview.total_chunks}개 청크
+              {docPreview.total_chunks > docPreview.preview_chunks.length && ` (아래는 앞 ${docPreview.preview_chunks.length}개)`}</div>
+            <div className="row-actions">
+              <button className="primary" disabled={busy} onClick={commitDoc}>이대로 등록</button>
+              <button onClick={() => { setDocPreview(null); analyze(); }}>정제 옵션 다시 적용</button>
+              <button onClick={resetPreviews}>취소</button>
+            </div>
+          </div>
+          <div>
+            {docPreview.preview_chunks.map(c => (
+              <div className="chunk" key={c.seq}>
+                <div className="meta"><span>{c.section_title || "(제목 없음)"} {c.page_no ? `· p${c.page_no}` : ""} · #{c.seq} · {c.char_count}자</span></div>
+                <div style={{whiteSpace: "pre-wrap", fontSize: 12.5}}>{c.chunk_text}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 엑셀 열 선택 */}
       {excelPreview && (
         <div className="card">
-          <div style={{marginBottom: 10}}><strong>엑셀 컬럼 선택</strong> · {excelPreview.filename}</div>
-          <div className="subtitle">DB에 저장할 컬럼을 고르세요. 선택한 컬럼 값들이 한 행씩 하나의 검색 청크가 됩니다.</div>
+          <div style={{marginBottom: 8}}><strong>엑셀 열 선택</strong> · {excelPreview.filename} · 시트 {excelPreview.sheet} · {excelPreview.total_rows}행</div>
+          <div className="subtitle">DB에 저장할 열을 고르세요. 선택한 열들이 <code>열이름: 값</code> 형태로 한 행씩 하나의 검색 청크가 됩니다 (예: question / answer).</div>
           <table style={{marginBottom: 12}}>
-            <thead>
-              <tr>
-                <th>내용 사용</th><th>제목 컬럼</th><th>컬럼명</th><th>샘플 값</th>
-              </tr>
-            </thead>
+            <thead><tr><th>내용</th><th>제목</th><th>열 이름</th><th>샘플 값</th></tr></thead>
             <tbody>
               {excelPreview.columns.map((col, i) => (
                 <tr key={col + i}>
-                  <td>
-                    <input type="checkbox" checked={selectedContentCols.includes(col)} onChange={() => toggleContentCol(col)} />
-                  </td>
-                  <td>
-                    <input type="radio" name="titleCol" checked={selectedTitleCol === col} onChange={() => setSelectedTitleCol(col)} />
-                  </td>
+                  <td><input type="checkbox" checked={contentCols.includes(col)} onChange={() => toggleContentCol(col)} /></td>
+                  <td><input type="radio" name="tc" checked={titleCol === col} onChange={() => setTitleCol(col)} /></td>
                   <td style={{fontFamily: "var(--mono)"}}>{col}</td>
-                  <td style={{color: "var(--muted)", fontSize: 12}}>
-                    {excelPreview.sample_rows.map(r => r[i]).filter(v => v != null).slice(0, 3).join(" · ")}
-                  </td>
+                  <td style={{color: "var(--muted)", fontSize: 12}}>{excelPreview.sample_rows.map(r => r[i]).filter(v => v).slice(0, 3).join(" · ")}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           <div className="row-actions">
-            <button className="primary" disabled={busy} onClick={commitExcel}>선택한 컬럼으로 등록</button>
-            <button onClick={() => setExcelPreview(null)}>취소</button>
-            {selectedTitleCol && <button onClick={() => setSelectedTitleCol("")}>제목 컬럼 해제</button>}
+            <button className="primary" disabled={busy} onClick={commitExcel}>선택한 열로 등록</button>
+            {titleCol && <button onClick={() => setTitleCol("")}>제목 열 해제</button>}
+            <button onClick={resetPreviews}>취소</button>
           </div>
         </div>
       )}
 
       <table>
-        <thead><tr><th>제목</th><th>버전</th><th>상태</th><th>파일명</th><th>업로드</th><th>발행일</th></tr></thead>
+        <thead><tr><th>제목</th><th>버전</th><th>상태</th><th>유형</th><th>파일명</th><th>업로드</th></tr></thead>
         <tbody>
           {manuals.map(m => (
             <tr key={m.id} onClick={() => openDetail(m.id)} style={{cursor: "pointer"}}>
               <td>{m.title}</td>
               <td>v{m.version}</td>
               <td><Badge value={m.status} /></td>
+              <td style={{fontSize: 12, color: "var(--muted)"}}>{m.source_type === "spreadsheet" ? "엑셀" : "문서"}</td>
               <td>{m.filename}</td>
-              <td>{m.uploaded_by} · {new Date(m.uploaded_at).toLocaleString()}</td>
-              <td>{m.published_at ? new Date(m.published_at).toLocaleString() : "-"}</td>
+              <td style={{fontSize: 12}}>{m.uploaded_by} · {new Date(m.uploaded_at).toLocaleDateString()}</td>
             </tr>
           ))}
           {manuals.length === 0 && <tr><td colSpan="6" className="empty">등록된 매뉴얼이 없습니다.</td></tr>}
@@ -284,33 +329,29 @@ function ManualsPanel() {
             <div className="row-actions">
               {detail.file.status !== "published" && <button className="primary" onClick={() => publish(detail.file.id)}>발행</button>}
               {detail.file.status !== "published" && <button className="danger" onClick={() => remove(detail.file.id)}>삭제</button>}
-              <button onClick={() => { setSelected(null); setDetail(null); }}>닫기</button>
+              <button onClick={() => setDetail(null)}>닫기</button>
             </div>
           </div>
-
           {versions.length > 1 && (
             <div style={{margin: "10px 0", fontSize: 12.5}}>
               버전 이력: {versions.map(v => (
                 <span key={v.id} style={{marginRight: 10}}>
                   v{v.version} <Badge value={v.status} />
-                  {v.status === "archived" && <button style={{marginLeft: 4}} onClick={() => publish(v.id)}>이 버전으로 롤백</button>}
+                  {v.status === "archived" && <button style={{marginLeft: 4}} onClick={() => publish(v.id)}>롤백</button>}
                 </span>
               ))}
             </div>
           )}
-
           <div style={{marginTop: 12}}>
             {detail.chunks.map(c => (
               <div className="chunk" key={c.id}>
                 <div className="meta">
-                  <span>{c.section_title || "(제목 없음)"} · #{c.seq} {c.embedded ? "· 임베딩됨" : "· 미임베딩(발행 시 처리)"}</span>
+                  <span>{c.section_title || "(제목 없음)"} {c.page_no ? `· p${c.page_no}` : ""} · #{c.seq} {c.embedded ? "· 임베딩됨" : "· 미임베딩(발행 시 처리)"}</span>
                   <button className="danger" onClick={() => deleteChunk(c.id)}>삭제</button>
                 </div>
-                <textarea
-                  defaultValue={c.chunk_text}
+                <textarea defaultValue={c.chunk_text}
                   rows={Math.min(10, Math.max(2, Math.ceil(c.chunk_text.length / 90)))}
-                  onBlur={e => { if (e.target.value !== c.chunk_text) saveChunk(c.id, e.target.value); }}
-                />
+                  onBlur={e => { if (e.target.value !== c.chunk_text) saveChunk(c.id, e.target.value); }} />
               </div>
             ))}
           </div>
@@ -319,6 +360,7 @@ function ManualsPanel() {
     </div>
   );
 }
+
 
 // ---------------------------------------------------------------- VOC
 function VocPanel() {
@@ -557,6 +599,7 @@ function SettingsPanel() {
 
   const grouped = {
     "vLLM / 모델": settings.filter(s => s.key.startsWith("vllm_")),
+    "검색 품질 (리랭커/캐시)": settings.filter(s => s.key.startsWith("rerank_") || s.key === "redis_url" || s.key === "embed_cache_ttl_seconds"),
     "MCP 엔드포인트": settings.filter(s => s.key.endsWith("_mcp_url")),
     "데이터베이스 (DSN)": settings.filter(s => s.key.endsWith("_db_dsn")),
     "System / 에이전트": settings.filter(s => s.key === "scheduler_api_base_url" || s.key === "agent_system_instruction"),

@@ -1,12 +1,20 @@
 """
-업로드된 매뉴얼 파일(xlsx/docx/pptx/pdf)을 검색용 청크 리스트로 변환한다.
-Docling을 사용해 구조(표/섹션)를 보존한 마크다운으로 변환한 뒤,
-헤더 단위로 청크를 분리한다. 폐쇄망에서는 Docling 모델 캐시를 사전에
-내려받아 컨테이너 이미지에 포함해야 한다 (README 참고).
+업로드된 매뉴얼 파일을 검색용 청크 리스트로 변환한다.
+
+파일 유형별로 자연스러운 경계로 청킹한다:
+- docx / pdf : Docling 마크다운 -> '#' 헤더(섹션) 단위 -> 길면 문단 재분할
+- pptx       : 슬라이드 단위(슬라이드 = 하나의 청크 후보) -> 길면 문단 재분할
+- txt / md   : 빈 줄(문단) 경계 -> 길면 재분할
+- xlsx       : (별도 흐름) routers/manuals.py의 엑셀 컬럼 선택 커밋에서 처리
+
+모든 청크 텍스트에는 cleaning.clean_text가 적용되어 HTML/제어문자/잡음이 제거된다.
+폐쇄망에서는 Docling 모델 캐시를 사전 반입해야 한다(README 참고).
 """
 import os
 import re
 from dataclasses import dataclass
+
+from cleaning import clean_text, CleanOptions
 
 MAX_CHUNK_CHARS = 1500
 
@@ -15,12 +23,12 @@ _converter = None
 
 def _get_converter():
     """Docling은 무겁고 모델 다운로드가 필요하므로 실제로 문서를 파싱할 때 최초 1회만 로딩한다.
-    dev 환경에서 DISABLE_DOCLING=1이면 로딩하지 않고, 파싱 요청 시 명확한 에러를 준다."""
+    dev 환경에서 DISABLE_DOCLING=1이면 로딩하지 않는다(txt/xlsx는 Docling 없이도 동작)."""
     global _converter
     if os.environ.get("DISABLE_DOCLING") == "1":
         raise RuntimeError(
-            "이 개발 환경에서는 Docling이 비활성화되어 있습니다. "
-            "docx/pptx/pdf 파싱은 프로덕션 환경에서 확인하세요 (엑셀 업로드/컬럼선택 흐름은 dev에서도 동작)."
+            "이 개발 환경에서는 Docling이 비활성화되어 있습니다(docx/pptx/pdf). "
+            "txt와 엑셀 컬럼선택 흐름은 dev에서도 동작합니다."
         )
     if _converter is None:
         from docling.document_converter import DocumentConverter
@@ -35,23 +43,90 @@ class ParsedChunk:
     chunk_text: str
 
 
-def parse_file(filepath: str) -> list[ParsedChunk]:
-    """파일을 마크다운으로 변환한 뒤 '#' 헤더 기준으로 섹션을 나누고,
-    섹션이 너무 길면 MAX_CHUNK_CHARS 단위로 추가 분할한다."""
-    result = _get_converter().convert(filepath)
-    markdown = result.document.export_to_markdown()
+SUPPORTED_EXTS = {".docx", ".pptx", ".pdf", ".txt", ".md"}
 
-    sections = _split_by_headers(markdown)
+
+def parse_file(filepath: str, opts: CleanOptions | None = None) -> list[ParsedChunk]:
+    """확장자에 따라 알맞은 파서로 분기한다. opts로 정제 강도를 지정한다."""
+    opts = opts or CleanOptions()
+    ext = os.path.splitext(filepath)[1].lower()
+
+    if ext in (".txt", ".md"):
+        raw_sections = _parse_text_file(filepath)
+    elif ext == ".pptx":
+        raw_sections = _parse_pptx(filepath)
+    elif ext in (".docx", ".pdf"):
+        raw_sections = _parse_via_docling(filepath)
+    else:
+        raise ValueError(f"지원하지 않는 확장자입니다: {ext}")
+
     chunks: list[ParsedChunk] = []
-    for title, body in sections:
-        body = body.strip()
-        if not body:
+    for title, page_no, body in raw_sections:
+        cleaned = clean_text(body, opts)
+        if not cleaned:
             continue
-        for piece in _split_long_text(body, MAX_CHUNK_CHARS):
-            chunks.append(ParsedChunk(section_title=title, page_no=None, chunk_text=piece))
+        clean_title = clean_text(title, opts) if title else None
+        for piece in _split_long_text(cleaned, MAX_CHUNK_CHARS):
+            chunks.append(ParsedChunk(section_title=clean_title or None, page_no=page_no, chunk_text=piece))
     return chunks
 
 
+# ---- txt / md ----------------------------------------------------------------
+def _parse_text_file(filepath: str) -> list[tuple[str | None, int | None, str]]:
+    with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+        content = f.read()
+    # 마크다운이면 헤더 기준, 순수 txt면 빈 줄(문단) 기준
+    if re.search(r"^#{1,6}\s+", content, re.MULTILINE):
+        return [(t, None, b) for t, b in _split_by_headers(content)]
+    paragraphs = re.split(r"\n\s*\n", content)
+    return [(None, None, p) for p in paragraphs if p.strip()]
+
+
+# ---- pptx (슬라이드 단위) ------------------------------------------------------
+def _parse_pptx(filepath: str) -> list[tuple[str | None, int | None, str]]:
+    """python-pptx로 슬라이드별 텍스트를 모은다. 슬라이드 제목이 있으면 section_title로.
+    page_no에는 슬라이드 번호를 넣는다."""
+    from pptx import Presentation
+
+    prs = Presentation(filepath)
+    sections: list[tuple[str | None, int | None, str]] = []
+    for idx, slide in enumerate(prs.slides, start=1):
+        title = None
+        texts: list[str] = []
+        for shape in slide.shapes:
+            if not shape.has_text_frame:
+                continue
+            shape_text = "\n".join(p.text for p in shape.text_frame.paragraphs if p.text)
+            if not shape_text.strip():
+                continue
+            # 제목 placeholder면 title로 사용
+            if title is None and getattr(shape, "is_placeholder", False):
+                try:
+                    if shape.placeholder_format and shape.placeholder_format.idx == 0:
+                        title = shape_text.strip()
+                        continue
+                except Exception:  # noqa: BLE001
+                    pass
+            texts.append(shape_text)
+        # 발표자 노트도 포함(있으면)
+        if slide.has_notes_slide and slide.notes_slide.notes_text_frame:
+            note = slide.notes_slide.notes_text_frame.text
+            if note and note.strip():
+                texts.append(f"[슬라이드 노트]\n{note.strip()}")
+        body = "\n".join(texts).strip()
+        if body:
+            sections.append((title or f"슬라이드 {idx}", idx, body))
+    return sections
+
+
+# ---- docx / pdf (Docling) ----------------------------------------------------
+def _parse_via_docling(filepath: str) -> list[tuple[str | None, int | None, str]]:
+    result = _get_converter().convert(filepath)
+    markdown = result.document.export_to_markdown()
+    return [(t, None, b) for t, b in _split_by_headers(markdown)]
+
+
+# ---- 공통 헬퍼 ----------------------------------------------------------------
 def _split_by_headers(markdown: str) -> list[tuple[str | None, str]]:
     lines = markdown.splitlines()
     sections: list[tuple[str | None, str]] = []
@@ -85,4 +160,12 @@ def _split_long_text(text: str, max_chars: int) -> list[str]:
             buf = f"{buf}\n\n{p}" if buf else p
     if buf:
         pieces.append(buf)
-    return pieces
+    # 여전히 너무 긴 조각은 하드 컷
+    final = []
+    for piece in pieces:
+        while len(piece) > max_chars:
+            final.append(piece[:max_chars])
+            piece = piece[max_chars:]
+        if piece:
+            final.append(piece)
+    return final

@@ -7,7 +7,7 @@ import sys
 import os
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../shared"))
-from db import get_pool, embed_text, vector_literal  # noqa: E402
+from db import get_pool, embed_text, vector_literal, rerank  # noqa: E402
 
 from mcp.server.fastmcp import FastMCP
 
@@ -17,8 +17,8 @@ mcp = FastMCP("manual-mcp", stateless_http=True)
 @mcp.tool()
 async def search_manual(query: str, top_k: int = 5) -> list[dict]:
     """매뉴얼/가이드 문서에서 질문과 관련된 내용을 검색한다.
-    의미 기반(벡터) 검색과 키워드(전문) 검색을 RRF로 결합한 하이브리드 검색이라,
-    동의어/문맥 질문과 정확한 키워드/에러코드 질문 모두에 강하다.
+    벡터+키워드 하이브리드(RRF)로 후보를 넓게 뽑은 뒤, 리랭커로 최종 순위를 정한다.
+    (리랭커가 설정돼 있지 않으면 RRF 순위를 그대로 사용한다.)
 
     Args:
         query: 사용자 질문 또는 검색어
@@ -26,8 +26,8 @@ async def search_manual(query: str, top_k: int = 5) -> list[dict]:
     """
     vec = await embed_text(query)
     pool = await get_pool("manual_db_dsn")
-    # RRF(Reciprocal Rank Fusion): 벡터 순위와 키워드 순위를 각각 매긴 뒤 1/(k+rank)로 합산.
-    # k=60은 관례적 상수. 두 신호를 정규화 없이 안정적으로 융합할 수 있다.
+    # 리랭킹 후보를 위해 top_k보다 넉넉히(candidate_k) 뽑는다.
+    candidate_k = max(top_k * 5, 20)
     rows = await pool.fetch(
         """
         WITH vector_search AS (
@@ -63,9 +63,20 @@ async def search_manual(query: str, top_k: int = 5) -> list[dict]:
         """,
         vector_literal(vec),
         query,
-        top_k,
+        candidate_k,
     )
-    return [dict(r) for r in rows]
+    candidates = [dict(r) for r in rows]
+    if not candidates:
+        return []
+
+    # 리랭킹: chunk_text 기준으로 재정렬 (설정 없으면 원 순서 유지)
+    ranked = await rerank(query, [c["chunk_text"] for c in candidates], top_k)
+    result = []
+    for idx, rr_score in ranked:
+        item = candidates[idx]
+        item["rerank_score"] = rr_score
+        result.append(item)
+    return result
 
 
 @mcp.tool()

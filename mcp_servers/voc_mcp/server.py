@@ -6,7 +6,7 @@ import sys
 import os
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../shared"))
-from db import get_pool, embed_text, vector_literal  # noqa: E402
+from db import get_pool, embed_text, vector_literal, rerank  # noqa: E402
 
 from mcp.server.fastmcp import FastMCP
 
@@ -30,6 +30,7 @@ async def search_voc(
     """
     vec = await embed_text(query)
     pool = await get_pool("voc_db_dsn")
+    candidate_k = max(top_k * 5, 20)
     rows = await pool.fetch(
         """
         WITH vector_search AS (
@@ -68,9 +69,21 @@ async def search_voc(
         department,
         resolved_only,
         query,
-        top_k,
+        candidate_k,
     )
-    return [dict(r) for r in rows]
+    candidates = [dict(r) for r in rows]
+    if not candidates:
+        return []
+
+    # 리랭킹: 질문+답변을 문서로 사용
+    docs = [f"{c['question']}\n{c['answer']}" for c in candidates]
+    ranked = await rerank(query, docs, top_k)
+    result = []
+    for idx, rr_score in ranked:
+        item = candidates[idx]
+        item["rerank_score"] = rr_score
+        result.append(item)
+    return result
 
 
 if __name__ == "__main__":

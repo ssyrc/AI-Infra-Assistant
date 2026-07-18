@@ -4,3 +4,4 @@ python-multipart
 asyncpg
 httpx
 openpyxl
+python-pptx
