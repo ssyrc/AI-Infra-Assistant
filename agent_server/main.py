@@ -180,19 +180,32 @@ def _event_text(event) -> str:
     return "".join(p.text or "" for p in event.content.parts)
 
 
+def _to_os_identity(raw: str) -> str:
+    """OS 계정 신원으로 정규화한다.
+    - 이메일 형태(user@corp.com)면 로컬파트(@ 앞)만 사용한다 -> 리눅스 계정명으로 매핑.
+    - 앞뒤 공백 제거. 이후 실제 검증은 System MCP의 pwd.getpwnam이 담당한다(없으면 실행 거부)."""
+    ident = (raw or "").strip()
+    if "@" in ident:
+        ident = ident.split("@", 1)[0].strip()
+    return ident
+
+
 def _caller_from_request(request: Request, req: ChatCompletionRequest) -> tuple[str, str, str]:
     """호출자 신원을 Open WebUI가 전달하는 헤더에서 읽는다.
     Open WebUI에서 ENABLE_FORWARD_USER_INFO_HEADERS=true여야 이 헤더들이 온다.
-    body의 user 필드는 Open WebUI가 대개 채우지 않으므로 헤더를 우선한다.
+    OS 계정 매핑에 쓰려고 이메일(로컬파트)을 우선한다. Open WebUI의 User-Id는 보통 UUID라
+    리눅스 계정과 맞지 않기 때문이다. body의 user 필드는 대개 비어 있어 헤더를 우선한다.
     (agent-server는 내부망에서 Open WebUI만 접근하므로 이 헤더를 신뢰한다.)"""
     h = request.headers
-    user_id = (h.get("x-openwebui-user-id")
-               or h.get("x-openwebui-user-email")
-               or req.user
-               or "anonymous")
-    role = h.get("x-openwebui-user-role") or ""   # 예: "admin" | "user"
+    raw = (h.get("x-openwebui-user-email")
+           or h.get("x-openwebui-user-name")
+           or h.get("x-openwebui-user-id")
+           or req.user
+           or "anonymous")
+    user_id = _to_os_identity(raw)[:128] or "anonymous"
+    role = (h.get("x-openwebui-user-role") or "").strip()   # 예: "admin" | "user"
     chat_id = h.get("x-openwebui-chat-id") or ""
-    return user_id[:128], role.strip(), chat_id
+    return user_id, role, chat_id
 
 
 @app.post("/v1/chat/completions")

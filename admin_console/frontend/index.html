@@ -760,20 +760,33 @@ function SettingsPanel() {
   };
 
   const grouped = {
-    "vLLM / 모델": settings.filter(s => s.key.startsWith("vllm_")),
-    "검색 품질 (리랭커/캐시)": settings.filter(s => s.key.startsWith("rerank_") || s.key === "redis_url" || s.key === "embed_cache_ttl_seconds"),
+    "인프라 주소 (LLM / 리랭커 / 스케줄러)": settings.filter(s =>
+      s.key === "vllm_llm_base_url" || s.key === "vllm_embed_base_url"
+      || s.key === "rerank_base_url" || s.key === "scheduler_api_base_url"),
+    "모델 / 임베딩": settings.filter(s =>
+      s.key === "vllm_llm_model" || s.key === "vllm_embed_model" || s.key === "embed_dim"),
+    "검색 품질 (리랭커/캐시)": settings.filter(s =>
+      (s.key.startsWith("rerank_") && s.key !== "rerank_base_url")
+      || s.key === "embed_cache_ttl_seconds" || s.key === "clean_policy_version"
+      || s.key.startsWith("search_") || s.key.startsWith("upload_")),
     "MCP 엔드포인트": settings.filter(s => s.key.endsWith("_mcp_url")),
-    "데이터베이스 (DSN)": settings.filter(s => s.key.endsWith("_db_dsn")),
-    "System / 에이전트": settings.filter(s => s.key === "scheduler_api_base_url" || s.key === "agent_system_instruction"),
+    "에이전트 지시문": settings.filter(s => s.key === "agent_system_instruction"),
+    "데이터베이스 · 시크릿 (.env로 관리)": settings.filter(s => s.env_managed),
   };
+  const shown = new Set(Object.values(grouped).flat().map(s => s.key));
+  const others = settings.filter(s => !shown.has(s.key));
+  if (others.length) grouped["기타"] = others;
 
   return (
     <div>
       <h2>설정</h2>
       <div className="subtitle">
-        vLLM 주소, 각 MCP DB, MCP 엔드포인트, 에이전트 지시문을 여기서 관리합니다.
-        <span className="badge enabled" style={{marginLeft: 8}}>즉시 반영</span> 표시는 재시작 없이 적용되고,
-        <span className="badge disabled" style={{marginLeft: 6}}>재시작 필요</span> 표시는 해당 서비스 컨테이너를 재시작해야 반영됩니다.
+        LLM·리랭커·스케줄러 주소, MCP 엔드포인트, 에이전트 지시문을 여기서 관리합니다(런타임 단일 소스).
+        <span className="badge enabled" style={{marginLeft: 8}}>즉시 반영</span>은 재시작 없이 적용,
+        <span className="badge disabled" style={{marginLeft: 6}}>재시작 필요</span>는 해당 서비스 재시작 후 반영됩니다.
+        <br />
+        <span className="badge disabled" style={{marginLeft: 0, marginTop: 4, display: "inline-block"}}>.env 관리</span>
+        {" "}표시된 DB/시크릿은 배포 시 <code>.env</code> 한 파일에서 관리되며(부트스트랩), 여기서는 읽기 전용입니다.
       </div>
 
       {Object.entries(grouped).map(([group, rows]) => rows.length > 0 && (
@@ -786,29 +799,38 @@ function SettingsPanel() {
               <div key={s.key} style={{marginBottom: 14}}>
                 <div style={{fontSize: 12.5, marginBottom: 4}}>
                   <span style={{fontFamily: "var(--mono)"}}>{s.key}</span>
-                  <span className={`badge ${s.hot_reload ? "enabled" : "disabled"}`} style={{marginLeft: 8}}>
-                    {s.hot_reload ? "즉시 반영" : "재시작 필요"}
-                  </span>
+                  {s.env_managed
+                    ? <span className="badge disabled" style={{marginLeft: 8}}>.env 관리</span>
+                    : <span className={`badge ${s.hot_reload ? "enabled" : "disabled"}`} style={{marginLeft: 8}}>
+                        {s.hot_reload ? "즉시 반영" : "재시작 필요"}
+                      </span>}
                   {s.description && <span style={{color: "var(--muted)", marginLeft: 8}}>{s.description}</span>}
                 </div>
-                <div style={{display: "flex", gap: 8, alignItems: "flex-start"}}>
-                  {isLong ? (
-                    <textarea
-                      style={{flex: 1}} rows={6}
-                      placeholder={s.is_secret ? `(현재: ${s.value})` : ""}
-                      value={val}
-                      onChange={e => setEdits({ ...edits, [s.key]: e.target.value })}
-                    />
-                  ) : (
-                    <input
-                      style={{flex: 1}}
-                      placeholder={s.is_secret ? `(마스킹됨: ${s.value})` : ""}
-                      value={val}
-                      onChange={e => setEdits({ ...edits, [s.key]: e.target.value })}
-                    />
-                  )}
-                  <button className="primary" disabled={!(s.key in edits)} onClick={() => save(s.key)}>저장</button>
-                </div>
+                {s.env_managed ? (
+                  <div style={{fontFamily: "var(--mono)", fontSize: 12.5, color: "var(--muted)",
+                               padding: "6px 8px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4}}>
+                    {s.value || "(비어 있음)"} <span style={{color: "var(--warn)"}}>· .env에서 수정 후 재시작</span>
+                  </div>
+                ) : (
+                  <div style={{display: "flex", gap: 8, alignItems: "flex-start"}}>
+                    {isLong ? (
+                      <textarea
+                        style={{flex: 1}} rows={10}
+                        placeholder={s.is_secret ? `(현재: ${s.value})` : ""}
+                        value={val}
+                        onChange={e => setEdits({ ...edits, [s.key]: e.target.value })}
+                      />
+                    ) : (
+                      <input
+                        style={{flex: 1}}
+                        placeholder={s.is_secret ? `(마스킹됨: ${s.value})` : ""}
+                        value={val}
+                        onChange={e => setEdits({ ...edits, [s.key]: e.target.value })}
+                      />
+                    )}
+                    <button className="primary" disabled={!(s.key in edits)} onClick={() => save(s.key)}>저장</button>
+                  </div>
+                )}
               </div>
             );
           })}
