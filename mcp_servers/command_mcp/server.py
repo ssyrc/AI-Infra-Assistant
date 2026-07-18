@@ -29,14 +29,21 @@ _STATE = "command_whitelist_state"
 # ------------------------------------------------------------------ 카탈로그 검색
 @mcp.tool()
 async def search_commands(query: str, top_k: int = 10, category: str | None = None) -> list[dict]:
-    """하고 싶은 작업을 설명하면 의미상 가까운 시스템 커맨드를 찾아 준다.
+    """하려는 작업을 설명하면 의미상 가까운 사내 시스템 커맨드를 찾아 준다(카탈로그 조회).
 
-    정확한 커맨드명이 아니어도 된다. 예) "작업이 언제 실행되는지 확인", "스케줄 등록".
+    사용할 때: "무슨 커맨드로 X를 하지?"처럼 어떤 명령이 있는지 모를 때. 정확한 이름이 없어도
+      설명형으로 검색된다. 예: "작업이 언제 실행되는지 확인", "스케줄 등록".
+    쓰지 말 것: 실제 실행/조회(예: 본인 job 상태)는 get_scheduler_job_info 등 실행 툴을 쓴다.
+      이 툴은 '어떤 커맨드가 있는지'만 알려주고 실행하지 않는다.
+
+    후보를 찾으면 get_command_detail로 정확한 사용법을 확인한 뒤 사용자에게 안내한다.
 
     Args:
-        query: 하고 싶은 작업 설명 또는 검색어
-        top_k: 반환할 최대 건수 (기본 10)
-        category: 특정 카테고리로 필터링 (없으면 전체)
+        query: 하려는 작업 설명 또는 키워드. 예: "배치 재시작"
+        top_k: 반환할 최대 건수(기본 10)
+        category: 카테고리로 한정(없으면 전체). 확실치 않으면 지정하지 않는다.
+    Returns:
+        커맨드 리스트. 각 항목에 name, description, usage, category가 있다.
     """
     if not query or not query.strip():
         return []
@@ -117,10 +124,15 @@ async def search_commands(query: str, top_k: int = 10, category: str | None = No
 
 @mcp.tool()
 async def get_command_detail(name: str) -> dict | None:
-    """특정 커맨드의 상세 사용법을 반환한다.
+    """특정 커맨드의 상세 사용법(usage)을 정확히 반환한다.
+
+    사용할 때: search_commands로 후보를 찾은 뒤, 사용자에게 안내하기 전에 정확한 이름의
+      사용법/예시를 확인할 때. name은 반드시 search_commands 결과의 name을 그대로 쓴다.
 
     Args:
-        name: command_catalog.name 값
+        name: command_catalog.name 값(추측 금지, 검색 결과의 정확한 이름)
+    Returns:
+        name/description/usage/category. 없으면 null(그때는 search_commands로 다시 찾는다).
     """
     pool = await get_pool(_DSN)
     row = await pool.fetchrow(
@@ -153,12 +165,20 @@ async def get_scheduler_queue_status() -> dict:
 EXEC_WHITELIST = {
     "get_scheduler_job_info": {
         "handler": get_scheduler_job_info,
-        "description": "현재 사용자 본인의 스케줄러 job 정보를 조회한다.",
+        "description": (
+            "현재 로그인한 사용자 '본인'의 스케줄러 job 상태/이력을 실시간 조회한다. "
+            "사용자가 '내 job', '내 작업 상태'를 물을 때 사용한다. 대상 사용자는 시스템이 "
+            "본인으로 고정하므로 특정 사용자 id를 지정하지 않는다(남의 job은 조회 불가). "
+            "커맨드 '사용법'이 궁금한 것이면 이 툴 대신 search_commands를 쓴다."
+        ),
         "enabled": True, "required_roles": [], "user_scoped": True, "scope_param": "user_id",
     },
     "get_scheduler_queue_status": {
         "handler": get_scheduler_queue_status,
-        "description": "s2 스케줄러 큐의 전체 대기/실행 상태를 조회한다(사용자별 데이터 아님).",
+        "description": (
+            "스케줄러 큐 '전체'의 대기/실행 상태(개수 등)를 조회한다. 특정 사용자 데이터가 "
+            "아니라 시스템 전반 현황이다. 본인 job은 get_scheduler_job_info를 쓴다."
+        ),
         "enabled": True, "required_roles": [], "user_scoped": False,
     },
 }

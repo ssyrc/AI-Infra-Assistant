@@ -77,15 +77,22 @@ _COMMON = {"enabled": False, "required_roles": [], "user_scoped": True, "scope_p
 
 WHITELIST = {
     "list_dir": {"handler": list_dir,
-                 "description": "현재 사용자 권한으로 디렉토리 내용을 나열한다(ls).", **_COMMON},
+                 "description": ("현재 로그인 사용자 '본인 권한'으로 서버 디렉토리 내용을 나열한다"
+                                 "(ls). 파일이 있는지/이름이 무엇인지 확인할 때 사용한다."), **_COMMON},
     "find_files": {"handler": find_files,
-                   "description": "현재 사용자 권한으로 파일을 검색한다(find, 읽기 전용).", **_COMMON},
+                   "description": ("현재 사용자 권한으로 서버에서 파일을 검색한다(find, 읽기 전용). "
+                                   "이름 패턴(예: '*.log')이나 종류로 찾을 때 사용한다. "
+                                   "파일을 수정/삭제/실행하지는 못한다."), **_COMMON},
     "disk_free": {"handler": disk_free,
-                  "description": "파일시스템 디스크 여유 용량을 보여준다(df -h).", **_COMMON},
+                  "description": "서버 파일시스템별 디스크 여유/사용 용량을 조회한다(df -h).", **_COMMON},
     "disk_usage": {"handler": disk_usage,
-                   "description": "경로의 디스크 사용량을 보여준다(du).", **_COMMON},
+                   "description": ("특정 경로가 차지하는 디스크 용량을 조회한다(du). "
+                                   "'어느 폴더가 용량을 많이 쓰나'를 볼 때 사용한다."), **_COMMON},
     "read_file_head": {"handler": read_file_head,
-                       "description": "현재 사용자 권한으로 텍스트 파일 앞부분을 읽는다(head).", **_COMMON},
+                       "description": ("현재 사용자 권한으로 텍스트 파일 앞부분을 읽는다(head). "
+                                       "로그/설정 파일 내용을 확인할 때 사용한다."), **_COMMON},
     "system_info": {"handler": system_info,
-                    "description": "시스템 정보(uptime/메모리/네트워크/who)를 조회한다.", **_COMMON},
+                    "description": ("서버 시스템 정보를 조회한다: uptime(가동시간)/memory(메모리)/"
+                                    "network(IP·인터페이스)/who(접속자). kind로 무엇을 볼지 지정한다."),
+                    **_COMMON},
 }

@@ -16,12 +16,21 @@ mcp = FastMCP("manual-mcp", stateless_http=True)
 
 @mcp.tool()
 async def search_manual(query: str, top_k: int = 5) -> list[dict]:
-    """매뉴얼/가이드 문서에서 질문과 관련된 내용을 검색한다.
-    벡터+키워드 하이브리드(RRF)로 후보를 넓게 뽑은 뒤, 리랭커로 최종 순위를 정한다.
+    """사내 매뉴얼·가이드 문서에서 질문에 답할 근거 문단을 검색한다.
+
+    사용할 때: 사용법·설정·절차·정책·개념 등 "문서에 적혀 있을" 질문.
+    쓰지 말 것: 과거 장애 해결 사례(→ voc.search_voc), 실행 가능한 커맨드 목록
+      (→ command.search_commands), 실시간 서버 상태·파일(→ system/command 실행 툴).
+
+    정확한 키워드가 없어도 된다(의미+키워드 하이브리드 검색). 결과가 부족하면 표현을 바꿔
+    다시 호출한다. 답변에는 반환된 문단의 title/section_title을 출처로 인용한다.
 
     Args:
-        query: 사용자 질문 또는 검색어
-        top_k: 반환할 최대 청크 수 (기본 5)
+        query: 자연어 질문 또는 핵심 키워드. 예: "배치 스케줄 등록 방법"
+        top_k: 반환할 최대 문단 수(기본 5). 폭넓게 보려면 8~10.
+    Returns:
+        문단 리스트. 각 항목에 title, section_title, page_no, chunk_text, manual_file_id가 있다.
+        더 넓은 맥락이 필요하면 manual_file_id로 get_document을 호출한다.
     """
     if not query or not query.strip():
         return []
@@ -108,14 +117,19 @@ async def search_manual(query: str, top_k: int = 5) -> list[dict]:
 @mcp.tool()
 async def get_document(manual_file_id: int, offset: int = 0, limit: int = 20,
                        max_chars: int = 8000) -> dict:
-    """특정 매뉴얼 문서의 청크를 순서대로 반환한다(발행된 문서만).
-    대형 문서를 통째로 컨텍스트에 넣지 않도록 페이지 단위로 잘라서 준다.
+    """특정 매뉴얼 문서를 순서대로 이어 읽는다(발행된 문서만).
+
+    사용할 때: search_manual로 찾은 문단만으로 부족해 문서의 앞뒤 맥락이 더 필요할 때.
+    처음부터 검색 없이 호출하지 말 것 — 반드시 search_manual로 manual_file_id를 먼저 얻는다.
+    대형 문서를 통째로 넣지 않도록 페이지 단위로 잘라 주며, has_more/next_offset으로 이어 읽는다.
 
     Args:
-        manual_file_id: manual_files 테이블의 문서 ID
-        offset: 건너뛸 청크 수 (기본 0)
-        limit: 가져올 최대 청크 수 (기본 20)
-        max_chars: 반환 텍스트 총 길이 상한 (기본 8000자, 초과 시 잘림)
+        manual_file_id: search_manual 결과의 manual_file_id
+        offset: 건너뛸 청크 수(기본 0). 이어 읽을 때 이전 응답의 next_offset을 넣는다.
+        limit: 가져올 최대 청크 수(기본 20)
+        max_chars: 반환 텍스트 총 길이 상한(기본 8000자, 초과 시 잘림)
+    Returns:
+        total_chunks, returned, has_more, next_offset, truncated_by_max_chars, chunks[].
     """
     offset = max(0, int(offset))
     limit = max(1, min(int(limit), 50))

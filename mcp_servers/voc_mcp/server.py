@@ -20,13 +20,22 @@ async def search_voc(
     department: str | None = None,
     resolved_only: bool = True,
 ) -> list[dict]:
-    """과거 VOC(질문/답변) 이력에서 현재 질문과 유사한 케이스와 해결 방법을 검색한다.
+    """과거 VOC(사용자/운영자 질의응답) 이력에서 유사 사례와 해결 방법을 검색한다.
+
+    사용할 때: "예전에 이런 문제 어떻게 해결했나", 오류/증상 기반으로 선례를 찾을 때.
+    쓰지 말 것: 공식 사용법·절차(→ manual.search_manual). 매뉴얼과 선례가 모두 유용할 것
+      같으면 두 툴을 함께 호출해 종합한다.
+
+    의미+키워드 하이브리드 검색이라 정확한 문구가 아니어도 된다. 답변에는 참고한 VOC 사례를
+    출처로 밝힌다(확정된 정답이 아니라 '과거 사례'임을 명시).
 
     Args:
-        query: 사용자 질문
-        top_k: 반환할 최대 건수 (기본 5)
-        department: 특정 부서로 필터링 (없으면 전체)
-        resolved_only: True면 해결 완료된 케이스만 검색 (기본 True)
+        query: 사용자 질문 또는 증상/오류 메시지. 예: "로그인 시 500 오류"
+        top_k: 반환할 최대 건수(기본 5)
+        department: 특정 부서로 한정(없으면 전체). 확실치 않으면 지정하지 않는다.
+        resolved_only: True면 해결 완료 사례만(기본 True). 미해결 사례도 보려면 False.
+    Returns:
+        사례 리스트. 각 항목에 question, answer, department, resolved, created_at가 있다.
     """
     if not query or not query.strip():
         return []
