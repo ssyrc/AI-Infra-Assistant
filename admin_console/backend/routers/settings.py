@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 # (shared/migrations.py::config_seed의 force=True 항목과 일치해야 한다.)
 ENV_MANAGED_KEYS = {
     "manual_db_dsn", "voc_db_dsn", "command_db_dsn", "system_db_dsn",
-    "agent_session_db_dsn", "redis_url",
+    "agent_session_db_dsn", "memory_db_dsn", "redis_url",
 }
 
 

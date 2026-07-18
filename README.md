@@ -159,6 +159,29 @@ http://서버:3001 접속 → 계정/프로젝트 생성 → API 키 발급 → 
 `LANGFUSE_SECRET_KEY`에 넣고 `docker compose up -d agent-server` 재기동. 이후 모든 LLM 호출과
 MCP 툴 호출이 트레이스로 쌓입니다. (키가 없으면 에이전트는 트레이싱 없이 정상 동작)
 
+## 상위 agent 연동 + 사용자 장기 메모리
+
+Open WebUI 외에, 상위 통합 agent(예: VOC agent)가 AI-Infra 질문을 **API로 위임**할 수 있다.
+
+```
+POST /v1/agent/query            # 내부망 전용(인증 없음)
+{ "user_id": "hong.gildong", "message": "...", "conversation_id": "voc-123",
+  "source": "voc-agent", "roles": ["user"], "use_memory": true, "stream": false }
+→ { "answer": "...", "conversation_id": "voc-123", "request_id": "..." }
+```
+
+- **단일 user_id 메모리**: user_id는 이메일이면 `@` 앞부분으로 정규화된다. 채널(Open WebUI/
+  VOC)이 달라도 같은 user_id면 **하나의 장기 메모리를 공유**한다.
+- **동작**: 요청 시 (1) 해당 대화의 최근 N턴 + (2) user_id의 장기기억을 질문 임베딩으로 의미검색해
+  시스템 지시문/대화 이력에 주입한다. 응답 후 대화 턴을 저장하고, 턴이 임계치(`memory_summarize_every`)만큼
+  쌓이면 오래된 대화를 vLLM으로 **요약·증류**해 `user_memory`(장기기억)로 승격한다(백그라운드).
+- **저장소**: 전용 `memory_db`(pgvector). `memory_turns`(원장)/`user_memory`(증류된 장기기억)/
+  `conversation_state`(요약 진행). 파라미터는 설정 탭의 `memory_*` 키로 조절.
+- **관리 API**: `GET /v1/memory/{user_id}`(조회), `POST /v1/memory/{user_id}`(수동 추가),
+  `DELETE /v1/memory/{user_id}`(개별 `?memory_id=` 또는 전체 삭제=잊힐 권리).
+- 주의: 이 엔드포인트들은 인증이 없으므로 **agent-server를 내부망에서만** 접근 가능하게 둔다
+  (compose 기본은 호스트 미노출). 외부 노출 시 reverse proxy에서 접근 제한 필요.
+
 ## 에이전트가 보는 MCP 목적/기능을 바꾸려면
 
 에이전트의 시스템 지시문(각 MCP를 언제 쓰라는 지침 포함)은 관리자 콘솔 **설정 탭 →

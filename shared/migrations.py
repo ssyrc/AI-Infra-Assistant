@@ -24,7 +24,8 @@ REDIS_PORT = os.environ.get("REDIS_PORT", "6379")
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", "")
 REDIS_CACHE_DB = os.environ.get("REDIS_CACHE_DB", "1")
 
-APP_DBS = ["platform_config", "manual_db", "voc_db", "command_db", "system_db", "agent_sessions_db", "langfuse"]
+APP_DBS = ["platform_config", "manual_db", "voc_db", "command_db", "system_db",
+           "agent_sessions_db", "memory_db", "langfuse"]
 
 
 def dsn(db: str) -> str:
@@ -217,6 +218,49 @@ MIGRATIONS: list[tuple[str, int, str]] = [
         );
         CREATE INDEX IF NOT EXISTS command_job_logs_created_idx ON job_logs (created_at DESC);
     """),
+    # 사용자별 장기 메모리(단일 user_id 키). 대화 턴 원장 + 증류된 장기기억 + 대화 상태.
+    # 상위 agent(예: 통합 VOC)에서 오는 요청도 이 메모리를 공유한다.
+    ("memory_db", 1, """
+        CREATE EXTENSION IF NOT EXISTS vector;
+        CREATE TABLE IF NOT EXISTS memory_turns (
+            id BIGSERIAL PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            conversation_id TEXT,
+            source TEXT,
+            role TEXT NOT NULL,                 -- 'user' | 'assistant'
+            content TEXT NOT NULL,
+            embedding vector(1024),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS memory_turns_conv_idx ON memory_turns (conversation_id, created_at);
+        CREATE INDEX IF NOT EXISTS memory_turns_user_idx ON memory_turns (user_id, created_at);
+        CREATE INDEX IF NOT EXISTS memory_turns_emb_idx ON memory_turns USING hnsw (embedding vector_cosine_ops);
+
+        -- 여러 대화에서 증류된 사용자 장기기억(사실/선호/요약). user_id 단위로 공유.
+        CREATE TABLE IF NOT EXISTS user_memory (
+            id BIGSERIAL PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'fact',  -- 'fact' | 'preference' | 'summary'
+            content TEXT NOT NULL,
+            embedding vector(1024),
+            source TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            expires_at TIMESTAMPTZ
+        );
+        CREATE INDEX IF NOT EXISTS user_memory_user_idx ON user_memory (user_id);
+        CREATE INDEX IF NOT EXISTS user_memory_emb_idx ON user_memory USING hnsw (embedding vector_cosine_ops);
+
+        -- 대화별 요약 진행 상태(어디까지 요약해 승격했는지).
+        CREATE TABLE IF NOT EXISTS conversation_state (
+            conversation_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            turn_count INT NOT NULL DEFAULT 0,
+            summarized_upto BIGINT NOT NULL DEFAULT 0,   -- 이 memory_turns.id 이하까지 요약 완료
+            last_summarized_at TIMESTAMPTZ,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+    """),
 ]
 
 
@@ -243,7 +287,14 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
         ("search_max_candidates", "100", "리랭킹 후보 상한", True, False, False),
         ("upload_max_mb", "50", "업로드 최대 크기(MB)", True, False, False),
         ("upload_session_ttl_minutes", "60", "업로드 미리보기 세션 유효시간(분)", True, False, False),
-        ("scheduler_api_base_url", os.environ.get("SCHEDULER_API_BASE_URL", "http://s2-scheduler:9000"), "System MCP가 호출하는 s2 스케줄러 API 주소", True, False, False),
+        ("scheduler_api_base_url", os.environ.get("SCHEDULER_API_BASE_URL", "http://s2-scheduler:9000"), "Command MCP가 호출하는 s2 스케줄러 API 주소", True, False, False),
+
+        # 장기 메모리(사용자별)
+        ("memory_enabled", "true", "장기 메모리 사용 여부(true/false)", True, False, False),
+        ("memory_recent_turns", "8", "프롬프트에 주입할 최근 대화 턴 수", True, False, False),
+        ("memory_top_k", "5", "장기기억에서 의미검색으로 주입할 최대 항목 수", True, False, False),
+        ("memory_summarize_every", "12", "이 턴 수마다 오래된 대화를 요약해 장기기억으로 승격", True, False, False),
+        ("memory_ttl_days", "180", "장기기억 보존일(0이면 무기한)", True, False, False),
 
         # credential류: 환경변수 기반, 매 기동 시 갱신(force=True)
         ("manual_db_dsn", dsn("manual_db"), "Manual MCP 전용 DB", False, True, True),
@@ -253,6 +304,7 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
         ("agent_session_db_dsn",
          dsn("agent_sessions_db").replace("postgresql://", "postgresql+asyncpg://"),
          "ADK DatabaseSessionService용 DB (asyncpg 스킴)", False, True, True),
+        ("memory_db_dsn", dsn("memory_db"), "사용자별 장기 메모리 DB", False, True, True),
         ("redis_url", redis_url(), "임베딩 캐시용 Redis(비우면 캐시 미사용)", False, True, True),
 
         ("manual_mcp_url", os.environ.get("MANUAL_MCP_URL", "http://manual-mcp:8001/mcp"),
