@@ -17,6 +17,11 @@ services:
       - ./dev/dev-config-override.sql:/docker-entrypoint-initdb.d/99-dev-override.sql
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d agent_sessions_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   mock-vllm:
     build:
@@ -31,7 +36,9 @@ services:
     environment:
       CONFIG_DB_DSN: postgresql://agent:devpass@postgres:5432/platform_config
     ports: ["8001:8001"]
-    depends_on: [postgres]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   command-mcp:
     build: { context: ., dockerfile: mcp_servers/Dockerfile }
@@ -39,7 +46,9 @@ services:
     environment:
       CONFIG_DB_DSN: postgresql://agent:devpass@postgres:5432/platform_config
     ports: ["8002:8002"]
-    depends_on: [postgres]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   voc-mcp:
     build: { context: ., dockerfile: mcp_servers/Dockerfile }
@@ -47,7 +56,9 @@ services:
     environment:
       CONFIG_DB_DSN: postgresql://agent:devpass@postgres:5432/platform_config
     ports: ["8003:8003"]
-    depends_on: [postgres]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   system-mcp:
     build: { context: ., dockerfile: mcp_servers/Dockerfile }
@@ -55,7 +66,9 @@ services:
     environment:
       CONFIG_DB_DSN: postgresql://agent:devpass@postgres:5432/platform_config
     ports: ["8004:8004"]
-    depends_on: [postgres]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   agent-server:
     build: { context: ., dockerfile: agent_server/Dockerfile }
@@ -63,7 +76,19 @@ services:
       CONFIG_DB_DSN: postgresql://agent:devpass@postgres:5432/platform_config
       # LANGFUSE 키 없음 -> 트레이싱 자동 비활성화
     ports: ["8000:8000"]
-    depends_on: [postgres, mock-vllm, manual-mcp, command-mcp, voc-mcp, system-mcp]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock-vllm:
+        condition: service_started
+      manual-mcp:
+        condition: service_started
+      command-mcp:
+        condition: service_started
+      voc-mcp:
+        condition: service_started
+      system-mcp:
+        condition: service_started
 
   admin-console:
     build:
@@ -74,7 +99,11 @@ services:
       ADMIN_USER: admin
       ADMIN_PASSWORD: admin
     ports: ["8080:8080"]
-    depends_on: [postgres, mock-vllm]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock-vllm:
+        condition: service_started
 
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
@@ -83,4 +112,6 @@ services:
       OPENAI_API_KEY: not-needed
       WEBUI_AUTH: "false"
     ports: ["3000:8080"]
-    depends_on: [agent-server]
+    depends_on:
+      agent-server:
+        condition: service_started

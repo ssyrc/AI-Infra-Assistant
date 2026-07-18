@@ -20,7 +20,7 @@ if os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY
         Langfuse(
             public_key=os.environ["LANGFUSE_PUBLIC_KEY"],
             secret_key=os.environ["LANGFUSE_SECRET_KEY"],
-            host=os.environ.get("LANGFUSE_HOST", "http://langfuse:3000"),
+            host=os.environ.get("LANGFUSE_HOST", "http://langfuse-web:3000"),
         )
         GoogleADKInstrumentor().instrument()
     except Exception as e:  # noqa: BLE001

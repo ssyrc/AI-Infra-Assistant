@@ -12,6 +12,13 @@ services:
       - ./shared/init-db:/docker-entrypoint-initdb.d
     ports:
       - "5432:5432"
+    healthcheck:
+      # agent_sessions_db는 init-db 스크립트 마지막 단계에서 만들어지는 DB 중 하나.
+      # 이 DB에 접속 가능하면 초기화가 끝난 것으로 보고 다른 서비스를 시작한다.
+      test: ["CMD-SHELL", "pg_isready -U agent -d agent_sessions_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   manual-mcp:
     build:
@@ -21,7 +28,9 @@ services:
     env_file: .env
     ports:
       - "8001:8001"
-    depends_on: [postgres]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   command-mcp:
     build:
@@ -31,7 +40,9 @@ services:
     env_file: .env
     ports:
       - "8002:8002"
-    depends_on: [postgres]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   voc-mcp:
     build:
@@ -41,7 +52,9 @@ services:
     env_file: .env
     ports:
       - "8003:8003"
-    depends_on: [postgres]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   system-mcp:
     build:
@@ -51,7 +64,9 @@ services:
     env_file: .env
     ports:
       - "8004:8004"
-    depends_on: [postgres]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   agent-server:
     build:
@@ -60,7 +75,17 @@ services:
     env_file: .env
     ports:
       - "8000:8000"
-    depends_on: [manual-mcp, command-mcp, voc-mcp, system-mcp]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      manual-mcp:
+        condition: service_started
+      command-mcp:
+        condition: service_started
+      voc-mcp:
+        condition: service_started
+      system-mcp:
+        condition: service_started
 
   admin-console:
     build:
@@ -69,17 +94,107 @@ services:
     env_file: .env
     ports:
       - "8080:8080"
-    depends_on: [postgres]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
-  langfuse:
-    image: langfuse/langfuse:latest
-    environment:
-      DATABASE_URL: postgresql://agent:${POSTGRES_PASSWORD}@postgres:5432/langfuse
-      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET}
-      SALT: ${LANGFUSE_SALT}
+  # --- Langfuse v3 스택 (web + worker + clickhouse + redis + minio) ------------
+  # v3는 단일 컨테이너로 뜨지 않는다. 아래 구성은 공식 self-host 구조를 따른다.
+  # LANGFUSE_INIT_* 로 최초 org/project와 API 키를 자동 생성하므로, agent-server의
+  # .env에 넣을 키를 UI에서 수동 발급할 필요가 없다(아래 .env.example의 키와 일치시킬 것).
+  langfuse-web:
+    image: langfuse/langfuse:3
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_started
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
     ports:
       - "3001:3000"
-    depends_on: [postgres]
+    environment:
+      DATABASE_URL: postgresql://agent:${POSTGRES_PASSWORD}@postgres:5432/langfuse
+      NEXTAUTH_URL: ${LANGFUSE_NEXTAUTH_URL:-http://localhost:3001}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET}
+      SALT: ${LANGFUSE_SALT}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY}
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_AUTH: ${REDIS_PASSWORD}
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_PASSWORD}
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      # 최초 1회 자동 생성되는 org/project와 API 키
+      LANGFUSE_INIT_ORG_ID: default-org
+      LANGFUSE_INIT_PROJECT_ID: default-project
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_started
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://agent:${POSTGRES_PASSWORD}@postgres:5432/langfuse
+      SALT: ${LANGFUSE_SALT}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY}
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_AUTH: ${REDIS_PASSWORD}
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_PASSWORD}
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+
+  clickhouse:
+    image: clickhouse/clickhouse-server
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD}
+    volumes:
+      - minio_data:/data
+    entrypoint: sh -c 'mkdir -p /data/langfuse && minio server /data --console-address ":9001"'
 
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
@@ -90,8 +205,12 @@ services:
       - open_webui_data:/app/backend/data
     ports:
       - "3000:8080"
-    depends_on: [agent-server]
+    depends_on:
+      agent-server:
+        condition: service_started
 
 volumes:
   pg_data:
   open_webui_data:
+  clickhouse_data:
+  minio_data:
