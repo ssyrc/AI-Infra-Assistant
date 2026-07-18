@@ -21,9 +21,14 @@ CREATE TABLE IF NOT EXISTS manual_chunks (
     section_title  TEXT,
     page_no        INT,
     chunk_text     TEXT NOT NULL,
-    embedding      vector(1024)
+    embedding      vector(1024),
+    -- 하이브리드 검색용 전문검색 벡터 (chunk_text로부터 자동 생성).
+    -- simple 구성을 써서 언어에 독립적으로 토큰화한다(한국어 형태소 분석기가 없는 폐쇄망 대비).
+    tsv            tsvector GENERATED ALWAYS AS (to_tsvector('simple', coalesce(chunk_text, ''))) STORED
     -- 발행 여부는 개별 청크가 아니라 manual_files.status로 판단한다
 );
+
+CREATE INDEX IF NOT EXISTS manual_chunks_tsv_idx ON manual_chunks USING gin (tsv);
 
 CREATE INDEX IF NOT EXISTS manual_chunks_embedding_idx
     ON manual_chunks USING hnsw (embedding vector_cosine_ops);

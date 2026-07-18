@@ -539,6 +539,80 @@ function SystemPanel() {
   );
 }
 
+// ---------------------------------------------------------------- Settings
+function SettingsPanel() {
+  const [settings, setSettings] = useState([]);
+  const [edits, setEdits] = useState({}); // key -> new value
+
+  const load = useCallback(async () => setSettings(await api("/api/settings")), []);
+  useEffect(() => { load(); }, [load]);
+
+  const save = async (key) => {
+    if (!(key in edits)) return;
+    await api(`/api/settings/${encodeURIComponent(key)}`, { method: "PUT", body: JSON.stringify({ value: edits[key] }) });
+    const next = { ...edits }; delete next[key]; setEdits(next);
+    await load();
+    alert("저장했습니다.");
+  };
+
+  const grouped = {
+    "vLLM / 모델": settings.filter(s => s.key.startsWith("vllm_")),
+    "MCP 엔드포인트": settings.filter(s => s.key.endsWith("_mcp_url")),
+    "데이터베이스 (DSN)": settings.filter(s => s.key.endsWith("_db_dsn")),
+    "System / 에이전트": settings.filter(s => s.key === "scheduler_api_base_url" || s.key === "agent_system_instruction"),
+  };
+
+  return (
+    <div>
+      <h2>설정</h2>
+      <div className="subtitle">
+        vLLM 주소, 각 MCP DB, MCP 엔드포인트, 에이전트 지시문을 여기서 관리합니다.
+        <span className="badge enabled" style={{marginLeft: 8}}>즉시 반영</span> 표시는 재시작 없이 적용되고,
+        <span className="badge disabled" style={{marginLeft: 6}}>재시작 필요</span> 표시는 해당 서비스 컨테이너를 재시작해야 반영됩니다.
+      </div>
+
+      {Object.entries(grouped).map(([group, rows]) => rows.length > 0 && (
+        <div className="card" key={group}>
+          <div style={{marginBottom: 10}}><strong>{group}</strong></div>
+          {rows.map(s => {
+            const isLong = s.key === "agent_system_instruction";
+            const val = s.key in edits ? edits[s.key] : (s.is_secret ? "" : s.value);
+            return (
+              <div key={s.key} style={{marginBottom: 14}}>
+                <div style={{fontSize: 12.5, marginBottom: 4}}>
+                  <span style={{fontFamily: "var(--mono)"}}>{s.key}</span>
+                  <span className={`badge ${s.hot_reload ? "enabled" : "disabled"}`} style={{marginLeft: 8}}>
+                    {s.hot_reload ? "즉시 반영" : "재시작 필요"}
+                  </span>
+                  {s.description && <span style={{color: "var(--muted)", marginLeft: 8}}>{s.description}</span>}
+                </div>
+                <div style={{display: "flex", gap: 8, alignItems: "flex-start"}}>
+                  {isLong ? (
+                    <textarea
+                      style={{flex: 1}} rows={6}
+                      placeholder={s.is_secret ? `(현재: ${s.value})` : ""}
+                      value={val}
+                      onChange={e => setEdits({ ...edits, [s.key]: e.target.value })}
+                    />
+                  ) : (
+                    <input
+                      style={{flex: 1}}
+                      placeholder={s.is_secret ? `(마스킹됨: ${s.value})` : ""}
+                      value={val}
+                      onChange={e => setEdits({ ...edits, [s.key]: e.target.value })}
+                    />
+                  )}
+                  <button className="primary" disabled={!(s.key in edits)} onClick={() => save(s.key)}>저장</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- App
 function App() {
   const [tab, setTab] = useState("manuals");
@@ -547,6 +621,7 @@ function App() {
     { id: "voc", label: "VOC 이력" },
     { id: "commands", label: "커맨드 카탈로그" },
     { id: "system", label: "System MCP" },
+    { id: "settings", label: "설정" },
   ];
   return (
     <React.Fragment>
@@ -561,6 +636,7 @@ function App() {
         {tab === "voc" && <VocPanel />}
         {tab === "commands" && <CommandsPanel />}
         {tab === "system" && <SystemPanel />}
+        {tab === "settings" && <SettingsPanel />}
       </div>
     </React.Fragment>
   );

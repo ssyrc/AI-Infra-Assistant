@@ -16,7 +16,9 @@ mcp = FastMCP("manual-mcp", stateless_http=True)
 
 @mcp.tool()
 async def search_manual(query: str, top_k: int = 5) -> list[dict]:
-    """매뉴얼/가이드 문서에서 질문과 관련된 내용을 의미 기반으로 검색한다.
+    """매뉴얼/가이드 문서에서 질문과 관련된 내용을 검색한다.
+    의미 기반(벡터) 검색과 키워드(전문) 검색을 RRF로 결합한 하이브리드 검색이라,
+    동의어/문맥 질문과 정확한 키워드/에러코드 질문 모두에 강하다.
 
     Args:
         query: 사용자 질문 또는 검색어
@@ -24,18 +26,43 @@ async def search_manual(query: str, top_k: int = 5) -> list[dict]:
     """
     vec = await embed_text(query)
     pool = await get_pool("manual_db_dsn")
+    # RRF(Reciprocal Rank Fusion): 벡터 순위와 키워드 순위를 각각 매긴 뒤 1/(k+rank)로 합산.
+    # k=60은 관례적 상수. 두 신호를 정규화 없이 안정적으로 융합할 수 있다.
     rows = await pool.fetch(
         """
+        WITH vector_search AS (
+            SELECT c.id, ROW_NUMBER() OVER (ORDER BY c.embedding <=> $1::vector) AS rank
+            FROM manual_chunks c
+            JOIN manual_files f ON f.id = c.manual_file_id
+            WHERE f.status = 'published' AND c.embedding IS NOT NULL
+            ORDER BY c.embedding <=> $1::vector
+            LIMIT 50
+        ),
+        keyword_search AS (
+            SELECT c.id, ROW_NUMBER() OVER (
+                ORDER BY ts_rank(c.tsv, plainto_tsquery('simple', $2)) DESC
+            ) AS rank
+            FROM manual_chunks c
+            JOIN manual_files f ON f.id = c.manual_file_id
+            WHERE f.status = 'published' AND c.tsv @@ plainto_tsquery('simple', $2)
+            LIMIT 50
+        ),
+        fused AS (
+            SELECT COALESCE(v.id, k.id) AS id,
+                   COALESCE(1.0 / (60 + v.rank), 0) + COALESCE(1.0 / (60 + k.rank), 0) AS rrf_score
+            FROM vector_search v
+            FULL OUTER JOIN keyword_search k ON v.id = k.id
+        )
         SELECT c.id, c.section_title, c.page_no, c.chunk_text,
-               f.title, f.filename, f.version,
-               1 - (c.embedding <=> $1::vector) AS score
-        FROM manual_chunks c
+               f.title, f.filename, f.version, fused.rrf_score AS score
+        FROM fused
+        JOIN manual_chunks c ON c.id = fused.id
         JOIN manual_files f ON f.id = c.manual_file_id
-        WHERE f.status = 'published'
-        ORDER BY c.embedding <=> $1::vector
-        LIMIT $2
+        ORDER BY fused.rrf_score DESC
+        LIMIT $3
         """,
         vector_literal(vec),
+        query,
         top_k,
     )
     return [dict(r) for r in rows]
