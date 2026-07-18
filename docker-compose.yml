@@ -1,0 +1,97 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./shared/init-db:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+
+  manual-mcp:
+    build:
+      context: .
+      dockerfile: mcp_servers/Dockerfile
+    command: ["python", "mcp_servers/manual_mcp/server.py"]
+    env_file: .env
+    ports:
+      - "8001:8001"
+    depends_on: [postgres]
+
+  command-mcp:
+    build:
+      context: .
+      dockerfile: mcp_servers/Dockerfile
+    command: ["python", "mcp_servers/command_mcp/server.py"]
+    env_file: .env
+    ports:
+      - "8002:8002"
+    depends_on: [postgres]
+
+  voc-mcp:
+    build:
+      context: .
+      dockerfile: mcp_servers/Dockerfile
+    command: ["python", "mcp_servers/voc_mcp/server.py"]
+    env_file: .env
+    ports:
+      - "8003:8003"
+    depends_on: [postgres]
+
+  system-mcp:
+    build:
+      context: .
+      dockerfile: mcp_servers/Dockerfile
+    command: ["python", "mcp_servers/system_mcp/server.py"]
+    env_file: .env
+    ports:
+      - "8004:8004"
+    depends_on: [postgres]
+
+  agent-server:
+    build:
+      context: .
+      dockerfile: agent_server/Dockerfile
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on: [manual-mcp, command-mcp, voc-mcp, system-mcp]
+
+  admin-console:
+    build:
+      context: .
+      dockerfile: admin_console/Dockerfile
+    env_file: .env
+    ports:
+      - "8080:8080"
+    depends_on: [postgres]
+
+  langfuse:
+    image: langfuse/langfuse:latest
+    environment:
+      DATABASE_URL: postgresql://agent:${POSTGRES_PASSWORD}@postgres:5432/langfuse
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET}
+      SALT: ${LANGFUSE_SALT}
+    ports:
+      - "3001:3000"
+    depends_on: [postgres]
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    environment:
+      OPENAI_API_BASE_URL: http://agent-server:8000/v1
+      OPENAI_API_KEY: not-needed
+    volumes:
+      - open_webui_data:/app/backend/data
+    ports:
+      - "3000:8080"
+    depends_on: [agent-server]
+
+volumes:
+  pg_data:
+  open_webui_data:

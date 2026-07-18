@@ -1,0 +1,86 @@
+# 개발/데모용 compose. 실제 vLLM/GPU 없이 전체 흐름(3개 웹 + 에이전트 + 4개 MCP)을 확인한다.
+#   docker compose -f docker-compose.dev.yml up -d --build
+#
+# - mock-vllm: 임베딩/LLM을 흉내내는 가짜 서버 (dev/mock_vllm.py)
+# - admin-console: docling 없이 빌드, 엑셀 업로드/컬럼선택 흐름은 정상 동작
+#   (docx/pptx/pdf 파싱만 프로덕션에서 확인)
+# - config DB 시드 후 dev-config-override.sql이 vLLM 주소를 mock으로 덮어씀
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: devpass
+    volumes:
+      - ./shared/init-db:/docker-entrypoint-initdb.d
+      - ./dev/dev-config-override.sql:/docker-entrypoint-initdb.d/99-dev-override.sql
+    ports:
+      - "5432:5432"
+
+  mock-vllm:
+    build:
+      context: .
+      dockerfile: dev/Dockerfile.mock
+    ports:
+      - "8100:8000"
+
+  manual-mcp:
+    build: { context: ., dockerfile: mcp_servers/Dockerfile }
+    command: ["python", "mcp_servers/manual_mcp/server.py"]
+    environment:
+      CONFIG_DB_DSN: postgresql://agent:devpass@postgres:5432/platform_config
+    ports: ["8001:8001"]
+    depends_on: [postgres]
+
+  command-mcp:
+    build: { context: ., dockerfile: mcp_servers/Dockerfile }
+    command: ["python", "mcp_servers/command_mcp/server.py"]
+    environment:
+      CONFIG_DB_DSN: postgresql://agent:devpass@postgres:5432/platform_config
+    ports: ["8002:8002"]
+    depends_on: [postgres]
+
+  voc-mcp:
+    build: { context: ., dockerfile: mcp_servers/Dockerfile }
+    command: ["python", "mcp_servers/voc_mcp/server.py"]
+    environment:
+      CONFIG_DB_DSN: postgresql://agent:devpass@postgres:5432/platform_config
+    ports: ["8003:8003"]
+    depends_on: [postgres]
+
+  system-mcp:
+    build: { context: ., dockerfile: mcp_servers/Dockerfile }
+    command: ["python", "mcp_servers/system_mcp/server.py"]
+    environment:
+      CONFIG_DB_DSN: postgresql://agent:devpass@postgres:5432/platform_config
+    ports: ["8004:8004"]
+    depends_on: [postgres]
+
+  agent-server:
+    build: { context: ., dockerfile: agent_server/Dockerfile }
+    environment:
+      CONFIG_DB_DSN: postgresql://agent:devpass@postgres:5432/platform_config
+      # LANGFUSE 키 없음 -> 트레이싱 자동 비활성화
+    ports: ["8000:8000"]
+    depends_on: [postgres, mock-vllm, manual-mcp, command-mcp, voc-mcp, system-mcp]
+
+  admin-console:
+    build:
+      context: .
+      dockerfile: dev/Dockerfile.admin-dev
+    environment:
+      CONFIG_DB_DSN: postgresql://agent:devpass@postgres:5432/platform_config
+      ADMIN_USER: admin
+      ADMIN_PASSWORD: admin
+    ports: ["8080:8080"]
+    depends_on: [postgres, mock-vllm]
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    environment:
+      OPENAI_API_BASE_URL: http://agent-server:8000/v1
+      OPENAI_API_KEY: not-needed
+      WEBUI_AUTH: "false"
+    ports: ["3000:8080"]
+    depends_on: [agent-server]

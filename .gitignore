@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+*.db
+admin_console/frontend/vendor/*.js
+.DS_Store
+docling_cache/

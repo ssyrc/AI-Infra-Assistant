@@ -1,0 +1,8 @@
+google-adk==1.22.1
+litellm
+fastapi
+uvicorn[standard]
+pydantic
+langfuse
+openinference-instrumentation-google-adk
+asyncpg
