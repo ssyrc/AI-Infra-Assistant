@@ -202,14 +202,16 @@ MIGRATIONS: list[tuple[str, int, str]] = [
 def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
     """(key, value, description, hot_reload, is_secret, force)"""
     return [
-        ("vllm_llm_base_url", "http://CHANGE-ME:8000/v1", "vLLM LLM 서버 주소 (OpenAI 호환)", True, False, False),
-        ("vllm_llm_model", "qwen3-32b", "vLLM에 서빙 중인 LLM 모델명", True, False, False),
-        ("vllm_embed_base_url", "http://CHANGE-ME:8010/v1", "vLLM 임베딩 서버 주소", True, False, False),
-        ("vllm_embed_model", "bge-m3", "임베딩 모델명", True, False, False),
-        ("embed_dim", "1024", "임베딩 차원(스키마 vector(N)과 일치해야 함)", False, False, False),
-        ("rerank_provider", "tei", "리랭커 종류: tei | vllm | none", True, False, False),
-        ("rerank_base_url", "", "리랭커 서버 주소. 비우면 리랭킹 생략", True, False, False),
-        ("rerank_model", "bge-reranker-v2-m3", "리랭커 모델명", True, False, False),
+        # 주소류 기본값은 .env(환경변수)에서 읽는다 -> 배포 시 주소를 .env 한 곳에서 관리.
+        # force=False라 최초 1회만 주입되고, 이후 관리자 콘솔에서 바꾼 값을 덮어쓰지 않는다.
+        ("vllm_llm_base_url", os.environ.get("VLLM_LLM_BASE_URL", "http://CHANGE-ME:8000/v1"), "vLLM LLM 서버 주소 (OpenAI 호환)", True, False, False),
+        ("vllm_llm_model", os.environ.get("VLLM_LLM_MODEL", "qwen3-32b"), "vLLM에 서빙 중인 LLM 모델명", True, False, False),
+        ("vllm_embed_base_url", os.environ.get("VLLM_EMBED_BASE_URL", "http://CHANGE-ME:8010/v1"), "vLLM 임베딩 서버 주소", True, False, False),
+        ("vllm_embed_model", os.environ.get("VLLM_EMBED_MODEL", "bge-m3"), "임베딩 모델명", True, False, False),
+        ("embed_dim", os.environ.get("EMBED_DIM", "1024"), "임베딩 차원(스키마 vector(N)과 일치해야 함)", False, False, False),
+        ("rerank_provider", os.environ.get("RERANK_PROVIDER", "tei"), "리랭커 종류: tei | vllm | none", True, False, False),
+        ("rerank_base_url", os.environ.get("RERANK_BASE_URL", ""), "리랭커 서버 주소. 비우면 리랭킹 생략", True, False, False),
+        ("rerank_model", os.environ.get("RERANK_MODEL", "bge-reranker-v2-m3"), "리랭커 모델명", True, False, False),
         ("rerank_timeout_seconds", "5", "리랭커 타임아웃(초). 초과 시 RRF 결과로 fallback", True, False, False),
         ("embed_cache_ttl_seconds", "86400", "쿼리 임베딩 캐시 TTL(초)", True, False, False),
         ("clean_policy_version", "1", "정제 정책 버전(캐시 키에 포함)", True, False, False),
@@ -217,7 +219,7 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
         ("search_max_candidates", "100", "리랭킹 후보 상한", True, False, False),
         ("upload_max_mb", "50", "업로드 최대 크기(MB)", True, False, False),
         ("upload_session_ttl_minutes", "60", "업로드 미리보기 세션 유효시간(분)", True, False, False),
-        ("scheduler_api_base_url", "http://s2-scheduler:9000", "System MCP가 호출하는 s2 스케줄러 API 주소", True, False, False),
+        ("scheduler_api_base_url", os.environ.get("SCHEDULER_API_BASE_URL", "http://s2-scheduler:9000"), "System MCP가 호출하는 s2 스케줄러 API 주소", True, False, False),
 
         # credential류: 환경변수 기반, 매 기동 시 갱신(force=True)
         ("manual_db_dsn", dsn("manual_db"), "Manual MCP 전용 DB", False, True, True),

@@ -180,11 +180,26 @@ def _event_text(event) -> str:
     return "".join(p.text or "" for p in event.content.parts)
 
 
+def _caller_from_request(request: Request, req: ChatCompletionRequest) -> tuple[str, str, str]:
+    """호출자 신원을 Open WebUI가 전달하는 헤더에서 읽는다.
+    Open WebUI에서 ENABLE_FORWARD_USER_INFO_HEADERS=true여야 이 헤더들이 온다.
+    body의 user 필드는 Open WebUI가 대개 채우지 않으므로 헤더를 우선한다.
+    (agent-server는 내부망에서 Open WebUI만 접근하므로 이 헤더를 신뢰한다.)"""
+    h = request.headers
+    user_id = (h.get("x-openwebui-user-id")
+               or h.get("x-openwebui-user-email")
+               or req.user
+               or "anonymous")
+    role = h.get("x-openwebui-user-role") or ""   # 예: "admin" | "user"
+    chat_id = h.get("x-openwebui-chat-id") or ""
+    return user_id[:128], role.strip(), chat_id
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(req: ChatCompletionRequest, request: Request):
     convo = _validate(req)
     model_name = state["model_name"]
-    user_id = (req.user or "openwebui-user")[:128]
+    user_id, user_role, chat_id = _caller_from_request(request, req)
     request_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
     history, (_, last_text) = convo[:-1], convo[-1]
@@ -192,14 +207,13 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     new_message = types.Content(role="user", parts=[types.Part(text=last_text)])
 
     # 요청 단위로 에이전트를 만들어 호출자 헤더를 MCP에 전달한다.
-    # System MCP는 X-User-Id로 user_scoped 툴(예: 본인 job 조회)의 user_id를 강제 주입한다.
+    # System MCP는 X-User-Id로 user_scoped 툴(예: 본인 job 조회)의 user_id를 강제 주입하고,
+    # X-User-Roles로 required_roles를 검사한다(Open WebUI 역할이 그대로 전달됨).
     caller_headers = {
         "X-User-Id": user_id,
-        "X-Conversation-Id": session_id,
+        "X-Conversation-Id": chat_id or session_id,
         "X-Request-Id": request_id,
-        # 역할 공급원이 아직 없다(Open WebUI는 사용자 id만 제공). 역할 제한을 건 툴은
-        # 이 값이 빌 때 실행 거부된다. 역할 연동 시 여기에 실제 역할을 채운다.
-        "X-User-Roles": "",
+        "X-User-Roles": user_role,
     }
     agent, _model, toolsets = await build_agent(caller_headers)
     runner = Runner(agent=agent, app_name=APP_NAME, session_service=state["session_service"])
