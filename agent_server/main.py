@@ -33,6 +33,14 @@ from google.genai import types
 
 import httpx
 
+from contextlib import nullcontext
+
+try:
+    # 트레이스에 user_id/session_id를 붙이는 openinference 컨텍스트(있을 때만 사용).
+    from openinference.instrumentation import using_attributes as _using_attributes
+except Exception:  # noqa: BLE001
+    _using_attributes = None
+
 from config_store import get_config
 from db import close_http_client
 from memory_store import (
@@ -187,6 +195,16 @@ def _event_text(event) -> str:
     return "".join(p.text or "" for p in event.content.parts)
 
 
+def _trace_ctx(user_id: str, session_id: str | None, source: str | None):
+    """Langfuse 트레이스에 user_id/session_id(대화)를 붙여 사용자별로 묶이게 한다.
+    openinference가 없거나 트레이싱이 꺼져 있으면 무해한 no-op이다."""
+    if _using_attributes is None:
+        return nullcontext()
+    md = {"source": source} if source else None
+    return _using_attributes(user_id=user_id or "anonymous",
+                             session_id=session_id or "", metadata=md)
+
+
 def _to_os_identity(raw: str) -> str:
     """OS 계정 신원으로 정규화한다.
     - 이메일 형태(user@corp.com)면 로컬파트(@ 앞)만 사용한다 -> 리눅스 계정명으로 매핑.
@@ -247,10 +265,11 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     if not req.stream:
         final_text = ""
         try:
-            async for event in runner.run_async(user_id=user_id, session_id=session_id,
-                                                new_message=new_message):
-                if event.is_final_response():
-                    final_text = _event_text(event) or final_text
+            with _trace_ctx(user_id, conv, "openwebui"):
+                async for event in runner.run_async(user_id=user_id, session_id=session_id,
+                                                    new_message=new_message):
+                    if event.is_final_response():
+                        final_text = _event_text(event) or final_text
         finally:
             await _cleanup_session(user_id, session_id)
             await _close_toolsets(toolsets)
@@ -266,24 +285,25 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     async def event_stream():
         sent = ""   # 지금까지 클라이언트로 보낸 텍스트
         try:
-            async for event in runner.run_async(user_id=user_id, session_id=session_id,
-                                                new_message=new_message):
-                if await request.is_disconnected():
-                    print("[agent] 클라이언트 연결 종료, 스트리밍 중단")
-                    break
+            with _trace_ctx(user_id, conv, "openwebui"):
+                async for event in runner.run_async(user_id=user_id, session_id=session_id,
+                                                    new_message=new_message):
+                    if await request.is_disconnected():
+                        print("[agent] 클라이언트 연결 종료, 스트리밍 중단")
+                        break
 
-                text = _event_text(event)
-                if not text:
-                    continue
-                # ADK 이벤트는 누적 텍스트로 올 수 있다 -> 증가분만 전송
-                if text.startswith(sent):
-                    delta = text[len(sent):]
-                    sent = text
-                else:
-                    delta = text
-                    sent += text
-                if delta:
-                    yield _sse(request_id, model_name, delta)
+                    text = _event_text(event)
+                    if not text:
+                        continue
+                    # ADK 이벤트는 누적 텍스트로 올 수 있다 -> 증가분만 전송
+                    if text.startswith(sent):
+                        delta = text[len(sent):]
+                        sent = text
+                    else:
+                        delta = text
+                        sent += text
+                    if delta:
+                        yield _sse(request_id, model_name, delta)
 
             yield _sse(request_id, model_name, "", finish=True)
             yield "data: [DONE]\n\n"
@@ -425,10 +445,11 @@ async def agent_query(body: AgentQueryIn, request: Request):
     if not body.stream:
         final_text = ""
         try:
-            async for event in runner.run_async(user_id=user_id, session_id=session_id,
-                                                new_message=new_message):
-                if event.is_final_response():
-                    final_text = _event_text(event) or final_text
+            with _trace_ctx(user_id, conv, body.source or "agent-api"):
+                async for event in runner.run_async(user_id=user_id, session_id=session_id,
+                                                    new_message=new_message):
+                    if event.is_final_response():
+                        final_text = _event_text(event) or final_text
         finally:
             await _cleanup_session(user_id, session_id)
             await _close_toolsets(toolsets)
@@ -439,21 +460,22 @@ async def agent_query(body: AgentQueryIn, request: Request):
     async def event_stream():
         sent = ""
         try:
-            async for event in runner.run_async(user_id=user_id, session_id=session_id,
-                                                new_message=new_message):
-                if await request.is_disconnected():
-                    break
-                text = _event_text(event)
-                if not text:
-                    continue
-                if text.startswith(sent):
-                    delta = text[len(sent):]
-                    sent = text
-                else:
-                    delta = text
-                    sent += text
-                if delta:
-                    yield _sse(request_id, model_name, delta)
+            with _trace_ctx(user_id, conv, body.source or "agent-api"):
+                async for event in runner.run_async(user_id=user_id, session_id=session_id,
+                                                    new_message=new_message):
+                    if await request.is_disconnected():
+                        break
+                    text = _event_text(event)
+                    if not text:
+                        continue
+                    if text.startswith(sent):
+                        delta = text[len(sent):]
+                        sent = text
+                    else:
+                        delta = text
+                        sent += text
+                    if delta:
+                        yield _sse(request_id, model_name, delta)
             yield _sse(request_id, model_name, "", finish=True)
             yield "data: [DONE]\n\n"
         except asyncio.CancelledError:
