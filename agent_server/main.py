@@ -17,6 +17,7 @@ import time
 import uuid
 import json
 import asyncio
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../shared"))
@@ -225,16 +226,22 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     session_id = await _create_session(user_id, history)
     new_message = types.Content(role="user", parts=[types.Part(text=last_text)])
 
+    # Open WebUI 경로도 '우리' 장기 메모리를 user_id 단위로 공유한다(외부 agent와 동일 저장소).
+    # 대화 이력은 이미 messages에 있으므로 최근 턴은 주입하지 않고, 증류된 장기기억만 주입한다.
+    conv = chat_id or _auto_conv(user_id)
+    mem_enabled = _mem_on(await get_config("memory_enabled", "true"))
+    extra_instruction = await _longterm_memory_block(user_id, conv, last_text) if mem_enabled else None
+
     # 요청 단위로 에이전트를 만들어 호출자 헤더를 MCP에 전달한다.
     # System MCP는 X-User-Id로 user_scoped 툴(예: 본인 job 조회)의 user_id를 강제 주입하고,
     # X-User-Roles로 required_roles를 검사한다(Open WebUI 역할이 그대로 전달됨).
     caller_headers = {
         "X-User-Id": user_id,
-        "X-Conversation-Id": chat_id or session_id,
+        "X-Conversation-Id": conv,
         "X-Request-Id": request_id,
         "X-User-Roles": user_role,
     }
-    agent, _model, toolsets = await build_agent(caller_headers)
+    agent, _model, toolsets = await build_agent(caller_headers, extra_instruction)
     runner = Runner(agent=agent, app_name=APP_NAME, session_service=state["session_service"])
 
     if not req.stream:
@@ -247,6 +254,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         finally:
             await _cleanup_session(user_id, session_id)
             await _close_toolsets(toolsets)
+        _bg_persist(user_id, conv, "openwebui", last_text, final_text, mem_enabled)
         return JSONResponse({
             "id": request_id, "object": "chat.completion",
             "created": int(time.time()), "model": model_name,
@@ -289,11 +297,30 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         finally:
             await _cleanup_session(user_id, session_id)
             await _close_toolsets(toolsets)
+            _bg_persist(user_id, conv, "openwebui", last_text, sent, mem_enabled)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 # ================================================================= Agent-to-agent API + 장기 메모리
+def _mem_on(raw: str | None) -> bool:
+    return (raw or "true").strip().lower() == "true"
+
+
+def _auto_conv(user_id: str) -> str:
+    """conversation_id가 없을 때 시간(UTC 일 단위)으로 스레드를 만든다.
+    같은 날 같은 사용자의 요청은 한 대화로 이어져 최근 턴·요약이 동작한다."""
+    return f"auto-{user_id}-{datetime.now(timezone.utc):%Y%m%d}"
+
+
+async def _longterm_memory_block(user_id: str, conversation_id: str | None, query: str):
+    """증류된 장기기억만 시스템 지시문 블록으로 반환한다(최근 턴은 주입하지 않음)."""
+    try:
+        tk = int(await get_config("memory_top_k", "5"))
+    except (TypeError, ValueError):
+        tk = 5
+    ctx = await load_context(user_id, conversation_id, query, 0, tk)
+    return format_memory_block(ctx["longterm"]) or None
 async def _summarize_turns(turns: list[dict]) -> list[str]:
     """대화 턴들에서 '이 사용자에 대해 기억할' 사실/선호를 vLLM으로 뽑아 한 줄씩 반환한다."""
     base = await get_config("vllm_llm_base_url")
@@ -347,12 +374,13 @@ async def _memory_context(user_id: str, conversation_id: str | None, query: str)
 
 
 def _bg_persist(user_id, conversation_id, source, message, answer, mem_enabled):
-    """응답 후 백그라운드로 턴 저장 + (임계 도달 시) 요약 승격."""
+    """응답 후 백그라운드로 턴 저장 + (임계 도달 시) 요약 승격.
+    메모리가 꺼져 있으면(use_memory=false 또는 memory_enabled=false) 아무것도 저장하지 않는다."""
     async def _run():
         try:
             await record_turns(user_id, conversation_id, source,
                                [("user", message), ("assistant", answer)])
-            if mem_enabled and conversation_id:
+            if conversation_id:
                 try:
                     every = int(await get_config("memory_summarize_every", "12"))
                     ttl = int(await get_config("memory_ttl_days", "180"))
@@ -361,7 +389,7 @@ def _bg_persist(user_id, conversation_id, source, message, answer, mem_enabled):
                 await maybe_summarize(user_id, conversation_id, _summarize_turns, every, ttl)
         except Exception as e:  # noqa: BLE001
             print(f"[agent] 메모리 저장/요약 실패(무시): {e}")
-    if answer:
+    if answer and mem_enabled:
         asyncio.create_task(_run())
 
 
@@ -374,11 +402,11 @@ async def agent_query(body: AgentQueryIn, request: Request):
     user_id = _to_os_identity(body.user_id)[:128] or "anonymous"
     roles = ",".join([r.strip() for r in (body.roles or []) if r and r.strip()])
     request_id = f"agentq-{uuid.uuid4().hex[:12]}"
-    conv = (body.conversation_id or "").strip() or None
     model_name = state["model_name"]
 
-    mem_enabled = body.use_memory and (
-        (await get_config("memory_enabled", "true")) or "true").lower() == "true"
+    mem_enabled = body.use_memory and _mem_on(await get_config("memory_enabled", "true"))
+    # conversation_id가 없으면 시간(일 단위)으로 자동 부여 -> 같은 날 같은 사용자는 이어짐.
+    conv = (body.conversation_id or "").strip() or (_auto_conv(user_id) if mem_enabled else None)
     history, extra_instruction = ([], None)
     if mem_enabled:
         history, extra_instruction = await _memory_context(user_id, conv, body.message)
