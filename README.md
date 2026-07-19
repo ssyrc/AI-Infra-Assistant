@@ -14,7 +14,7 @@ Google ADK 에이전트가 4개의 MCP 서버(매뉴얼 RAG, 커맨드 카탈로
               ▼               ▼               ▼               ▼
           Manual MCP     Command MCP       VOC MCP        System MCP
           (하이브리드    (카탈로그검색+    (하이브리드    (리눅스 read-only
-           RAG 검색)      본인 job 실행)    이력 검색)      명령, 본인권한)
+           RAG 검색)      본인 job 실행)    이력 검색)      ssh 원격, 본인권한)
               │               │               │               │
           manual_db       command_db       voc_db          system_db      ← MCP별 분리된 DB
               ▲
@@ -60,16 +60,17 @@ Google ADK 에이전트가 4개의 MCP 서버(매뉴얼 RAG, 커맨드 카탈로
 - **하이브리드 검색**: Manual/VOC/Command MCP는 벡터 검색과 전문검색(tsvector)을 RRF로 융합한다.
   의미 질문과 정확한 키워드/에러코드 질문 모두에 강하다. 커맨드도 정확한 이름을 몰라도
   "무엇을 하고 싶은지" 설명형으로 물으면 의미상 가까운 커맨드를 찾는다.
-- **System MCP 리눅스 실행 안전성**: `whitelist.py`에 등록된 read-only 명령만, 타입이 정해진
-  파라미터로만 노출된다(원시 셸/플래그를 LLM에 주지 않음). 실행은 **셸 없이 argv**로만 하므로
-  `;`·`|`·`$()` 같은 명령 주입이 불가능하고, `find`의 `-exec/-delete` 등 실행·삭제 프레디킷은
-  금지된다. 실행 직전 **호출자(user_id) 권한으로 setuid 강등**하며(그래서 남의 권한으로 못 봄),
-  root가 아니면 강등 실패로 실행이 중단된다. 타임아웃·출력 상한이 걸리고 `rm` 등 파괴적 명령은
-  아예 등록하지 않는다. 이 툴들은 **기본 비활성(disabled)**이며, 아래 인프라 요건이 갖춰진 뒤
-  관리자 콘솔에서 켠다.
-  - 인프라 요건: system-mcp가 **root로, 호스트의 사용자 계정·파일시스템**에 접근할 수 있어야
-    한다(베어메탈 또는 호스트 네임스페이스 공유 + LDAP/SSSD). 일반 컨테이너에는 직원 OS
-    계정이 없어 `pwd` 조회가 실패하고 실행이 거부된다.
+- **System MCP 원격 실행 안전성**: `whitelist.py`에 등록된 read-only 명령만, 타입이 정해진
+  파라미터(대상 `host` + 인자)로만 노출된다(원시 셸/플래그를 LLM에 주지 않음). 실행은 사용자가
+  지정한 서버로 **ssh(root) 접속 후 `su - <user_id>`로 강등**해 수행한다(그래서 남의 권한으로 못 봄).
+  - `host`는 **agent 호스트의 `/etc/hosts`에 등록된 서버만** 허용된다(미등록 이름 거부 = 접근 화이트리스트).
+  - 원격 명령은 **shlex로 이중 인용**(root 셸 + 사용자 셸)하고 `user_id`는 리눅스 계정명 정규식으로
+    검증하므로 `;`·`|`·`$()`·백틱 주입이 불가능하다. `find`의 `-exec/-delete` 등은 금지, 타임아웃·
+    출력 상한이 걸리며 `rm` 등 파괴적 명령은 등록하지 않는다.
+  - 예: "hgpu8002 서버 GPU가 이상해요" → `gpu_status(host='hgpu8002')` → /etc/hosts에서 IP 조회 →
+    `ssh root@… → su - <user> → nvidia-smi` → 결과로 판단.
+  - **기본 비활성(disabled)**. 켜려면 (1) 대상 서버들에 root ssh 가능한 키가 컨테이너에 마운트되고,
+    (2) 대상 IP가 `/etc/hosts`에 매핑되어 있어야 한다(compose 참고). 그 뒤 관리자 콘솔 System 탭에서 켠다.
   `functools.wraps`로 원본 시그니처를 보존해 MCP input schema에 실제 파라미터가 정확히
   노출된다. 실행 가능 여부(enabled)와 필요 역할(required_roles)은 콘솔에서 재배포 없이
   편집되고 실행 시점에 실시간 반영된다(설명 오버라이드는 MCP 재시작 시 반영). 모든 실행은
@@ -131,7 +132,7 @@ docker compose up -d --build
 사내 vLLM 서버 주소로 바꿉니다:
 - `vllm_llm_base_url`, `vllm_llm_model` — LLM 서빙 서버
 - `vllm_embed_base_url`, `vllm_embed_model` — 임베딩 서버
-- `scheduler_api_base_url` — Command MCP가 호출할 s2 스케줄러 API
+- `scheduler_login_host` — Command MCP가 job 조회 시 ssh할 로그인 서버(/etc/hosts 등록명, 예: login05)
 
 vLLM 주소는 즉시 반영됩니다. (DB DSN을 바꾼 경우 해당 서비스만 `docker compose restart`)
 

@@ -43,7 +43,7 @@ services:
       RERANK_PROVIDER: ${RERANK_PROVIDER:-tei}
       RERANK_BASE_URL: ${RERANK_BASE_URL:-}
       RERANK_MODEL: ${RERANK_MODEL:-bge-reranker-v2-m3}
-      SCHEDULER_API_BASE_URL: ${SCHEDULER_API_BASE_URL:-http://s2-scheduler:9000}
+      SCHEDULER_LOGIN_HOST: ${SCHEDULER_LOGIN_HOST:-login05}
     depends_on:
       postgres:
         condition: service_healthy
@@ -67,6 +67,14 @@ services:
     environment:
       CONFIG_DB_DSN: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD}@postgres:5432/platform_config
       MCP_PORT: "8002"
+      # job 조회는 로그인 서버로 ssh(root) 후 `su - <user>`로 phd info 실행 -> 아래 마운트 필요.
+      HOSTS_FILE: /etc/hosts.targets
+      SSH_KEY: /root/.ssh/id_ed25519
+      SSH_ROOT_USER: root
+    volumes:
+      # 대상 서버 IP 매핑(호스트의 /etc/hosts). ssh 개인키(대상 서버에 root 신뢰 등록된 키).
+      - /etc/hosts:/etc/hosts.targets:ro
+      - ${SSH_KEY_PATH:-./secrets/id_ed25519}:/root/.ssh/id_ed25519:ro
     expose: ["8002"]
     depends_on:
       db-init:
@@ -91,20 +99,22 @@ services:
     environment:
       CONFIG_DB_DSN: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD}@postgres:5432/platform_config
       MCP_PORT: "8004"
+      # 리눅스 실행 툴은 대상 서버로 ssh(root) 후 `su - <user>`로 명령을 실행한다.
+      HOSTS_FILE: /etc/hosts.targets      # 대상 서버 IP 매핑(호스트 /etc/hosts)
+      SSH_KEY: /root/.ssh/id_ed25519      # 대상 서버에 root로 접속 가능한 개인키
+      SSH_ROOT_USER: root
+      SSH_CONNECT_TIMEOUT: "8"
+    volumes:
+      - /etc/hosts:/etc/hosts.targets:ro
+      - ${SSH_KEY_PATH:-./secrets/id_ed25519}:/root/.ssh/id_ed25519:ro
     expose: ["8004"]
     depends_on:
       db-init:
         condition: service_completed_successfully
     restart: unless-stopped
-    # 리눅스 실행 툴(whitelist.py)은 기본 비활성이다. 실제로 켜려면 이 컨테이너가 호스트의
-    # 사용자 계정으로 setuid할 수 있어야 한다(root + 호스트 사용자/파일시스템 접근). 그 경우
-    # 아래 같은 설정이 추가로 필요하다(환경에 맞게 검토 후 적용):
-    #   user: "0:0"            # root로 실행(setuid 권한)
-    #   pid: "host"            # 호스트 프로세스/시스템 정보 조회 시
-    #   volumes:
-    #     - /etc/passwd:/etc/passwd:ro
-    #     - /etc/group:/etc/group:ro
-    #   # 또는 LDAP/SSSD로 호스트 계정 해석. 조회 대상 파일시스템도 마운트 필요.
+    # 참고: 실행 툴(whitelist.py)은 기본 비활성이다. 대상 서버에 ssh 키가 등록되고
+    # /etc/hosts에 서버가 매핑된 뒤, 관리자 콘솔 System 탭에서 켠다. 대상 서버에는 runuser/su가
+    # 있고 root가 해당 user로 강등 가능해야 한다(리눅스 표준).
 
   agent-server:
     build: { context: ., dockerfile: agent_server/Dockerfile }
