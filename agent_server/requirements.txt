@@ -1,4 +1,5 @@
 google-adk==1.22.1
+mcp>=1.28.1,<2.0.0
 litellm==1.61.20
 fastapi==0.115.8
 uvicorn[standard]==0.34.0

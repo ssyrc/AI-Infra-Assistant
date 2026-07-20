@@ -16,8 +16,8 @@ from config_store import get_config  # noqa: E402
 from mcp_caller import (  # noqa: E402
     get_caller, CallerContextMiddleware, load_overrides_sync, tool_description, build_wrapped,
 )
+from ssh_exec import run_ssh_as_user  # noqa: E402
 
-import httpx  # noqa: E402
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("command-mcp", stateless_http=True)
@@ -144,42 +144,24 @@ async def get_command_detail(name: str) -> dict | None:
 
 # ------------------------------------------------------------------ 사용자 스코프 실행
 async def get_scheduler_job_info(user_id: str) -> dict:
-    """현재 사용자 '본인'의 스케줄러 job 정보를 조회한다.
-    user_id는 호출자 신원(X-User-Id)에서 강제 주입되므로 남의 job을 조회할 수 없다."""
-    base_url = await get_config("scheduler_api_base_url")
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(f"{base_url}/jobs", params={"user_id": user_id})
-        resp.raise_for_status()
-        return resp.json()
-
-
-async def get_scheduler_queue_status() -> dict:
-    """s2 스케줄러 큐의 전체 대기/실행 상태를 조회한다(사용자별 데이터 아님)."""
-    base_url = await get_config("scheduler_api_base_url")
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(f"{base_url}/queue/status")
-        resp.raise_for_status()
-        return resp.json()
+    """현재 사용자 '본인'의 스케줄러 job 상태를 조회한다.
+    로그인 서버(scheduler_login_host)에 ssh(root) 후 `su - <user_id>`로 강등해
+    `phd info -u <user_id>`를 실행한다. user_id는 호출자 신원에서 강제 주입되므로
+    남의 job을 조회할 수 없다. 결과에 실행한 커맨드(command)도 함께 반환한다."""
+    login_host = await get_config("scheduler_login_host", "login05")
+    return await run_ssh_as_user(login_host, user_id, ["phd", "info", "-u", user_id])
 
 
 EXEC_WHITELIST = {
     "get_scheduler_job_info": {
         "handler": get_scheduler_job_info,
         "description": (
-            "현재 로그인한 사용자 '본인'의 스케줄러 job 상태/이력을 실시간 조회한다. "
-            "사용자가 '내 job', '내 작업 상태'를 물을 때 사용한다. 대상 사용자는 시스템이 "
-            "본인으로 고정하므로 특정 사용자 id를 지정하지 않는다(남의 job은 조회 불가). "
-            "커맨드 '사용법'이 궁금한 것이면 이 툴 대신 search_commands를 쓴다."
+            "현재 로그인한 사용자 '본인'의 스케줄러 job 상태를 조회한다(로그인 서버에서 "
+            "`phd info -u <본인>` 실행). 사용자가 '내 job', '내 작업 상태'를 물을 때 사용한다. "
+            "대상 사용자는 시스템이 본인으로 고정하므로 사용자 id를 지정하지 않는다(남의 job 불가). "
+            "커맨드 '사용법'만 궁금하면 이 툴 대신 search_commands를 쓴다."
         ),
         "enabled": True, "required_roles": [], "user_scoped": True, "scope_param": "user_id",
-    },
-    "get_scheduler_queue_status": {
-        "handler": get_scheduler_queue_status,
-        "description": (
-            "스케줄러 큐 '전체'의 대기/실행 상태(개수 등)를 조회한다. 특정 사용자 데이터가 "
-            "아니라 시스템 전반 현황이다. 본인 job은 get_scheduler_job_info를 쓴다."
-        ),
-        "enabled": True, "required_roles": [], "user_scoped": False,
     },
 }
 

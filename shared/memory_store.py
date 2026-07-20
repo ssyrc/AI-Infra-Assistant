@@ -34,7 +34,7 @@ async def load_context(user_id: str, conversation_id: str | None, query: str,
     pool = await get_pool(_DSN)
 
     recent = []
-    if conversation_id:
+    if conversation_id and recent_turns > 0:
         rows = await pool.fetch(
             """
             SELECT role, content FROM (
@@ -134,13 +134,15 @@ async def maybe_summarize(user_id: str, conversation_id: str | None, summarizer,
         return 0
 
     # 아직 요약 안 한 턴(id > summarized_upto)을 가져온다.
+    # 반드시 user_id로도 스코프한다: 외부 호출자가 같은 conversation_id를 서로 다른 사용자에게
+    # 재사용해도 남의 턴이 이 사용자의 장기기억으로 섞이지 않게 한다(교차오염 방지).
     pending = await pool.fetch(
         """
         SELECT id, role, content FROM memory_turns
-        WHERE conversation_id = $1 AND id > $2
+        WHERE conversation_id = $1 AND user_id = $3 AND id > $2
         ORDER BY id ASC
         """,
-        conversation_id, state["summarized_upto"],
+        conversation_id, state["summarized_upto"], user_id,
     )
     if len(pending) < summarize_every:
         return 0

@@ -287,7 +287,7 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
         ("search_max_candidates", "100", "리랭킹 후보 상한", True, False, False),
         ("upload_max_mb", "50", "업로드 최대 크기(MB)", True, False, False),
         ("upload_session_ttl_minutes", "60", "업로드 미리보기 세션 유효시간(분)", True, False, False),
-        ("scheduler_api_base_url", os.environ.get("SCHEDULER_API_BASE_URL", "http://s2-scheduler:9000"), "Command MCP가 호출하는 s2 스케줄러 API 주소", True, False, False),
+        ("scheduler_login_host", os.environ.get("SCHEDULER_LOGIN_HOST", "login05"), "Command MCP가 job 조회 시 ssh할 로그인 서버(/etc/hosts 등록명)", True, False, False),
 
         # 장기 메모리(사용자별)
         ("memory_enabled", "true", "장기 메모리 사용 여부(true/false)", True, False, False),
@@ -315,6 +315,9 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
          "Agent Server가 연결할 VOC MCP 주소", False, False, False),
         ("system_mcp_url", os.environ.get("SYSTEM_MCP_URL", "http://system-mcp:8004/mcp"),
          "Agent Server가 연결할 System MCP 주소", False, False, False),
+        ("service_hub_mcp_url", os.environ.get("SERVICE_HUB_MCP_URL", ""),
+         "유사 VOC 조회용 Service Hub MCP 주소(비우면 similar_voc 생략). 방화벽 개통 후 설정", True, False, False),
+        ("voc_similar_top_k", "3", "VOC 답변에 붙일 유사 VOC 최대 개수(0이면 비활성)", True, False, False),
 
         ("agent_system_instruction", AGENT_INSTRUCTION, "ADK 루트 에이전트 system instruction", False, False, False),
     ]
@@ -335,8 +338,10 @@ AGENT_INSTRUCTION = """당신은 사내 시스템 운영/사용을 돕는 한국
 - 사용자 '본인'의 스케줄러 job 상태 → command.get_scheduler_job_info
   (대상 사용자는 시스템이 본인으로 고정하니, 다른 사용자 id를 지정하지 않습니다)
 - 스케줄러 큐 '전체' 현황 → command.get_scheduler_queue_status
-- 서버 파일 탐색·디스크·시스템 정보(본인 권한) → system의 read-only 툴
-  (list_dir, find_files, disk_free, disk_usage, read_file_head, system_info)
+- 특정 '서버'의 GPU·디스크·파일·시스템 정보(본인 권한) → system의 read-only 툴
+  (gpu_status, list_dir, find_files, disk_free, disk_usage, read_file_head, system_info).
+  이 툴들은 대상 서버 이름 host가 필요하다(예: "hgpu8002 GPU 이상" → gpu_status(host='hgpu8002')).
+  사용자가 서버 이름을 안 밝히면 어느 서버인지 되묻는다.
 - 매뉴얼과 VOC가 모두 도움이 될 것 같으면 둘 다 조회해 종합합니다.
 
 ## 하지 말 것
