@@ -139,3 +139,90 @@ async def main():
         print(result)
 
 asyncio.run(main())
+
+
+4. get_voc_data_by_id
+# parameters
+파라미터	타입	필수	설명
+voc_id	string	✅	VOC ID
+
+# 응답 예제
+{
+  "success": true,
+  "data": {
+    "voc_id": "2026050811395386418",
+    "title": "서비스허브 로그인 오류",
+    "content": "상세 내용...",
+    "system_name": "MOS"
+  }
+}
+
+# 사용 예제
+## Next.js
+const result = await client.callTool({
+  name: 'get_voc_data_by_id',
+  arguments: {
+    voc_id: '2026050811395386418'
+  }
+});
+
+## Python
+import asyncio
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+async def main():
+    async with streamablehttp_client("http://innodev--etl-prod.cdep.samsungds.net/mcp") as (read, write, _):
+        async with ClientSession(read, write) as session:
+        await session.connect("http://innodev--etl-prod.cdep.samsungds.net/mcp")
+        result = await session.call_tool(
+            "get_voc_data_by_id",
+            {"voc_id": "2026050811395386418"}
+        )
+        print(result)
+
+asyncio.run(main())
+
+
+5. get_metadata_hierarchy
+
+# parameters
+파라미터	타입	필수	설명
+system_id	string	❌	시스템 ID
+
+# 응답 예제
+{
+  "success": true,
+  "data": {
+    "hierarchy": {
+      "system": "MOS",
+      "sub_systems": ["SUB1", "SUB2"]
+    }
+  }
+}
+
+# 사용 예제
+## Next.js
+const result = await client.callTool({
+  name: 'get_metadata_hierarchy',
+  arguments: {
+    system_id: 'SSTM02300'
+  }
+});
+
+## Python
+import asyncio
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+async def main():
+    async with streamablehttp_client("http://innodev--etl-prod.cdep.samsungds.net/mcp") as (read, write, _):
+        async with ClientSession(read, write) as session:
+        await session.connect("http://innodev--etl-prod.cdep.samsungds.net/mcp")
+        result = await session.call_tool(
+            "get_metadata_hierarchy",
+            {"system_id": "SSTM02300"}
+        )
+        print(result)
+
+asyncio.run(main())
