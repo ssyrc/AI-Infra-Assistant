@@ -1,6 +1,161 @@
-[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml up -d --build
-[+] up 3/3
- ! Image postgres:16-alpine                   Interrupted                                                                                          25.0s
- ✘ Image pgvector/pgvector:pg16               Error Get "https://registry-1.docker.io/v2/": net/http: request canceled while waiting for ...       25.0s
- ! Image ghcr.io/open-webui/open-webui:v0.6.5 Interrupted                                                                                          25.0s
-Error response from daemon: Get "https://registry-1.docker.io/v2/": net/http: request canceled while waiting for connection (Client.Timeout exceeded while awaiting headers)
+[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml up -d --build --no-cache
+unknown flag: --no-cache
+[root@24-gp19 AI-Infra-Assistant]# ^C
+[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml build --no-cache && \
+>   docker compose -f docker-compose.dev.yml up -d
+[+] Building 1.7s (32/77)
+ => [internal] load local bake definitions                                                                                                         0.0s
+ => => reading from stdin 5.22kB                                                                                                                   0.0s
+ => [command-mcp internal] load build definition from Dockerfile                                                                                   0.0s
+ => => transferring dockerfile: 725B                                                                                                               0.0s
+ => [manual-mcp internal] load build definition from Dockerfile                                                                                    0.0s
+ => => transferring dockerfile: 725B                                                                                                               0.0s
+ => [db-init internal] load build definition from Dockerfile.db-init                                                                               0.0s
+ => => transferring dockerfile: 292B                                                                                                               0.0s
+ => [system-mcp internal] load build definition from Dockerfile                                                                                    0.0s
+ => => transferring dockerfile: 725B                                                                                                               0.0s
+ => [mock-vllm internal] load build definition from Dockerfile.mock                                                                                0.0s
+ => => transferring dockerfile: 356B                                                                                                               0.0s
+ => [agent-server internal] load build definition from Dockerfile                                                                                  0.0s
+ => => transferring dockerfile: 463B                                                                                                               0.0s
+ => [voc-mcp internal] load build definition from Dockerfile                                                                                       0.0s
+ => => transferring dockerfile: 725B                                                                                                               0.0s
+ => [admin-console internal] load build definition from Dockerfile.admin-dev                                                                       0.0s
+ => => transferring dockerfile: 542B                                                                                                               0.0s
+ => [db-init internal] load metadata for repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.12-slim                               0.0s
+ => [admin-console internal] load .dockerignore                                                                                                    0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [manual-mcp internal] load .dockerignore                                                                                                       0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [command-mcp internal] load .dockerignore                                                                                                      0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [mock-vllm internal] load .dockerignore                                                                                                        0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [agent-server internal] load .dockerignore                                                                                                     0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [system-mcp internal] load .dockerignore                                                                                                       0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [voc-mcp internal] load .dockerignore                                                                                                          0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [db-init internal] load .dockerignore                                                                                                          0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [mock-vllm 1/8] FROM repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.12-slim                                               0.0s
+ => [admin-console internal] load build context                                                                                                    0.0s
+ => => transferring context: 107.12kB                                                                                                              0.0s
+ => CACHED [mock-vllm 2/8] WORKDIR /app                                                                                                            0.0s
+ => [voc-mcp internal] load build context                                                                                                          0.0s
+ => => transferring context: 35.00kB                                                                                                               0.0s
+ => [system-mcp internal] load build context                                                                                                       0.0s
+ => => transferring context: 2.02kB                                                                                                                0.0s
+ => [manual-mcp internal] load build context                                                                                                       0.0s
+ => => transferring context: 95.20kB                                                                                                               0.0s
+ => [agent-server internal] load build context                                                                                                     0.0s
+ => => transferring context: 74.06kB                                                                                                               0.0s
+ => [command-mcp internal] load build context                                                                                                      0.0s
+ => => transferring context: 2.02kB                                                                                                                0.0s
+ => [db-init internal] load build context                                                                                                          0.0s
+ => => transferring context: 97B                                                                                                                   0.0s
+ => [mock-vllm internal] load build context                                                                                                        0.0s
+ => => transferring context: 3.51kB                                                                                                                0.0s
+ => [admin-console 3/8] COPY admin_console/backend/requirements.txt admin_console/backend/requirements.txt                                         0.0s
+ => [db-init 3/9] COPY pip.conf /etc/pip.conf                                                                                                      0.0s
+ => CANCELED [admin-console 4/8] RUN pip install --no-cache-dir -r admin_console/backend/requirements.txt                                          1.5s
+ => ERROR [command-mcp 4/9] RUN pip install --no-cache-dir "pip<23"                                                                                1.4s
+------
+ > [command-mcp 4/9] RUN pip install --no-cache-dir "pip<23":
+1.169 Looking in indexes: http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
+1.207 WARNING: There was an error checking the latest version of pip.
+1.210 ERROR: Exception:
+1.210 Traceback (most recent call last):
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/base_command.py", line 106, in _run_wrapper
+1.210     status = _inner_run()
+1.210              ^^^^^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/base_command.py", line 97, in _inner_run
+1.210     return self.run(options, args)
+1.210            ^^^^^^^^^^^^^^^^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 67, in wrapper
+1.210     return func(self, options, args)
+1.210            ^^^^^^^^^^^^^^^^^^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_internal/commands/install.py", line 386, in run
+1.210     requirement_set = resolver.resolve(
+1.210                       ^^^^^^^^^^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_internal/resolution/resolvelib/resolver.py", line 95, in resolve
+1.210     result = self._result = resolver.resolve(
+1.210                             ^^^^^^^^^^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_vendor/resolvelib/resolvers.py", line 546, in resolve
+1.210     state = resolution.resolve(requirements, max_rounds=max_rounds)
+1.210             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_vendor/resolvelib/resolvers.py", line 397, in resolve
+1.210     self._add_to_criteria(self.state.criteria, r, parent=None)
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_vendor/resolvelib/resolvers.py", line 173, in _add_to_criteria
+1.210     if not criterion.candidates:
+1.210            ^^^^^^^^^^^^^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_vendor/resolvelib/structs.py", line 156, in __bool__
+1.210     return bool(self._sequence)
+1.210            ^^^^^^^^^^^^^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_internal/resolution/resolvelib/found_candidates.py", line 174, in __bool__
+1.210     return any(self)
+1.210            ^^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_internal/resolution/resolvelib/found_candidates.py", line 162, in <genexpr>
+1.210     return (c for c in iterator if id(c) not in self._incompatible_ids)
+1.210                        ^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_internal/resolution/resolvelib/found_candidates.py", line 49, in _iter_built
+1.210     for version, func in infos:
+1.210                          ^^^^^
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_internal/resolution/resolvelib/factory.py", line 307, in iter_index_candidate_infos
+1.210     result = self._finder.find_best_candidate(
+1.210              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_internal/index/package_finder.py", line 892, in find_best_candidate
+1.210     candidates = self.find_all_candidates(project_name)
+1.210                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_internal/index/package_finder.py", line 833, in find_all_candidates
+1.210     page_candidates = list(page_candidates_it)
+1.210                       ^^^^^^^^^^^^^^^^^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_internal/index/sources.py", line 193, in page_candidates
+1.210     yield from self._candidates_from_page(self._link)
+1.210                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_internal/index/package_finder.py", line 797, in process_project_url
+1.210     page_links = list(parse_links(index_response))
+1.210                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_internal/index/collector.py", line 218, in wrapper_wrapper
+1.210     return list(fn(page))
+1.210            ^^^^^^^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/site-packages/pip/_internal/index/collector.py", line 231, in parse_links
+1.210     data = json.loads(page.content)
+1.210            ^^^^^^^^^^^^^^^^^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/json/__init__.py", line 346, in loads
+1.210     return _default_decoder.decode(s)
+1.210            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/json/decoder.py", line 338, in decode
+1.210     obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+1.210                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1.210   File "/usr/local/lib/python3.12/json/decoder.py", line 356, in raw_decode
+1.210     raise JSONDecodeError("Expecting value", s, err.value) from None
+1.210 json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+------
+[+] build 0/8
+ ⠙ Image ai-infra-assistant-system-mcp    Building                                                                                                  1.7s
+ ⠙ Image ai-infra-assistant-voc-mcp       Building                                                                                                  1.7s
+ ⠙ Image ai-infra-assistant-db-init       Building                                                                                                  1.7s
+ ⠙ Image ai-infra-assistant-command-mcp   Building                                                                                                  1.7s
+ ⠙ Image ai-infra-assistant-admin-console Building                                                                                                  1.7s
+ ⠙ Image ai-infra-assistant-mock-vllm     Building                                                                                                  1.7s
+ ⠙ Image ai-infra-assistant-agent-server  Building                                                                                                  1.7s
+ ⠙ Image ai-infra-assistant-manual-mcp    Building                                                                                                  1.7s
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+
+target command-mcp: failed to solve: process "/bin/sh -c pip install --no-cache-dir \"pip<23\"" did not complete successfully: exit code: 2
