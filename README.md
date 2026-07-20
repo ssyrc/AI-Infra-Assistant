@@ -167,6 +167,35 @@ docker compose up -d --build
 
 ---
 
+## 외부 Service Hub MCP 연동 (similar_voc)
+
+Service Hub MCP는 **외부에서 제공하는 원격 MCP 서버**(streamable-http)로, VOC/서비스허브 지식에 대한
+RAG 검색 툴을 노출한다. 우리 에이전트의 4개 MCP와 달리 **에이전트 툴로 붙이지 않고**,
+`/v1/voc/query`에서 **직접 호출해 `similar_voc`를 후처리로 채운다**(결정적 출력, 에이전트 응답과 병렬).
+
+| 툴 | 용도 |
+|---|---|
+| `rag_keyword_search` | 키워드 RAG 검색 (`query`, `num_result_doc`) |
+| `rag_filtered_search` | 메타데이터 필터 검색 (`query` + `system_name`/`sub_system_name`/`division_name`/…) |
+| `get_voc_data_by_id` | VOC ID로 상세 조회 |
+| `voc_statistics` | VOC 통계 (시스템별 건수 등) |
+| `get_metadata_hierarchy` | 시스템 메타데이터 계층 |
+
+- **동작**: 현재 VOC의 시스템명이 있으면 `rag_filtered_search`(같은 시스템으로 좁힘), 없으면
+  `rag_keyword_search`를 호출 → 상위 N개를 `{voc_id?, title, system?, reason}`로 매핑.
+- **방어적 매핑**: rag 검색 응답은 `{title, content, score}`만 주고 `voc_id`/`system`이 없을 수 있다.
+  있으면 채우고(여러 키 시도), `system`은 필터로 쓴 `system_name`을 fallback, `reason`은 `content`
+  스니펫으로 만든다. (실서버가 더 많은 필드를 주면 자동 반영)
+- **설정**: `service_hub_mcp_url`(비우면 similar_voc 생략), `voc_similar_top_k`(개수, 0이면 비활성).
+  인증/헤더 불필요. `shared/service_hub.py` 담당.
+- **장애 격리**: URL 미설정(방화벽 미개통)·연결 실패·타임아웃이면 **조용히 빈 리스트**를 반환하고
+  본문 답변은 정상 반환한다(요청 실패 아님).
+
+> URL: `http://innodev--etl-prod.…/mcp` (방화벽 개통 후 설정 탭에 입력). MCP는 self-describing이라
+> URL만 있으면 되고, 방화벽 개통 후 rag 응답에 `voc_id`가 실제로 오는지 1건으로 확인해 매핑을 확정한다.
+
+---
+
 ## 테스트
 
 서버 스모크 테스트는 **`docs/TESTING.md`**. 단위 회귀 테스트:
