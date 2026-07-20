@@ -359,7 +359,8 @@ async def _summarize_turns(turns: list[dict]) -> list[str]:
                   "temperature": 0.2, "max_tokens": 400},
         )
         resp.raise_for_status()
-        text = resp.json()["choices"][0]["message"]["content"]
+        data = resp.json()
+        text = ((data.get("choices") or [{}])[0].get("message", {}) or {}).get("content") or ""
     out = []
     for line in text.splitlines():
         s = line.strip().lstrip("-•*").strip()
@@ -393,6 +394,9 @@ async def _memory_context(user_id: str, conversation_id: str | None, query: str)
     return hist, (format_memory_block(ctx["longterm"]) or None)
 
 
+_bg_tasks: set = set()   # 백그라운드 태스크가 GC로 사라지지 않도록 참조를 보관한다.
+
+
 def _bg_persist(user_id, conversation_id, source, message, answer, mem_enabled):
     """응답 후 백그라운드로 턴 저장 + (임계 도달 시) 요약 승격.
     메모리가 꺼져 있으면(use_memory=false 또는 memory_enabled=false) 아무것도 저장하지 않는다."""
@@ -410,7 +414,9 @@ def _bg_persist(user_id, conversation_id, source, message, answer, mem_enabled):
         except Exception as e:  # noqa: BLE001
             print(f"[agent] 메모리 저장/요약 실패(무시): {e}")
     if answer and mem_enabled:
-        asyncio.create_task(_run())
+        task = asyncio.create_task(_run())
+        _bg_tasks.add(task)
+        task.add_done_callback(_bg_tasks.discard)
 
 
 @app.post("/v1/agent/query")
