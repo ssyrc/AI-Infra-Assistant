@@ -48,6 +48,7 @@ from memory_store import (
     load_context, format_memory_block, record_turns, maybe_summarize,
     list_user_memory, add_user_memory, delete_user_memory,
 )
+from service_hub import search_similar_voc
 from agent import build_agent, APP_NAME
 
 MAX_MESSAGES = 100
@@ -601,6 +602,19 @@ def _voc_message(v: VocInfo, body: str) -> str:
     return "\n".join(parts)
 
 
+async def _voc_similar(v: VocInfo, query: str) -> list:
+    """Service Hub MCP로 유사 VOC를 조회한다(설정/방화벽 없으면 빈 리스트).
+    현재 VOC의 시스템명으로 필터해 관련도를 높인다."""
+    try:
+        k = int(await get_config("voc_similar_top_k", "3"))
+    except (TypeError, ValueError):
+        k = 3
+    if k <= 0:
+        return []
+    system_name = v.system.name if v.system else None
+    return await search_similar_voc(query, system_name, k)
+
+
 def _voc_format_instruction(output_option: str) -> str:
     if (output_option or "").lower() == "html":
         return ("\n\n## 출력 형식(반드시 준수)\n답변 전체를 유효한 HTML 조각으로만 출력한다. "
@@ -644,6 +658,15 @@ async def voc_query(body: VocQueryIn, request: Request):
     agent, _model, toolsets = await build_agent(caller_headers, extra_instruction)
     runner = Runner(agent=agent, app_name=APP_NAME, session_service=state["session_service"])
 
+    # 유사 VOC 조회는 에이전트 응답과 병렬로 돌린다(지연 최소화). Service Hub 미설정 시 빈 리스트.
+    similar_task = asyncio.create_task(_voc_similar(v, body_text))
+
+    async def _collect_similar():
+        try:
+            return await similar_task
+        except Exception:  # noqa: BLE001
+            return []
+
     if not body.stream:
         final_text, ok = "", True
         try:
@@ -658,10 +681,14 @@ async def voc_query(body: VocQueryIn, request: Request):
         finally:
             await _cleanup_session(user_id, session_id)
             await _close_toolsets(toolsets)
+        similar = await _collect_similar()
         _bg_persist(user_id, conv, "voc-agent", message, final_text, mem_enabled)
         if not ok or not final_text:
             return JSONResponse({"success": False, "answer": None})
-        return JSONResponse({"success": True, "answer": {"content": final_text}})
+        answer = {"content": final_text}
+        if similar:
+            answer["similar_voc"] = similar
+        return JSONResponse({"success": True, "answer": answer})
 
     async def event_stream():
         sent = ""
@@ -683,8 +710,14 @@ async def voc_query(body: VocQueryIn, request: Request):
                     if delta:
                         yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
             # 마지막에 가이드 계약 형태의 완성 envelope을 한 번 더 보낸다.
-            envelope = ({"success": True, "answer": {"content": sent}} if sent
-                        else {"success": False, "answer": None})
+            if sent:
+                similar = await _collect_similar()
+                answer = {"content": sent}
+                if similar:
+                    answer["similar_voc"] = similar
+                envelope = {"success": True, "answer": answer}
+            else:
+                envelope = {"success": False, "answer": None}
             yield f"data: {json.dumps(envelope, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
         except asyncio.CancelledError:
@@ -693,6 +726,8 @@ async def voc_query(body: VocQueryIn, request: Request):
             yield f"data: {json.dumps({'success': False, 'answer': None, 'error': str(e)}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
         finally:
+            if not similar_task.done():   # sent가 비어 await를 안 한 경우 고아 방지
+                similar_task.cancel()
             await _cleanup_session(user_id, session_id)
             await _close_toolsets(toolsets)
             _bg_persist(user_id, conv, "voc-agent", message, sent, mem_enabled)

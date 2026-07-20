@@ -195,7 +195,12 @@ POST /v1/agent/query            # 내부망 전용(인증 없음)
   대화 스레드(conversation_id)로 사용.
 - `output_option`에 따라 답변을 **HTML/마크다운으로 강제** 출력.
 - `stream:true`면 SSE로 `{"delta":…}`를 흘리고 마지막에 완성 envelope + `[DONE]`.
-- `similar_voc`/`evaluation`(선택)과 service hub MCP 연동은 추후(가이드 3번은 참고용).
+- `answer.similar_voc`: **Service Hub MCP를 직접 호출**해 후처리로 채운다(에이전트 응답과 병렬).
+  현재 VOC의 시스템명으로 `rag_filtered_search`(없으면 `rag_keyword_search`)를 호출해 상위 N개를
+  `{voc_id?, title, system?, reason}`로 매핑한다. 설정 키 `service_hub_mcp_url`가 비어 있으면
+  (방화벽 미개통 등) **조용히 생략**하고 나머지 답변은 정상 반환한다(`voc_similar_top_k`로 개수 조절).
+  주의: rag 검색 응답에 `voc_id`/`system`이 없을 수 있어, 있으면 채우고 없으면 생략한다.
+- `evaluation`(선택)은 추후.
 - 주의: 이 엔드포인트들은 인증이 없으므로 **agent-server를 내부망에서만** 접근 가능하게 둔다
   (compose 기본은 호스트 미노출). 외부 노출 시 reverse proxy에서 접근 제한 필요.
 

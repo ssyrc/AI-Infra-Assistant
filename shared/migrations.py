@@ -315,6 +315,9 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
          "Agent Server가 연결할 VOC MCP 주소", False, False, False),
         ("system_mcp_url", os.environ.get("SYSTEM_MCP_URL", "http://system-mcp:8004/mcp"),
          "Agent Server가 연결할 System MCP 주소", False, False, False),
+        ("service_hub_mcp_url", os.environ.get("SERVICE_HUB_MCP_URL", ""),
+         "유사 VOC 조회용 Service Hub MCP 주소(비우면 similar_voc 생략). 방화벽 개통 후 설정", True, False, False),
+        ("voc_similar_top_k", "3", "VOC 답변에 붙일 유사 VOC 최대 개수(0이면 비활성)", True, False, False),
 
         ("agent_system_instruction", AGENT_INSTRUCTION, "ADK 루트 에이전트 system instruction", False, False, False),
     ]
