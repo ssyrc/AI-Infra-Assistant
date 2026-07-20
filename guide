@@ -1,0 +1,123 @@
+1. 외부 Agent -> Input 전달 json 예시
+{
+  "voc_info": {
+    "voc_id": "2026041616503589073", # VOC(고객 의견) 고유 식별자
+    "voc_title": "서비스 VOC 등록/답변/평가 관련 문의", # VOC 제목
+    "voc_status": "STAT0002", # VOC 현재 상태  코드 (예: STAT0002)
+    "voc_status_name": "진행중", # 상태 코드에 대한 한글 명칭
+    "voc_class_code": "RQTP0002", # VOC 분류 코드 (문의/불만 등)
+    "voc_class_name": "문의", # 분류 코드에 대한 한글 명칭
+    "system": {
+      "id": "SSTM01420", #해당 서비스가 속한 시스템 ID
+      "name": "Service Hub" # 시스템 명
+    },
+    "sub_system": {
+      "id": "MDLE08140", # 시스템 내 세부 모듈 ID
+      "name": "UI" # 세부 모듈 명
+    },
+    "division": {
+      "id": "DVSN00010", # 담당 사업부/조직 ID
+      "name": "AI센터" # 담당 사업부/조직 명
+    },
+    "campus": {
+      "id": "CMPS00040", # 현장(캠퍼스) ID
+      "name": "화성" # 현장(캠퍼스) 명
+    },
+    "line": {
+      "id": null, # 라인(생산·설비 등) ID – 미사용 시 null
+      "name": null # 라인 명 – 미사용 시 null
+    },
+    "requester": {
+      "user_id": "sg.chon", # VOC 요청자 사번·ID
+      "user_name": "전성균", # 요청자 성명
+      "user_dept": "IT솔루션팀(AI센터)" # 요청자 소속 부서·팀
+    },
+    "created_at": "2026-04-16T16:50:35", # VOC 생성 일시 (ISO‑8601)
+    "voc_content": {
+      "text": "itrm 시스템팀에서 요청받았습니다.서비스 사용 중 아래와 같은 현상이 발생합니다. 서비스 화면에서 2번 클릭해야 반응. 등록/답변/평가 버튼이 동작하지 않습니다. 감사합니다. 위치 확인 부탁드립니다.", # 사용자 입력 텍스트(요약)
+      "raw_text": "<div class='contents'>[자료] 서비스 voc 등록/답변/평가 관련 문의 안내...<br><br>itrm 시스템팀에서 요청받았습니다.<br>서비스 사용 중 아래와 같은 현상이 발생합니다.<br><ul><li>서비스 화면에서 2번 클릭해야 반응</li><li>등록/답변/평가 버튼이 동작하지 않습니다.</li></ul>감사합니다. 위치 확인 부탁드립니다.</div>" 원본 HTML 형태 내용
+    }
+  },
+  "output_option" : "html" # 답변 Text 형식, "markdown", "html" 택일
+}
+
+
+2. AI Infra Assistant -> 외부 Agent 전달 output json 예시
+{
+  "success": true, # 필수, 요청 결과 성공 여부. true이면 정상 응답, false이면 오류/실패 상태.
+  "answer": {
+    "content": "<h2> 문제 분석</h2><body><tr><td>구분</td> <td>내용</td>...", # 필수, 성공(success:true)일 때 제공되는 답변 내용. 실패(success:false)이면 null 혹은 빈 객체로 반환될 수 있음.
+    "similar_voc": [ # 필수 X
+      {
+        "voc_id": "2025050122485517667", # 필수 X, 유사 VOC 고유 식별자, service hub mcp 활용 필
+        "title": "FOUP 위치 조회", # 필수 X, VOC 제목
+        "system": "물류", # 필수 X, 해당 VOC가 속한 시스템/사업부
+        "reason": "매뉴얼 투입 후 전산 위치 업데이트 필요" # 필수 X, 유사 VOC가 선택된 사유·설명
+      }
+    ]
+  },
+  "evaluation": { # 필수 X
+    "score": 85, # 필수 X, 0~100 사이의 정수형 점수
+    "reason": "관련 사례를 기반으로 정확한 답변 제공" # 필수 X, 점수 산정 근거·설명
+  }
+}
+
+
+
+3. service hub mcp 활용 방법
+# 1. MCP 클라이언트 설치
+npm install @modelcontextprotocol/sdk
+
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+
+const client = new Client({
+  name: 'my-mcp-client',
+  version: '1.0.0',
+});
+
+const transport = new StreamableHTTPClientTransport(
+  new URL('http://innodev--etl-prod.cdep.samsungds.net/mcp')
+);
+
+await client.connect(transport);
+
+const result = await client.callTool({
+  name: 'rag_keyword_search',
+  arguments: { query: '서비스허브 오류', num_result_doc: 3 }
+});
+
+console.log(result);
+
+# 2. MCP SDK 설치
+pip install mcp
+
+import asyncio
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+async def main():
+    async with streamablehttp_client("http://innodev--etl-prod.cdep.samsungds.net/mcp") as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            # RAG 키워드 검색
+            result = await session.call_tool(
+                "rag_keyword_search",
+                {"query": "서비스허브 오류", "num_result_doc": 3}
+            )
+            print(result)
+
+asyncio.run(main())
+
+
+# 3. 사용 가능한 mcp tool
+
+툴 이름	설명	사용 예제
+rag_keyword_search	RAG 엔진으로 키워드 검색	"서비스허브 오류" 검색
+rag_filtered_search	메타데이터 필터로 정교한 검색	"MOS 시스템 + 권한 오류"
+voc_list_query	DB 에서 VOC 목록 조회	최근 100 건 조회
+voc_statistics	VOC 통계	시스템별 건수
+get_voc_data_by_id	VOC ID 로 상세 조회	특정 VOC 상세
+get_metadata_hierarchy	시스템 메타데이터 조회	전체 시스템 목록
+help	툴 도움말	사용법 확인
