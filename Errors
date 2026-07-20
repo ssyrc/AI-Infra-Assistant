@@ -1,0 +1,6 @@
+[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml up -d --build
+[+] up 3/3
+ ! Image postgres:16-alpine                   Interrupted                                                                                          25.0s
+ ✘ Image pgvector/pgvector:pg16               Error Get "https://registry-1.docker.io/v2/": net/http: request canceled while waiting for ...       25.0s
+ ! Image ghcr.io/open-webui/open-webui:v0.6.5 Interrupted                                                                                          25.0s
+Error response from daemon: Get "https://registry-1.docker.io/v2/": net/http: request canceled while waiting for connection (Client.Timeout exceeded while awaiting headers)
