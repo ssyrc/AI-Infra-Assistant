@@ -1,0 +1,141 @@
+1. rag_keyword_search
+# parameters
+파라미터	타입	필수	설명
+query	string	✅	검색 질의어
+index_name	string	❌	인덱스 이름 (기본값: default)
+search_fn	string	❌	검색 함수 이름
+num_result_doc	number	❌	결과 문서 수 (기본값: 10)
+
+# 응답 예제
+{
+  "success": true,
+  "data": {
+    "total": 5,
+    "results": [
+      {
+        "title": "서비스허브 오류 관련 문서",
+        "content": "서비스허브 접속 오류 해결 방법...",
+        "score": 0.95
+      }
+    ]
+  }
+}
+
+# 사용 예제
+## Next.js
+const result = await client.callTool({
+  name: 'rag_keyword_search',
+  arguments: {
+    query: '서비스허브 오류',
+    num_result_doc: 5
+  }
+});
+
+## Python
+import asyncio
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+async def main():
+    async with streamablehttp_client("http://innodev--etl-prod.cdep.samsungds.net/mcp") as (read, write, _):
+        async with ClientSession(read, write) as session:
+        await session.connect("http://innodev--etl-prod.cdep.samsungds.net/mcp")
+        result = await session.call_tool(
+            "rag_keyword_search",
+            {"query": "서비스허브 오류", "num_result_doc": 5}
+        )
+        print(result)
+
+asyncio.run(main())
+
+2. rag_filtered_search
+# parameters
+파라미터	타입	필수	설명
+query	string	✅	검색 질의어
+index_name	string	❌	인덱스 이름
+search_fn	string	❌	검색 함수 이름
+num_result_doc	number	❌	결과 문서 수
+system_name	string	❌	시스템명
+sub_system_name	string	❌	세부시스템명
+division_name	string	❌	사업부명
+campus_name	string	❌	캠퍼스명
+voc_class_name	string	❌	VOC 분류명
+
+# 응답 예제
+{
+  "success": true,
+  "data": {
+    "total": 3,
+    "results": [
+      {
+        "title": "MOS 시스템 권한 오류",
+        "content": "MOS 시스템 권한 관련 오류 해결...",
+        "score": 0.92
+      }
+    ]
+  }
+}
+
+# 사용 예제
+## Next.js
+const result = await client.callTool({
+  name: 'rag_filtered_search',
+  arguments: {
+    query: '권한 오류',
+    system_name: 'MOS',
+    num_result_doc: 5
+  }
+});
+
+## Python
+result = client.call_tool(
+    "rag_filtered_search",
+    {"query": "권한 오류", "system_name": "MOS", "num_result_doc": 5}
+)
+
+
+3. voc_statistics
+# parameters
+
+파라미터	타입	필수	설명
+system_name	string	❌	시스템명
+voc_class_name	string	❌	VOC 분류명
+
+
+# 응답 예제
+{
+  "success": true,
+  "data": {
+    "total": 1234,
+    "by_system": {
+      "MOS": 456,
+      "Service Hub": 345
+    }
+  }
+}
+
+# 사용 예제
+## Next.js
+const result = await client.callTool({
+  name: 'voc_statistics',
+  arguments: {
+    system_name: 'MOS'
+  }
+});
+
+## Python
+import asyncio
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+async def main():
+    async with streamablehttp_client("http://innodev--etl-prod.cdep.samsungds.net/mcp") as (read, write, _):
+        async with ClientSession(read, write) as session:
+        await session.connect("http://innodev--etl-prod.cdep.samsungds.net/mcp")
+        result = await session.call_tool(
+            "voc_statistics",
+            {"system_name": "MOS"}
+        )
+        print(result)
+
+asyncio.run(main())
