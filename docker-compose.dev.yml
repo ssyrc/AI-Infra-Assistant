@@ -5,9 +5,16 @@
 x-pg-pass: &pgpass devpass
 x-config-dsn: &configdsn postgresql://agent:devpass@postgres:5432/platform_config
 
+# 폐쇄망: 사내 미러 레지스트리를 .env로 지정한다(기본은 공개 레지스트리).
+#   REGISTRY_DOCKERHUB=repository.samsungds.net/proxy-docker-registry-1.docker.io
+#   REGISTRY_GHCR=repository.samsungds.net/proxy-docker-ghcr.io
+# 빌드 베이스(python)도 미러에서 받도록 build args로 전달한다.
+x-py-build-args: &pyargs
+  PYTHON_IMAGE: ${REGISTRY_DOCKERHUB:-docker.io}/python:3.12-slim
+
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: ${REGISTRY_DOCKERHUB:-docker.io}/pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: agent
@@ -22,7 +29,7 @@ services:
       retries: 20
 
   db-init:
-    build: { context: ., dockerfile: shared/Dockerfile.db-init }
+    build: { context: ., dockerfile: shared/Dockerfile.db-init, args: *pyargs }
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_USER: agent
@@ -38,7 +45,7 @@ services:
 
   # dev 전용: 설정을 mock vLLM으로 덮어쓴다 (db-init 이후 실행)
   dev-config:
-    image: postgres:16-alpine
+    image: ${REGISTRY_DOCKERHUB:-docker.io}/postgres:16-alpine
     environment:
       PGPASSWORD: *pgpass
     entrypoint: >
@@ -52,11 +59,11 @@ services:
     restart: "no"
 
   mock-vllm:
-    build: { context: ., dockerfile: dev/Dockerfile.mock }
+    build: { context: ., dockerfile: dev/Dockerfile.mock, args: *pyargs }
     ports: ["8100:8000"]
 
   manual-mcp:
-    build: { context: ., dockerfile: mcp_servers/Dockerfile }
+    build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
     command: ["python", "mcp_servers/manual_mcp/server.py"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8001" }
     ports: ["8001:8001"]
@@ -64,7 +71,7 @@ services:
       dev-config: { condition: service_completed_successfully }
 
   command-mcp:
-    build: { context: ., dockerfile: mcp_servers/Dockerfile }
+    build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
     command: ["python", "mcp_servers/command_mcp/server.py"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8002" }
     ports: ["8002:8002"]
@@ -72,7 +79,7 @@ services:
       dev-config: { condition: service_completed_successfully }
 
   voc-mcp:
-    build: { context: ., dockerfile: mcp_servers/Dockerfile }
+    build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
     command: ["python", "mcp_servers/voc_mcp/server.py"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8003" }
     ports: ["8003:8003"]
@@ -80,7 +87,7 @@ services:
       dev-config: { condition: service_completed_successfully }
 
   system-mcp:
-    build: { context: ., dockerfile: mcp_servers/Dockerfile }
+    build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
     command: ["python", "mcp_servers/system_mcp/server.py"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8004" }
     ports: ["8004:8004"]
@@ -88,7 +95,7 @@ services:
       dev-config: { condition: service_completed_successfully }
 
   agent-server:
-    build: { context: ., dockerfile: agent_server/Dockerfile }
+    build: { context: ., dockerfile: agent_server/Dockerfile, args: *pyargs }
     environment:
       CONFIG_DB_DSN: *configdsn
       # LANGFUSE 키 없음 -> 트레이싱 자동 비활성화
@@ -102,7 +109,7 @@ services:
       system-mcp: { condition: service_started }
 
   admin-console:
-    build: { context: ., dockerfile: dev/Dockerfile.admin-dev }
+    build: { context: ., dockerfile: dev/Dockerfile.admin-dev, args: *pyargs }
     environment:
       CONFIG_DB_DSN: *configdsn
       ADMIN_USER: admin
@@ -112,7 +119,7 @@ services:
       dev-config: { condition: service_completed_successfully }
 
   open-webui:
-    image: ghcr.io/open-webui/open-webui:v0.6.5
+    image: ${REGISTRY_GHCR:-ghcr.io}/open-webui/open-webui:v0.6.5
     environment:
       OPENAI_API_BASE_URL: http://agent-server:8000/v1
       OPENAI_API_KEY: not-needed

@@ -6,9 +6,15 @@
 # - 이미지 태그는 latest/main 대신 고정 버전을 사용한다.
 # - 기동 순서: postgres(healthy) -> db-init(마이그레이션 완료) -> 나머지 서비스
 
+# 폐쇄망: 사내 미러 레지스트리를 .env로 지정한다(기본은 공개 레지스트리).
+#   REGISTRY_DOCKERHUB=repository.samsungds.net/proxy-docker-registry-1.docker.io
+#   REGISTRY_GHCR=repository.samsungds.net/proxy-docker-ghcr.io
+x-py-build-args: &pyargs
+  PYTHON_IMAGE: ${REGISTRY_DOCKERHUB:-docker.io}/python:3.12-slim
+
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: ${REGISTRY_DOCKERHUB:-docker.io}/pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: ${POSTGRES_USER:-agent}
@@ -27,6 +33,7 @@ services:
     build:
       context: .
       dockerfile: shared/Dockerfile.db-init
+      args: *pyargs
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_USER: ${POSTGRES_USER:-agent}
@@ -50,7 +57,7 @@ services:
     restart: "no"
 
   manual-mcp:
-    build: { context: ., dockerfile: mcp_servers/Dockerfile }
+    build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
     command: ["python", "mcp_servers/manual_mcp/server.py"]
     environment:
       CONFIG_DB_DSN: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD}@postgres:5432/platform_config
@@ -62,7 +69,7 @@ services:
     restart: unless-stopped
 
   command-mcp:
-    build: { context: ., dockerfile: mcp_servers/Dockerfile }
+    build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
     command: ["python", "mcp_servers/command_mcp/server.py"]
     environment:
       CONFIG_DB_DSN: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD}@postgres:5432/platform_config
@@ -82,7 +89,7 @@ services:
     restart: unless-stopped
 
   voc-mcp:
-    build: { context: ., dockerfile: mcp_servers/Dockerfile }
+    build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
     command: ["python", "mcp_servers/voc_mcp/server.py"]
     environment:
       CONFIG_DB_DSN: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD}@postgres:5432/platform_config
@@ -94,7 +101,7 @@ services:
     restart: unless-stopped
 
   system-mcp:
-    build: { context: ., dockerfile: mcp_servers/Dockerfile }
+    build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
     command: ["python", "mcp_servers/system_mcp/server.py"]
     environment:
       CONFIG_DB_DSN: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD}@postgres:5432/platform_config
@@ -117,7 +124,7 @@ services:
     # 있고 root가 해당 user로 강등 가능해야 한다(리눅스 표준).
 
   agent-server:
-    build: { context: ., dockerfile: agent_server/Dockerfile }
+    build: { context: ., dockerfile: agent_server/Dockerfile, args: *pyargs }
     environment:
       CONFIG_DB_DSN: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD}@postgres:5432/platform_config
       LANGFUSE_HOST: ${LANGFUSE_HOST:-http://langfuse-web:3000}
@@ -138,7 +145,7 @@ services:
     restart: unless-stopped
 
   admin-console:
-    build: { context: ., dockerfile: admin_console/Dockerfile }
+    build: { context: ., dockerfile: admin_console/Dockerfile, args: *pyargs }
     environment:
       CONFIG_DB_DSN: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD}@postgres:5432/platform_config
       ADMIN_USER: ${ADMIN_USER:?ADMIN_USER를 .env에 설정하세요}
@@ -151,7 +158,7 @@ services:
     restart: unless-stopped
 
   open-webui:
-    image: ghcr.io/open-webui/open-webui:v0.6.5
+    image: ${REGISTRY_GHCR:-ghcr.io}/open-webui/open-webui:v0.6.5
     environment:
       OPENAI_API_BASE_URL: http://agent-server:8000/v1
       OPENAI_API_KEY: not-needed
@@ -169,7 +176,7 @@ services:
 
   # --- Langfuse v3 스택 ---------------------------------------------------------
   langfuse-web:
-    image: langfuse/langfuse:3.130.0
+    image: ${REGISTRY_DOCKERHUB:-docker.io}/langfuse/langfuse:3.130.0
     depends_on:
       postgres:
         condition: service_healthy
@@ -208,7 +215,7 @@ services:
     restart: unless-stopped
 
   langfuse-worker:
-    image: langfuse/langfuse-worker:3.130.0
+    image: ${REGISTRY_DOCKERHUB:-docker.io}/langfuse/langfuse-worker:3.130.0
     depends_on:
       postgres:
         condition: service_healthy
@@ -239,7 +246,7 @@ services:
     restart: unless-stopped
 
   clickhouse:
-    image: clickhouse/clickhouse-server:24.8
+    image: ${REGISTRY_DOCKERHUB:-docker.io}/clickhouse/clickhouse-server:24.8
     environment:
       CLICKHOUSE_DB: default
       CLICKHOUSE_USER: clickhouse
@@ -256,7 +263,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7.4-alpine
+    image: ${REGISTRY_DOCKERHUB:-docker.io}/redis:7.4-alpine
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?설정 필요}",
               "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
     healthcheck:
@@ -269,7 +276,7 @@ services:
     restart: unless-stopped
 
   minio:
-    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    image: ${REGISTRY_DOCKERHUB:-docker.io}/minio/minio:RELEASE.2024-11-07T00-52-20Z
     environment:
       MINIO_ROOT_USER: minio
       MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:?설정 필요}

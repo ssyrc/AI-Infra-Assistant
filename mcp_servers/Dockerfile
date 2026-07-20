@@ -1,4 +1,5 @@
-FROM python:3.12-slim
+ARG PYTHON_IMAGE=python:3.12-slim
+FROM ${PYTHON_IMAGE}
 WORKDIR /app
 # openssh-client: System/Command MCP가 대상 서버로 ssh 실행할 때 필요.
 RUN apt-get update && apt-get install -y --no-install-recommends openssh-client \
