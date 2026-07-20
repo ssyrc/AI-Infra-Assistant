@@ -12,19 +12,24 @@
 사용자 ─ Open WebUI ─┐
                      ├─(OpenAI 호환 / VOC API)─► Agent Server (FastAPI + Google ADK)
 상위 VOC agent ──────┘                            │  LiteLLM → 사내 vLLM(LLM)
-                                                  │  MCP Client (요청별 호출자 헤더 주입)
-              ┌───────────────┬──────────────┬────┴──────────┐
-              ▼               ▼               ▼               ▼
-          Manual MCP     Command MCP       VOC MCP        System MCP
-          (하이브리드    (카탈로그검색+    (하이브리드    (리눅스 read-only
-           RAG 검색)      본인 job 실행)    이력 검색)      ssh 원격, 본인권한)
-              │               │               │               │
-          manual_db       command_db       voc_db          system_db   ← MCP별 분리 DB
                                                   │
+                    ① LLM이 판단해 호출(tool)      │  ② 코드가 직접 호출(비-LLM)
+              ┌───────────────┬──────────────┬────┴──────────┐          ┆
+              ▼               ▼               ▼               ▼          ┆ similar_voc
+          Manual MCP     Command MCP       VOC MCP        System MCP     ┆ 후처리
+          (하이브리드    (카탈로그검색+    (하이브리드    (리눅스 read-only         ┆
+           RAG 검색)      본인 job 실행)    이력 검색)      ssh 원격, 본인권한)      ▼
+              │               │               │               │      Service Hub MCP
+          manual_db       command_db       voc_db          system_db   (외부 원격 MCP,
+                                                  │                      우리 소유 아님)
    memory_db(사용자 장기기억) ◄── Agent Server ──┤  임베딩(사내 vLLM)
    platform_config(중앙 설정) ◄── 모든 서비스가 참조
    Langfuse ◄── OpenTelemetry ── Agent Server (user_id/session 태깅)
 ```
+
+- **①** manual/command/voc/system MCP는 **에이전트(LLM)가 tool-calling으로 오케스트레이션**하는 우리 소유 MCP.
+- **②** Service Hub MCP는 에이전트의 툴이 아니라, `/v1/voc/query` **핸들러 코드가 직접 호출**하는
+  **외부 원격 MCP**(우리 소유 아님). similar_voc 후처리 전용이며 방화벽 개통·URL 설정 시에만 동작.
 
 세 개의 웹: **Open WebUI**(사용자), **관리자 콘솔**(데이터·설정), **Langfuse**(트레이싱).
 
