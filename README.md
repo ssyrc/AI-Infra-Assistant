@@ -180,6 +180,22 @@ POST /v1/agent/query            # 내부망 전용(인증 없음)
   `conversation_state`(요약 진행). 파라미터는 설정 탭의 `memory_*` 키로 조절.
 - **관리 API**: `GET /v1/memory/{user_id}`(조회), `POST /v1/memory/{user_id}`(수동 추가),
   `DELETE /v1/memory/{user_id}`(개별 `?memory_id=` 또는 전체 삭제=잊힐 권리).
+
+### 통합 VOC agent 연동 (`POST /v1/voc/query`)
+
+통합 VOC agent가 AI-Infra 관련 VOC를 위임하는 전용 엔드포인트(가이드 계약).
+```
+입력:  { "voc_info": { voc_id, voc_title, system{}, sub_system{}, requester{ user_id, ... },
+                       voc_content{ text, raw_text }, ... },
+         "output_option": "html" | "markdown" }   # 답변 형식 강제
+출력:  { "success": true, "answer": { "content": "<h2>…" } }   # 필수: success, answer.content
+        (실패 시 { "success": false, "answer": null })
+```
+- `requester.user_id`로 **장기 메모리를 공유**(Open WebUI/agent와 동일 저장소), `voc_id`를
+  대화 스레드(conversation_id)로 사용.
+- `output_option`에 따라 답변을 **HTML/마크다운으로 강제** 출력.
+- `stream:true`면 SSE로 `{"delta":…}`를 흘리고 마지막에 완성 envelope + `[DONE]`.
+- `similar_voc`/`evaluation`(선택)과 service hub MCP 연동은 추후(가이드 3번은 참고용).
 - 주의: 이 엔드포인트들은 인증이 없으므로 **agent-server를 내부망에서만** 접근 가능하게 둔다
   (compose 기본은 호스트 미노출). 외부 노출 시 reverse proxy에서 접근 제한 필요.
 
