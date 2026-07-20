@@ -1,4 +1,5 @@
-FROM python:3.12-slim
+ARG PYTHON_IMAGE=python:3.12-slim
+FROM ${PYTHON_IMAGE}
 WORKDIR /app
 COPY agent_server/requirements.txt agent_server/requirements.txt
 RUN pip install --no-cache-dir -r agent_server/requirements.txt

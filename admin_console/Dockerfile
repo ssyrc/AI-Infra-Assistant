@@ -1,4 +1,5 @@
-FROM python:3.12-slim
+ARG PYTHON_IMAGE=python:3.12-slim
+FROM ${PYTHON_IMAGE}
 WORKDIR /app
 COPY admin_console/backend/requirements.txt admin_console/backend/requirements.txt
 COPY admin_console/backend/requirements-docling.txt admin_console/backend/requirements-docling.txt
