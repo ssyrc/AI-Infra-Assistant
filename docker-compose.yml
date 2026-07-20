@@ -15,6 +15,7 @@ x-py-build-args: &pyargs
   PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
   PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
   BUILD_PROXY: ${BUILD_PROXY:-}
+  NO_PROXY: ${NO_PROXY:-}
 
 services:
   postgres:
