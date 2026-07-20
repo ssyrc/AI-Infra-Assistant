@@ -1,4 +1,40 @@
-repository.samsungds.net/proxy-docker-registry-1.docker.io/pgvector/pgvector:pg16
-repository.samsungds.net/proxy-docker-registry-1.docker.io/postgres:16-alpine
-repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.12-slim
-repository.samsungds.net/proxy-docker-ghcr.io/open-webui/open-webui:v0.6.5
+dev/Dockerfile.mock
+
++ COPY pip.conf /etc/pip.conf
++ RUN pip install --no-cache-dir "pip<23"
+  RUN pip install --no-cache-dir fastapi "uvicorn[standard]" pydantic
+
+shared/Dockerfile.db-init
+
++ COPY pip.conf /etc/pip.conf
++ RUN pip install --no-cache-dir "pip<23"
+  RUN pip install --no-cache-dir "asyncpg==0.30.0"
+
+mcp_servers/Dockerfile
+
++ COPY pip.conf /etc/pip.conf
++ RUN pip install --no-cache-dir "pip<23"
+  # openssh-client ...
+- RUN apt-get update && apt-get install -y ...
++ RUN http_proxy=http://202.20.187.241:3128 https_proxy=http://202.20.187.241:3128 \
++     apt-get update && apt-get install -y ...
+  RUN pip install --no-cache-dir -r requirements.txt
+
+agent_server/Dockerfile
+
++ COPY pip.conf /etc/pip.conf
++ RUN pip install --no-cache-dir "pip<23"
+  COPY agent_server/requirements.txt ...
+
+admin_console/Dockerfile
+
++ COPY pip.conf /etc/pip.conf
++ RUN pip install --no-cache-dir "pip<23"
+  COPY admin_console/backend/requirements.txt ...
+
+---
+그리고 신규 파일 pip.conf:
+[global]
+index-url = http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
+proxy = http://202.20.187.241:3128
+trusted-host = repository.samsungds.net
