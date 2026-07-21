@@ -8,19 +8,23 @@
 json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
 ```
 
-**HTML Simple API만 쓰는 pip < 22.3** 으로 내리면 미러가 정상 동작한다(사내 호스트의 pip가
-동작하는 이유와 동일). 하지만 최신 pip로는 미러에서 그 옛 pip 조차 같은 이유로 못 받으므로
-(닭-달걀), 이 디렉터리에 미리 받아둔 pip 휠을 각 Dockerfile이 **오프라인**(`--no-index`)으로
-먼저 설치한 뒤, 이후 패키지들을 사내 미러에서 받는다.
+**HTML Simple API만 쓰는 pip < 22.2** 으로 내리면 미러가 정상 동작한다(사내 호스트의 pip가
+동작하는 이유와 동일). PEP 691 JSON은 pip 22.2부터 들어갔으므로 **22.1.2**가 마지막 HTML-only
+버전이다. 하지만 최신 pip로는 미러에서 그 옛 pip 조차 같은 이유로 못 받으므로 (닭-달걀), 이
+디렉터리에 미리 받아둔 pip 휠을 각 Dockerfile이 **오프라인**(`--no-index`)으로 먼저 설치한 뒤,
+이후 패키지들을 사내 미러에서 받는다.
+
+> 그리고 이 옛 pip는 **Python 3.12에서 `pkgutil.ImpImporter` 에러로 실행되지 않으므로** 베이스
+> 이미지는 **`python:3.11-slim`** 이어야 한다(compose·Dockerfile에 반영됨).
 
 ## 들어있는 파일
 
-- `pip-22.2.2-py3-none-any.whl` — 순수 파이썬 휠(py3-none-any)이라 이미지에 그대로 쓰인다.
+- `pip-22.1.2-py3-none-any.whl` — 순수 파이썬 휠(py3-none-any)이라 이미지에 그대로 쓰인다.
 
 ## 휠을 직접 갱신/교체하려면 (인터넷 되는 곳에서 1회)
 
 ```bash
-pip download pip==22.2.2 --no-deps -d vendor/
+pip download pip==22.1.2 --no-deps -d vendor/
 ```
 
 폐쇄망 반입만 가능하면, 사내에서 동작하는 pip로 위 명령을 실행해 나온 `.whl`을 이 폴더에 두면 된다.
