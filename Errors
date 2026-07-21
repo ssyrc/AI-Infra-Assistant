@@ -1,238 +1,286 @@
-[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml build --no-cache
+[root@24-gp19 AI-Infra-Assistant-main]# ls -l vendor/pip-22.2.2-py3-none-any.whl          # 약 2,044,706 bytes 있어야 함
+-rw-r--r-- 1 root root 2044706 Jul 21 20:23 vendor/pip-22.2.2-py3-none-any.whl
+[root@24-gp19 AI-Infra-Assistant-main]# grep -rn 'pip<23' */Dockerfile* 2>/dev/null       # 아무것도 안 나와야 함
+[root@24-gp19 AI-Infra-Assistant-main]# grep -n vendor mcp_servers/Dockerfile             # COPY vendor/ /tmp/vendor/ 나와야 함
+14:# 내려야 하는데 최신 pip로는 미러에서 그 pip조차 못 받으므로(닭-달걀), vendor/에 미리 받아둔 pip
+15:# 휠을 오프라인으로 먼저 설치한다. (vendor 휠이 없으면 건너뜀 = 공개 PyPI 등 정상 미러용)
+16:COPY vendor/ /tmp/vendor/
+17:RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then \
+18:      pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ; \
+[root@24-gp19 AI-Infra-Assistant-main]# ls -l vendor/pip-22.2.2-py3-none-any.whl
+-rw-r--r-- 1 root root 2044706 Jul 21 20:23 vendor/pip-22.2.2-py3-none-any.whl
+[root@24-gp19 AI-Infra-Assistant-main]# grep -rn 'pip<23' */Dockerfile* 2>/dev/null
+[root@24-gp19 AI-Infra-Assistant-main]# grep -n vendor mcp_servers/Dockerfile
+14:# 내려야 하는데 최신 pip로는 미러에서 그 pip조차 못 받으므로(닭-달걀), vendor/에 미리 받아둔 pip
+15:# 휠을 오프라인으로 먼저 설치한다. (vendor 휠이 없으면 건너뜀 = 공개 PyPI 등 정상 미러용)
+16:COPY vendor/ /tmp/vendor/
+17:RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then \
+18:      pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ; \
+[root@24-gp19 AI-Infra-Assistant-main]# docker compose -f docker-compose.dev.yml build --no-cache
 [+] Building 3.3s (45/79)
  => [internal] load local bake definitions                                                                                                         0.0s
- => => reading from stdin 7.33kB                                                                                                                   0.0s
- => [system-mcp internal] load build definition from Dockerfile                                                                                    0.0s
+ => => reading from stdin 7.49kB                                                                                                                   0.0s
+ => [command-mcp internal] load build definition from Dockerfile                                                                                   0.0s
  => => transferring dockerfile: 1.88kB                                                                                                             0.0s
  => [manual-mcp internal] load build definition from Dockerfile                                                                                    0.0s
  => => transferring dockerfile: 1.88kB                                                                                                             0.0s
- => [agent-server internal] load build definition from Dockerfile                                                                                  0.0s
- => => transferring dockerfile: 1.58kB                                                                                                             0.0s
- => [command-mcp internal] load build definition from Dockerfile                                                                                   0.0s
- => => transferring dockerfile: 1.88kB                                                                                                             0.0s
- => [voc-mcp internal] load build definition from Dockerfile                                                                                       0.0s
- => => transferring dockerfile: 1.88kB                                                                                                             0.0s
- => [admin-console internal] load build definition from Dockerfile.admin-dev                                                                       0.0s
- => => transferring dockerfile: 1.73kB                                                                                                             0.0s
- => [db-init internal] load build definition from Dockerfile.db-init                                                                               0.0s
- => => transferring dockerfile: 1.41kB                                                                                                             0.0s
  => [mock-vllm internal] load build definition from Dockerfile.mock                                                                                0.0s
  => => transferring dockerfile: 1.47kB                                                                                                             0.0s
- => [admin-console internal] load metadata for repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.12-slim                         0.0s
- => [db-init internal] load .dockerignore                                                                                                          0.0s
- => => transferring context: 2B                                                                                                                    0.0s
+ => [system-mcp internal] load build definition from Dockerfile                                                                                    0.0s
+ => => transferring dockerfile: 1.88kB                                                                                                             0.0s
+ => [db-init internal] load build definition from Dockerfile.db-init                                                                               0.0s
+ => => transferring dockerfile: 1.41kB                                                                                                             0.0s
+ => [voc-mcp internal] load build definition from Dockerfile                                                                                       0.0s
+ => => transferring dockerfile: 1.88kB                                                                                                             0.0s
+ => [agent-server internal] load build definition from Dockerfile                                                                                  0.0s
+ => => transferring dockerfile: 1.58kB                                                                                                             0.0s
+ => [admin-console internal] load build definition from Dockerfile.admin-dev                                                                       0.0s
+ => => transferring dockerfile: 1.73kB                                                                                                             0.0s
+ => [db-init internal] load metadata for repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.12-slim                               0.0s
  => [system-mcp internal] load .dockerignore                                                                                                       0.0s
- => => transferring context: 2B                                                                                                                    0.0s
- => [mock-vllm internal] load .dockerignore                                                                                                        0.0s
- => => transferring context: 2B                                                                                                                    0.0s
- => [agent-server internal] load .dockerignore                                                                                                     0.0s
- => => transferring context: 2B                                                                                                                    0.0s
- => [command-mcp internal] load .dockerignore                                                                                                      0.0s
- => => transferring context: 2B                                                                                                                    0.0s
- => [voc-mcp internal] load .dockerignore                                                                                                          0.0s
  => => transferring context: 2B                                                                                                                    0.0s
  => [manual-mcp internal] load .dockerignore                                                                                                       0.0s
  => => transferring context: 2B                                                                                                                    0.0s
+ => [agent-server internal] load .dockerignore                                                                                                     0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [mock-vllm internal] load .dockerignore                                                                                                        0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [command-mcp internal] load .dockerignore                                                                                                      0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
  => [admin-console internal] load .dockerignore                                                                                                    0.0s
  => => transferring context: 2B                                                                                                                    0.0s
- => [command-mcp 1/9] FROM repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.12-slim                                             0.0s
- => [voc-mcp internal] load build context                                                                                                          0.0s
+ => [voc-mcp internal] load .dockerignore                                                                                                          0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [db-init internal] load .dockerignore                                                                                                          0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [admin-console 1/9] FROM repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.12-slim                                           0.0s
+ => [system-mcp internal] load build context                                                                                                       0.0s
  => => transferring context: 2.14MB                                                                                                                0.0s
- => [command-mcp 2/9] WORKDIR /app                                                                                                                 0.0s
+ => CACHED [admin-console 2/9] WORKDIR /app                                                                                                        0.0s
  => [mock-vllm internal] load build context                                                                                                        0.0s
  => => transferring context: 2.05MB                                                                                                                0.0s
- => [manual-mcp internal] load build context                                                                                                       0.0s
- => => transferring context: 2.14MB                                                                                                                0.0s
- => [admin-console internal] load build context                                                                                                    0.0s
- => => transferring context: 2.23MB                                                                                                                0.0s
- => [db-init internal] load build context                                                                                                          0.0s
- => => transferring context: 2.07MB                                                                                                                0.0s
  => [agent-server internal] load build context                                                                                                     0.0s
  => => transferring context: 2.15MB                                                                                                                0.0s
- => [system-mcp internal] load build context                                                                                                       0.0s
+ => [manual-mcp internal] load build context                                                                                                       0.0s
  => => transferring context: 2.14MB                                                                                                                0.0s
  => [command-mcp internal] load build context                                                                                                      0.0s
  => => transferring context: 2.14MB                                                                                                                0.0s
- => [system-mcp 3/9] COPY vendor/ /tmp/vendor/                                                                                                     0.1s
+ => [mock-vllm 3/9] COPY vendor/ /tmp/vendor/                                                                                                      0.1s
+ => [db-init internal] load build context                                                                                                          0.0s
+ => => transferring context: 2.07MB                                                                                                                0.0s
+ => [voc-mcp internal] load build context                                                                                                          0.0s
+ => => transferring context: 2.14MB                                                                                                                0.0s
+ => [admin-console internal] load build context                                                                                                    0.0s
+ => => transferring context: 2.22MB                                                                                                                0.0s
  => [mock-vllm 4/9] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ;      2.2s
- => CACHED [mock-vllm 3/6] COPY vendor/ /tmp/vendor/                                                                                               0.0s
- => CACHED [mock-vllm 4/6] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.wh  0.0s
- => ERROR [mock-vllm 5/6] RUN pip install --no-cache-dir fastapi "uvicorn[standard]" pydantic                                                      0.8s
- => CANCELED [system-mcp 5/9] RUN apt-get update && apt-get install -y --no-install-recommends openssh-client     && rm -rf /var/lib/apt/lists/*   0.8s
+ => CACHED [db-init 3/6] COPY vendor/ /tmp/vendor/                                                                                                 0.0s
+ => CACHED [db-init 4/6] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl   0.0s
+ => ERROR [db-init 5/6] RUN pip install --no-cache-dir "asyncpg==0.30.0"                                                                           0.9s
+ => CANCELED [system-mcp 5/9] RUN apt-get update && apt-get install -y --no-install-recommends openssh-client     && rm -rf /var/lib/apt/lists/*   0.9s
  => CACHED [admin-console  3/10] COPY vendor/ /tmp/vendor/                                                                                         0.0s
  => CACHED [admin-console  4/10] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pi  0.0s
  => [admin-console  5/10] COPY admin_console/backend/requirements.txt admin_console/backend/requirements.txt                                       0.0s
  => CACHED [agent-server 3/9] COPY vendor/ /tmp/vendor/                                                                                            0.0s
  => CACHED [agent-server 4/9] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*  0.0s
  => [agent-server 5/9] COPY agent_server/requirements.txt agent_server/requirements.txt                                                            0.1s
- => CACHED [db-init 3/6] COPY vendor/ /tmp/vendor/                                                                                                 0.0s
- => CACHED [db-init 4/6] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl   0.0s
- => ERROR [db-init 5/6] RUN pip install --no-cache-dir "asyncpg==0.30.0"                                                                           0.8s
- => CANCELED [admin-console  6/10] RUN pip install --no-cache-dir -r admin_console/backend/requirements.txt                                        0.8s
- => ERROR [agent-server 6/9] RUN pip install --no-cache-dir -r agent_server/requirements.txt                                                       0.7s
-------
- > [mock-vllm 5/6] RUN pip install --no-cache-dir fastapi "uvicorn[standard]" pydantic:
-0.554 ERROR: Exception:
-0.554 Traceback (most recent call last):
-0.554   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/base_command.py", line 167, in exc_logging_wrapper
-0.554     status = run_func(*args)
-0.554              ^^^^^^^^^^^^^^^
-0.554   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 247, in wrapper
-0.554     return func(self, options, args)
-0.554            ^^^^^^^^^^^^^^^^^^^^^^^^^
-0.554   File "/usr/local/lib/python3.12/site-packages/pip/_internal/commands/install.py", line 315, in run
-0.554     session = self.get_default_session(options)
-0.554               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-0.554   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 98, in get_default_session
-0.554     self._session = self.enter_context(self._build_session(options))
-0.554                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-0.554   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 125, in _build_session
-0.554     session = PipSession(
-0.554               ^^^^^^^^^^^
-0.554   File "/usr/local/lib/python3.12/site-packages/pip/_internal/network/session.py", line 343, in __init__
-0.554     self.headers["User-Agent"] = user_agent()
-0.554                                  ^^^^^^^^^^^^
-0.554   File "/usr/local/lib/python3.12/site-packages/pip/_internal/network/session.py", line 175, in user_agent
-0.554     setuptools_dist = get_default_environment().get_distribution("setuptools")
-0.554                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-0.554   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 180, in get_distribution
-0.554     return next(matches, None)
-0.554            ^^^^^^^^^^^^^^^^^^^
-0.554   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 177, in <genexpr>
-0.554     for distribution in self.iter_all_distributions()
-0.554                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-0.554   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/base.py", line 594, in iter_all_distributions
-0.554     for dist in self._iter_distributions():
-0.554                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
-0.554   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 168, in _iter_distributions
-0.554     for dist in finder.find_eggs(location):
-0.554                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
-0.554   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 136, in find_eggs
-0.554     yield from self._find_eggs_in_dir(location)
-0.554   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 103, in _find_eggs_in_dir
-0.554     from pip._vendor.pkg_resources import find_distributions
-0.554   File "/usr/local/lib/python3.12/site-packages/pip/_vendor/pkg_resources/__init__.py", line 2164, in <module>
-0.554     register_finder(pkgutil.ImpImporter, find_on_path)
-0.554                     ^^^^^^^^^^^^^^^^^^^
-0.554 AttributeError: module 'pkgutil' has no attribute 'ImpImporter'. Did you mean: 'zipimporter'?
-------
+ => CACHED [mock-vllm 3/6] COPY vendor/ /tmp/vendor/                                                                                               0.0s
+ => CACHED [mock-vllm 4/6] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.wh  0.0s
+ => ERROR [mock-vllm 5/6] RUN pip install --no-cache-dir fastapi "uvicorn[standard]" pydantic                                                      0.8s
+ => ERROR [admin-console  6/10] RUN pip install --no-cache-dir -r admin_console/backend/requirements.txt                                           0.8s
+ => ERROR [agent-server 6/9] RUN pip install --no-cache-dir -r agent_server/requirements.txt                                                       0.8s
 ------
  > [db-init 5/6] RUN pip install --no-cache-dir "asyncpg==0.30.0":
-0.637 ERROR: Exception:
-0.637 Traceback (most recent call last):
-0.637   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/base_command.py", line 167, in exc_logging_wrapper
-0.637     status = run_func(*args)
-0.637              ^^^^^^^^^^^^^^^
-0.637   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 247, in wrapper
-0.637     return func(self, options, args)
-0.637            ^^^^^^^^^^^^^^^^^^^^^^^^^
-0.637   File "/usr/local/lib/python3.12/site-packages/pip/_internal/commands/install.py", line 315, in run
-0.637     session = self.get_default_session(options)
-0.637               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-0.637   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 98, in get_default_session
-0.637     self._session = self.enter_context(self._build_session(options))
-0.637                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-0.637   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 125, in _build_session
-0.637     session = PipSession(
-0.637               ^^^^^^^^^^^
-0.637   File "/usr/local/lib/python3.12/site-packages/pip/_internal/network/session.py", line 343, in __init__
-0.637     self.headers["User-Agent"] = user_agent()
-0.637                                  ^^^^^^^^^^^^
-0.637   File "/usr/local/lib/python3.12/site-packages/pip/_internal/network/session.py", line 175, in user_agent
-0.637     setuptools_dist = get_default_environment().get_distribution("setuptools")
-0.637                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-0.637   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 180, in get_distribution
-0.637     return next(matches, None)
-0.637            ^^^^^^^^^^^^^^^^^^^
-0.637   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 177, in <genexpr>
-0.637     for distribution in self.iter_all_distributions()
-0.637                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-0.637   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/base.py", line 594, in iter_all_distributions
-0.637     for dist in self._iter_distributions():
-0.637                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
-0.637   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 168, in _iter_distributions
-0.637     for dist in finder.find_eggs(location):
-0.637                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
-0.637   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 136, in find_eggs
-0.637     yield from self._find_eggs_in_dir(location)
-0.637   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 103, in _find_eggs_in_dir
-0.637     from pip._vendor.pkg_resources import find_distributions
-0.637   File "/usr/local/lib/python3.12/site-packages/pip/_vendor/pkg_resources/__init__.py", line 2164, in <module>
-0.637     register_finder(pkgutil.ImpImporter, find_on_path)
-0.637                     ^^^^^^^^^^^^^^^^^^^
-0.637 AttributeError: module 'pkgutil' has no attribute 'ImpImporter'. Did you mean: 'zipimporter'?
+0.714 ERROR: Exception:
+0.714 Traceback (most recent call last):
+0.714   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/base_command.py", line 167, in exc_logging_wrapper
+0.714     status = run_func(*args)
+0.714              ^^^^^^^^^^^^^^^
+0.714   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 247, in wrapper
+0.714     return func(self, options, args)
+0.714            ^^^^^^^^^^^^^^^^^^^^^^^^^
+0.714   File "/usr/local/lib/python3.12/site-packages/pip/_internal/commands/install.py", line 315, in run
+0.714     session = self.get_default_session(options)
+0.714               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.714   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 98, in get_default_session
+0.714     self._session = self.enter_context(self._build_session(options))
+0.714                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.714   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 125, in _build_session
+0.714     session = PipSession(
+0.714               ^^^^^^^^^^^
+0.714   File "/usr/local/lib/python3.12/site-packages/pip/_internal/network/session.py", line 343, in __init__
+0.714     self.headers["User-Agent"] = user_agent()
+0.714                                  ^^^^^^^^^^^^
+0.714   File "/usr/local/lib/python3.12/site-packages/pip/_internal/network/session.py", line 175, in user_agent
+0.714     setuptools_dist = get_default_environment().get_distribution("setuptools")
+0.714                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.714   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 180, in get_distribution
+0.714     return next(matches, None)
+0.714            ^^^^^^^^^^^^^^^^^^^
+0.714   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 177, in <genexpr>
+0.714     for distribution in self.iter_all_distributions()
+0.714                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.714   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/base.py", line 594, in iter_all_distributions
+0.714     for dist in self._iter_distributions():
+0.714                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.714   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 168, in _iter_distributions
+0.714     for dist in finder.find_eggs(location):
+0.714                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.714   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 136, in find_eggs
+0.714     yield from self._find_eggs_in_dir(location)
+0.714   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 103, in _find_eggs_in_dir
+0.714     from pip._vendor.pkg_resources import find_distributions
+0.714   File "/usr/local/lib/python3.12/site-packages/pip/_vendor/pkg_resources/__init__.py", line 2164, in <module>
+0.714     register_finder(pkgutil.ImpImporter, find_on_path)
+0.714                     ^^^^^^^^^^^^^^^^^^^
+0.714 AttributeError: module 'pkgutil' has no attribute 'ImpImporter'. Did you mean: 'zipimporter'?
+------
+------
+ > [mock-vllm 5/6] RUN pip install --no-cache-dir fastapi "uvicorn[standard]" pydantic:
+0.613 ERROR: Exception:
+0.613 Traceback (most recent call last):
+0.613   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/base_command.py", line 167, in exc_logging_wrapper
+0.613     status = run_func(*args)
+0.613              ^^^^^^^^^^^^^^^
+0.613   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 247, in wrapper
+0.613     return func(self, options, args)
+0.613            ^^^^^^^^^^^^^^^^^^^^^^^^^
+0.613   File "/usr/local/lib/python3.12/site-packages/pip/_internal/commands/install.py", line 315, in run
+0.613     session = self.get_default_session(options)
+0.613               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.613   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 98, in get_default_session
+0.613     self._session = self.enter_context(self._build_session(options))
+0.613                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.613   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 125, in _build_session
+0.613     session = PipSession(
+0.613               ^^^^^^^^^^^
+0.613   File "/usr/local/lib/python3.12/site-packages/pip/_internal/network/session.py", line 343, in __init__
+0.613     self.headers["User-Agent"] = user_agent()
+0.613                                  ^^^^^^^^^^^^
+0.613   File "/usr/local/lib/python3.12/site-packages/pip/_internal/network/session.py", line 175, in user_agent
+0.613     setuptools_dist = get_default_environment().get_distribution("setuptools")
+0.613                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.613   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 180, in get_distribution
+0.613     return next(matches, None)
+0.613            ^^^^^^^^^^^^^^^^^^^
+0.613   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 177, in <genexpr>
+0.613     for distribution in self.iter_all_distributions()
+0.613                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.613   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/base.py", line 594, in iter_all_distributions
+0.613     for dist in self._iter_distributions():
+0.613                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.613   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 168, in _iter_distributions
+0.613     for dist in finder.find_eggs(location):
+0.613                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.613   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 136, in find_eggs
+0.613     yield from self._find_eggs_in_dir(location)
+0.613   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 103, in _find_eggs_in_dir
+0.613     from pip._vendor.pkg_resources import find_distributions
+0.613   File "/usr/local/lib/python3.12/site-packages/pip/_vendor/pkg_resources/__init__.py", line 2164, in <module>
+0.613     register_finder(pkgutil.ImpImporter, find_on_path)
+0.613                     ^^^^^^^^^^^^^^^^^^^
+0.613 AttributeError: module 'pkgutil' has no attribute 'ImpImporter'. Did you mean: 'zipimporter'?
+------
+------
+ > [admin-console  6/10] RUN pip install --no-cache-dir -r admin_console/backend/requirements.txt:
+0.684 ERROR: Exception:
+0.684 Traceback (most recent call last):
+0.684   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/base_command.py", line 167, in exc_logging_wrapper
+0.684     status = run_func(*args)
+0.684              ^^^^^^^^^^^^^^^
+0.684   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 247, in wrapper
+0.684     return func(self, options, args)
+0.684            ^^^^^^^^^^^^^^^^^^^^^^^^^
+0.684   File "/usr/local/lib/python3.12/site-packages/pip/_internal/commands/install.py", line 315, in run
+0.684     session = self.get_default_session(options)
+0.684               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.684   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 98, in get_default_session
+0.684     self._session = self.enter_context(self._build_session(options))
+0.684                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.684   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 125, in _build_session
+0.684     session = PipSession(
+0.684               ^^^^^^^^^^^
+0.684   File "/usr/local/lib/python3.12/site-packages/pip/_internal/network/session.py", line 343, in __init__
+0.684     self.headers["User-Agent"] = user_agent()
+0.684                                  ^^^^^^^^^^^^
+0.684   File "/usr/local/lib/python3.12/site-packages/pip/_internal/network/session.py", line 175, in user_agent
+0.684     setuptools_dist = get_default_environment().get_distribution("setuptools")
+0.684                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.684   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 180, in get_distribution
+0.684     return next(matches, None)
+0.684            ^^^^^^^^^^^^^^^^^^^
+0.684   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 177, in <genexpr>
+0.684     for distribution in self.iter_all_distributions()
+0.684                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.684   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/base.py", line 594, in iter_all_distributions
+0.684     for dist in self._iter_distributions():
+0.684                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.684   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 168, in _iter_distributions
+0.684     for dist in finder.find_eggs(location):
+0.684                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.684   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 136, in find_eggs
+0.684     yield from self._find_eggs_in_dir(location)
+0.684   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 103, in _find_eggs_in_dir
+0.684     from pip._vendor.pkg_resources import find_distributions
+0.684   File "/usr/local/lib/python3.12/site-packages/pip/_vendor/pkg_resources/__init__.py", line 2164, in <module>
+0.684     register_finder(pkgutil.ImpImporter, find_on_path)
+0.684                     ^^^^^^^^^^^^^^^^^^^
+0.684 AttributeError: module 'pkgutil' has no attribute 'ImpImporter'. Did you mean: 'zipimporter'?
 ------
 ------
  > [agent-server 6/9] RUN pip install --no-cache-dir -r agent_server/requirements.txt:
-0.616 ERROR: Exception:
-0.616 Traceback (most recent call last):
-0.616   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/base_command.py", line 167, in exc_logging_wrapper
-0.616     status = run_func(*args)
-0.616              ^^^^^^^^^^^^^^^
-0.616   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 247, in wrapper
-0.616     return func(self, options, args)
-0.616            ^^^^^^^^^^^^^^^^^^^^^^^^^
-0.616   File "/usr/local/lib/python3.12/site-packages/pip/_internal/commands/install.py", line 315, in run
-0.616     session = self.get_default_session(options)
-0.616               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-0.616   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 98, in get_default_session
-0.616     self._session = self.enter_context(self._build_session(options))
-0.616                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-0.616   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 125, in _build_session
-0.616     session = PipSession(
-0.616               ^^^^^^^^^^^
-0.616   File "/usr/local/lib/python3.12/site-packages/pip/_internal/network/session.py", line 343, in __init__
-0.616     self.headers["User-Agent"] = user_agent()
-0.616                                  ^^^^^^^^^^^^
-0.616   File "/usr/local/lib/python3.12/site-packages/pip/_internal/network/session.py", line 175, in user_agent
-0.616     setuptools_dist = get_default_environment().get_distribution("setuptools")
-0.616                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-0.616   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 180, in get_distribution
-0.616     return next(matches, None)
-0.616            ^^^^^^^^^^^^^^^^^^^
-0.616   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 177, in <genexpr>
-0.616     for distribution in self.iter_all_distributions()
-0.616                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-0.616   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/base.py", line 594, in iter_all_distributions
-0.616     for dist in self._iter_distributions():
-0.616                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
-0.616   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 168, in _iter_distributions
-0.616     for dist in finder.find_eggs(location):
-0.616                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
-0.616   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 136, in find_eggs
-0.616     yield from self._find_eggs_in_dir(location)
-0.616   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 103, in _find_eggs_in_dir
-0.616     from pip._vendor.pkg_resources import find_distributions
-0.616   File "/usr/local/lib/python3.12/site-packages/pip/_vendor/pkg_resources/__init__.py", line 2164, in <module>
-0.616     register_finder(pkgutil.ImpImporter, find_on_path)
-0.616                     ^^^^^^^^^^^^^^^^^^^
-0.616 AttributeError: module 'pkgutil' has no attribute 'ImpImporter'. Did you mean: 'zipimporter'?
+0.676 ERROR: Exception:
+0.676 Traceback (most recent call last):
+0.676   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/base_command.py", line 167, in exc_logging_wrapper
+0.676     status = run_func(*args)
+0.676              ^^^^^^^^^^^^^^^
+0.676   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 247, in wrapper
+0.676     return func(self, options, args)
+0.676            ^^^^^^^^^^^^^^^^^^^^^^^^^
+0.676   File "/usr/local/lib/python3.12/site-packages/pip/_internal/commands/install.py", line 315, in run
+0.676     session = self.get_default_session(options)
+0.676               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.676   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 98, in get_default_session
+0.676     self._session = self.enter_context(self._build_session(options))
+0.676                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.676   File "/usr/local/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 125, in _build_session
+0.676     session = PipSession(
+0.676               ^^^^^^^^^^^
+0.676   File "/usr/local/lib/python3.12/site-packages/pip/_internal/network/session.py", line 343, in __init__
+0.676     self.headers["User-Agent"] = user_agent()
+0.676                                  ^^^^^^^^^^^^
+0.676   File "/usr/local/lib/python3.12/site-packages/pip/_internal/network/session.py", line 175, in user_agent
+0.676     setuptools_dist = get_default_environment().get_distribution("setuptools")
+0.676                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.676   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 180, in get_distribution
+0.676     return next(matches, None)
+0.676            ^^^^^^^^^^^^^^^^^^^
+0.676   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 177, in <genexpr>
+0.676     for distribution in self.iter_all_distributions()
+0.676                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.676   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/base.py", line 594, in iter_all_distributions
+0.676     for dist in self._iter_distributions():
+0.676                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.676   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 168, in _iter_distributions
+0.676     for dist in finder.find_eggs(location):
+0.676                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+0.676   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 136, in find_eggs
+0.676     yield from self._find_eggs_in_dir(location)
+0.676   File "/usr/local/lib/python3.12/site-packages/pip/_internal/metadata/importlib/_envs.py", line 103, in _find_eggs_in_dir
+0.676     from pip._vendor.pkg_resources import find_distributions
+0.676   File "/usr/local/lib/python3.12/site-packages/pip/_vendor/pkg_resources/__init__.py", line 2164, in <module>
+0.676     register_finder(pkgutil.ImpImporter, find_on_path)
+0.676                     ^^^^^^^^^^^^^^^^^^^
+0.676 AttributeError: module 'pkgutil' has no attribute 'ImpImporter'. Did you mean: 'zipimporter'?
 ------
 [+] build 0/8
- ⠙ Image ai-infra-assistant-manual-mcp    Building                                                                                                  3.3s
- ⠙ Image ai-infra-assistant-mock-vllm     Building                                                                                                  3.3s
- ⠙ Image ai-infra-assistant-system-mcp    Building                                                                                                  3.3s
- ⠙ Image ai-infra-assistant-command-mcp   Building                                                                                                  3.3s
- ⠙ Image ai-infra-assistant-voc-mcp       Building                                                                                                  3.3s
- ⠙ Image ai-infra-assistant-admin-console Building                                                                                                  3.3s
- ⠙ Image ai-infra-assistant-db-init       Building                                                                                                  3.3s
- ⠙ Image ai-infra-assistant-agent-server  Building                                                                                                  3.3s
-WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
-
-WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
-
-WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
-
-WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
-
-WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
-
-WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
-
-WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
-
-WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
-
+ ⠙ Image ai-infra-assistant-main-voc-mcp       Building                                                                                             3.4s
+ ⠙ Image ai-infra-assistant-main-manual-mcp    Building                                                                                             3.4s
+ ⠙ Image ai-infra-assistant-main-db-init       Building                                                                                             3.4s
+ ⠙ Image ai-infra-assistant-main-command-mcp   Building                                                                                             3.4s
+ ⠙ Image ai-infra-assistant-main-admin-console Building                                                                                             3.4s
+ ⠙ Image ai-infra-assistant-main-agent-server  Building                                                                                             3.4s
+ ⠙ Image ai-infra-assistant-main-mock-vllm     Building                                                                                             3.4s
+ ⠙ Image ai-infra-assistant-main-system-mcp    Building                                                                                             3.4s
 Dockerfile.mock:20
 
 --------------------
