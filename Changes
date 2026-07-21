@@ -49,3 +49,4 @@ admin_console/Dockerfile — 12~13번 줄 추가
 신규 파일
 
 - Temp/pip-22.3.1-py3-none-any.whl — 원격 서버에서 pip download로 받아서 로컬에 복사한 wheel 파일
+- .env.sample 말고 .env 지정, PIP_INDEX_URL=http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple 사용
