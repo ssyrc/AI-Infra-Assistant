@@ -1,3 +1,11 @@
+[root@24-gp19 AI-Infra-Assistant]# ls -l vendor/pip*
+-rw-r--r-- 1 yr9.choi X0104 2140742 Jul 21 20:58 vendor/pip-22.1.2-py3-none-any.whl
+[root@24-gp19 AI-Infra-Assistant]# grep -rn 'python:3.12' docker-compose*.yml */Dockerfile* && echo "!!! 3.12" || echo "3.11 OK"
+grep -rn 'python:3.12' docker-compose*.yml */Dockerfile* && echo "ls -l vendor/pip*! 3.12" || echo "3.11 OK"
+3.11 OK
+[root@24-gp19 AI-Infra-Assistant]# cp .env.example .env
+[root@24-gp19 AI-Infra-Assistant]#
+[root@24-gp19 AI-Infra-Assistant]#
 [root@24-gp19 AI-Infra-Assistant]# docker builder prune -af
 ID                                              RECLAIMABLE     SIZE            LAST ACCESSED
 uvfhmmwhn735fphdde47pe91a*                      true            1.845kB         14 minutes ago
@@ -173,3 +181,12 @@ Dockerfile.admin-dev:21
 --------------------
 
 target admin-console: failed to solve: process "/bin/sh -c pip install --no-cache-dir -r admin_console/backend/requirements.txt" did not complete successfully: exit code: 1
+
+[root@24-gp19 AI-Infra-Assistant]# ^C
+[root@24-gp19 AI-Infra-Assistant]# pip install asyncpg==0.31.0
+Looking in indexes: http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
+Requirement already satisfied: asyncpg==0.31.0 in /apps/python/Python-3.13.0/lib/python3.13/site-packages (0.31.0)
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+
+[notice] A new release of pip is available: 24.2 -> 26.1.2
+[notice] To update, run: /apps/python/Python-3.13.0/bin/python3 -m pip install --upgrade pip
