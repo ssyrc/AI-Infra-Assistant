@@ -1,40 +1,51 @@
-dev/Dockerfile.mock
+1. pip version 변경
 
-+ COPY pip.conf /etc/pip.conf
-+ RUN pip install --no-cache-dir "pip<23"
-  RUN pip install --no-cache-dir fastapi "uvicorn[standard]" pydantic
+[root@24-gp19 AI-Infra-Assistant]# pip --version
+pip 24.2 from /apps/python/Python-3.13.0/lib/python3.13/site-packages/pip (python 3.13)
+[root@24-gp19 AI-Infra-Assistant]#
+[root@24-gp19 AI-Infra-Assistant]#
+[root@24-gp19 AI-Infra-Assistant]# pip download "pip==22.3.1" --no-deps -d /home/gpu1/yr9.choi/AI-Infra-Assistant/Temp/
+Looking in indexes: http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
+Collecting pip==22.3.1
+  Downloading http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/packages/pip/22.3.1/pip-22.3.1-py3-none-any.whl.metadata (4.1 kB)
+Downloading http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/packages/pip/22.3.1/pip-22.3.1-py3-none-any.whl (2.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 59.2 MB/s eta 0:00:00
+Saved ./Temp/pip-22.3.1-py3-none-any.whl
+Successfully downloaded pip
 
-shared/Dockerfile.db-init
+[notice] A new release of pip is available: 24.2 -> 26.1.2
+[notice] To update, run: /apps/python/Python-3.13.0/bin/python3 -m pip install --upgrade pip
+[root@24-gp19 AI-Infra-Assistant]# ^C
 
-+ COPY pip.conf /etc/pip.conf
-+ RUN pip install --no-cache-dir "pip<23"
-  RUN pip install --no-cache-dir "asyncpg==0.30.0"
 
-mcp_servers/Dockerfile
 
-+ COPY pip.conf /etc/pip.conf
-+ RUN pip install --no-cache-dir "pip<23"
-  # openssh-client ...
-- RUN apt-get update && apt-get install -y ...
-+ RUN http_proxy=http://202.20.187.241:3128 https_proxy=http://202.20.187.241:3128 \
-+     apt-get update && apt-get install -y ...
-  RUN pip install --no-cache-dir -r requirements.txt
+2. 파일 변경
+dev/Dockerfile.mock — 12~13번 줄 추가
 
-agent_server/Dockerfile
+12  COPY Temp/pip-22.3.1-py3-none-any.whl /tmp/
+13  RUN pip install --no-cache-dir /tmp/pip-22.3.1-py3-none-any.whl
 
-+ COPY pip.conf /etc/pip.conf
-+ RUN pip install --no-cache-dir "pip<23"
-  COPY agent_server/requirements.txt ...
+shared/Dockerfile.db-init — 12~13번 줄 추가
 
-admin_console/Dockerfile
+12  COPY Temp/pip-22.3.1-py3-none-any.whl /tmp/
+13  RUN pip install --no-cache-dir /tmp/pip-22.3.1-py3-none-any.whl
 
-+ COPY pip.conf /etc/pip.conf
-+ RUN pip install --no-cache-dir "pip<23"
-  COPY admin_console/backend/requirements.txt ...
+mcp_servers/Dockerfile — 12~13번 줄 추가
+
+12  COPY Temp/pip-22.3.1-py3-none-any.whl /tmp/
+13  RUN pip install --no-cache-dir /tmp/pip-22.3.1-py3-none-any.whl
+
+agent_server/Dockerfile — 12~13번 줄 추가
+
+12  COPY Temp/pip-22.3.1-py3-none-any.whl /tmp/
+13  RUN pip install --no-cache-dir /tmp/pip-22.3.1-py3-none-any.whl
+
+admin_console/Dockerfile — 12~13번 줄 추가
+
+12  COPY Temp/pip-22.3.1-py3-none-any.whl /tmp/
+13  RUN pip install --no-cache-dir /tmp/pip-22.3.1-py3-none-any.whl
 
 ---
-그리고 신규 파일 pip.conf:
-[global]
-index-url = http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
-proxy = http://202.20.187.241:3128
-trusted-host = repository.samsungds.net
+신규 파일
+
+- Temp/pip-22.3.1-py3-none-any.whl — 원격 서버에서 pip download로 받아서 로컬에 복사한 wheel 파일
