@@ -8,6 +8,58 @@
 
 ---
 
+## ⚡ 지금 당장 실행 (WSL에서 git 받고 → rsync로 서버 올리고 → 서버에서 빌드)
+
+> 워크플로: **WSL(git 됨)** 에서 최신 main을 받아 **rsync로 폐쇄망 서버에 올린 뒤**, 서버에서 빌드.
+> `--delete`가 빠지면 서버에 옛 파일(3.12 Dockerfile, pip-22.2.2 휠)이 남아 **같은 에러가 반복**된다.
+
+### 1) WSL — 최신 받기
+```bash
+cd ~/AI-Infra-Assistant
+git fetch origin main
+git reset --hard origin/main
+# 확인: 아래 3줄이 각각 "pip-22.1.2 하나만 / 3.11 OK / =1 여섯 줄" 나와야 함
+ls -1 vendor/pip-*.whl
+grep -rq 'python:3.12' docker-compose*.yml */Dockerfile* && echo '!!! 3.12 남음' || echo '3.11 OK'
+for f in agent_server/Dockerfile admin_console/Dockerfile mcp_servers/Dockerfile \
+         shared/Dockerfile.db-init dev/Dockerfile.mock dev/Dockerfile.admin-dev; do
+  printf '%-35s =%s\n' "$f" "$(grep -c 'no-index --no-cache-dir /tmp/vendor/pip' "$f")"; done
+```
+
+### 2) WSL — rsync로 서버에 올리기 (⚠️ `--delete` 필수)
+```bash
+rsync -av --delete --exclude '.env' --exclude '.git' \
+  ~/AI-Infra-Assistant/  root@<서버IP>:<서버경로>/AI-Infra-Assistant/
+```
+- `--delete`: 서버의 **옛 pip-22.2.2 휠 / 3.12 Dockerfile을 지워** WSL과 완전히 동일하게 맞춘다.
+- `--exclude '.env'`: 서버에서 만든 `.env`를 덮어쓰지 않는다.
+
+### 3) 서버 — 확인 후 빌드
+```bash
+cd <서버경로>/AI-Infra-Assistant
+
+# (핵심) 서버에도 최신이 올라갔는지 재확인 — 아래가 기대값과 다르면 rsync가 덜 된 것
+ls -1 vendor/pip-*.whl                                          # pip-22.1.2 하나만
+grep -rq 'python:3.12' docker-compose*.yml */Dockerfile* && echo '!!! 3.12 남음' || echo '3.11 OK'
+
+[ -f .env ] || cp .env.example .env
+
+docker builder prune -af
+docker compose -f docker-compose.dev.yml build --no-cache
+docker compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.dev.yml ps
+curl -s http://localhost:8500/health ; echo
+```
+
+### 성공 판정
+빌드 로그에서 `pip install ... -r requirements.txt` 자리에 **`json.loads` 트레이스백 없이**
+`Collecting fastapi ...` / `Downloading ...` 이 뜨면 통과. (실패해온 자리가 여기였다.)
+
+> 현재 조합: **python:3.11-slim + pip 22.1.2(HTML-only)**. 이 둘이 맞아야 폐쇄망 미러가 동작한다.
+> 배경/원리는 아래 3장, git 안 쓰고 직접 패치하려면 3-A 참고.
+
+---
+
 ## 0. 한눈에 보기
 
 | 구분 | 값 |
