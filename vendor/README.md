@@ -19,14 +19,34 @@ json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
 
 ## 들어있는 파일
 
-- `pip-22.1.2-py3-none-any.whl` — 순수 파이썬 휠(py3-none-any)이라 이미지에 그대로 쓰인다.
+- `pip-22.1.2-py3-none-any.whl` — 순수 파이썬 휠. pip 자체 부트스트랩 전용(위 문제 해결).
+- `asyncpg-0.31.0-cp311-...manylinux...x86_64.whl` — 사내 미러가 asyncpg 인덱스 조회 시
+  간헐적으로 빈 응답(`from versions: none`)을 줘서 오프라인으로 고정 설치.
+  **cp311 + manylinux(x86_64) 휠** — 베이스 이미지(`python:3.11-slim`, linux/amd64)와 일치해야 한다.
+- `fastapi-0.115.8-py3-none-any.whl` — 순수 파이썬. 같은 이유(미러 간헐 실패)로 오프라인 고정.
 
-## 휠을 직접 갱신/교체하려면 (인터넷 되는 곳에서 1회)
+## 동작 방식 — vendor의 모든 whl은 자동으로 오프라인 설치된다
+
+각 Dockerfile은 `pip-*.whl`로 pip를 부트스트랩한 뒤, **`vendor/` 안의 모든 `*.whl`을
+`--no-index`로 순회 설치**한다. 그러면 이후 `pip install -r requirements.txt` 단계에서
+그 패키지는 이미 설치돼 있어 미러에 요청을 보내지 않는다(다른 패키지는 평소처럼 미러에서 받음).
+
+**즉, 미러가 특정 패키지/버전을 못 주거나(없음 또는 간헐적 빈 응답) 사내망에서 그 원인을 당장
+못 고칠 때, 그 패키지의 whl을 이 폴더에 넣기만 하면 Dockerfile을 손대지 않고 바로 해결된다.**
+
+## 휠을 새로 추가/갱신하려면 (인터넷 되는 곳에서 1회)
 
 ```bash
-pip download pip==22.1.2 --no-deps -d vendor/
+# 순수 파이썬 패키지(대부분의 웹 프레임워크 등)
+pip download '<pkg>==<버전>' --no-deps -d vendor/
+
+# C 확장이 있는 패키지(예: asyncpg)는 베이스 이미지와 플랫폼이 맞아야 한다.
+# 이 리포 베이스는 python:3.11-slim, linux/amd64 이므로:
+pip download '<pkg>==<버전>' --no-deps -d vendor/ \
+  --platform manylinux_2_17_x86_64 --python-version 311 --implementation cp --abi cp311 \
+  --only-binary=:all:
 ```
 
 폐쇄망 반입만 가능하면, 사내에서 동작하는 pip로 위 명령을 실행해 나온 `.whl`을 이 폴더에 두면 된다.
-`pip-*.whl` 이름이면 Dockerfile이 자동으로 집어서 오프라인 설치한다. 파일이 없으면 인덱스에서
-직접 설치를 시도하므로 공개 PyPI 등 정상 미러 환경에서는 이 폴더가 비어 있어도 된다.
+휠이 없는 패키지는 평소처럼 인덱스에서 설치를 시도하므로, 공개 PyPI 등 정상 미러 환경에서는
+이 폴더에 `pip-*.whl` 외엔 없어도 된다.
