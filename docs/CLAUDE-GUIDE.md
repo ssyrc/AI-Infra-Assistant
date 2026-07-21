@@ -39,7 +39,7 @@ dev에 필요한 이미지 4종:
 ```
 <REGISTRY_DOCKERHUB>/pgvector/pgvector:pg16
 <REGISTRY_DOCKERHUB>/postgres:16-alpine
-<REGISTRY_DOCKERHUB>/python:3.12-slim
+<REGISTRY_DOCKERHUB>/python:3.11-slim
 <REGISTRY_GHCR>/open-webui/open-webui:v0.6.5
 ```
 프로덕션은 추가로 `langfuse/langfuse:3.130.0`, `langfuse/langfuse-worker:3.130.0`,
@@ -107,6 +107,16 @@ API(PEP 691)** 로 조회하는데, 사내 미러가 이를 지원하지 않아 
 순수 파이썬 휠)을 각 Dockerfile이 빌드 첫 단계에서 **오프라인(`--no-index`)** 으로 먼저 설치한다.
 이후 모든 패키지는 옛 pip로 사내 미러에서 정상 설치된다.
 
+> **베이스 이미지는 Python 3.11 (3.12 아님).** pip 22.2.2(<22.3, HTML API)는 **Python 3.12에서
+> 실행되지 않는다** — `AttributeError: module 'pkgutil' has no attribute 'ImpImporter'`(3.12에서
+> 제거된 API를 옛 pip의 vendored pkg_resources가 참조). 정리하면:
+> - 미러 호환 위해 pip **< 22.3** 필요 → 그런데 그 pip는 **3.12에서 못 돎**
+> - 3.12 호환 pip(≥23)은 다시 **JSON API** → 미러 실패
+>
+> 그래서 베이스 이미지를 **`python:3.11-slim`** 으로 고정했다(3.11엔 `pkgutil.ImpImporter`가 있어
+> pip 22.2.2가 정상 실행되고, HTML API로 미러도 OK). compose `x-py-build-args`와 6개 Dockerfile의
+> `ARG PYTHON_IMAGE`가 모두 3.11-slim이다. 사내 미러에 `python:3.11-slim` 이미지가 있어야 한다.
+
 빌드 로그에서 아래처럼 나오면 정상:
 ```
 => [command-mcp] COPY vendor/ /tmp/vendor/
@@ -133,6 +143,13 @@ mkdir -p vendor
 rm -f vendor/pip-22.3.1*.whl
 [ -f vendor/pip-22.2.2-py3-none-any.whl ] || pip download "pip==22.2.2" --no-deps -d vendor/
 ls -l vendor/pip-*.whl
+
+# 1-b) 베이스 이미지를 Python 3.11로 (pip 22.2.2는 Python 3.12에서 ImpImporter 에러로 못 돎)
+sed -i 's#python:3.12-slim#python:3.11-slim#g' \
+  docker-compose.yml docker-compose.dev.yml \
+  agent_server/Dockerfile admin_console/Dockerfile mcp_servers/Dockerfile \
+  shared/Dockerfile.db-init dev/Dockerfile.mock dev/Dockerfile.admin-dev
+grep -rn 'python:3.12' docker-compose*.yml */Dockerfile* 2>/dev/null && echo "!!! 3.12 남음" || echo "3.11 전환 OK"
 
 # 2) 6개 Dockerfile 전부에 vendor 부트스트랩 주입 (WORKDIR /app 바로 뒤)
 for f in agent_server/Dockerfile admin_console/Dockerfile mcp_servers/Dockerfile \
@@ -270,6 +287,15 @@ docker compose up -d --build
 그 후 `grep -c 'no-index --no-cache-dir /tmp/vendor/pip'` 가 **6개 파일 모두 `1`** 인지,
 `grep -rn 'pip<23\|Temp/pip\|22.3.1' */Dockerfile*` 가 **아무것도 안 나오는지** 먼저 확인하고 빌드한다.
 (로그가 매번 100% 동일하면 = 파일이 안 바뀐 것. `22.3.1`은 여전히 JSON을 쓰므로 반드시 `22.2.2`.)
+
+### 8-1-b. 빌드 중 `AttributeError: module 'pkgutil' has no attribute 'ImpImporter'`
+→ pip 22.2.2를 **Python 3.12** 위에서 돌려서 나는 에러(3.12가 `ImpImporter`를 제거함). 베이스
+이미지가 **`python:3.11-slim`** 인지 확인한다:
+```bash
+grep -rn 'python:3.1[12]' docker-compose*.yml */Dockerfile*
+```
+`3.12`가 보이면 3장 3-A의 **1-b 단계**(`sed ... 3.12-slim → 3.11-slim`)를 실행하고 다시 빌드한다.
+사내 미러에 `python:3.11-slim`이 있어야 한다(없으면 미러 관리자에게 요청).
 
 ### 8-2. 포트 충돌 (`address already in use`, 8000/8100 등)
 → agent-server는 기본 **8500**으로 노출된다. 그래도 겹치면 `.env`에서 해당 `*_PORT`만 빈 포트로 바꾼다.
