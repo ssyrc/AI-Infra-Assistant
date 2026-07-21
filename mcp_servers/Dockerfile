@@ -17,6 +17,12 @@ COPY vendor/ /tmp/vendor/
 RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then \
       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ; \
     fi
+# vendor/에 다른 whl(미러에 없거나 불안정한 패키지, 예: asyncpg/fastapi)이 있으면 오프라인으로
+# 먼저 설치한다. 이후 requirements.txt 설치 시 그 패키지는 '이미 만족'되어 미러 요청을 안 한다.
+RUN for w in /tmp/vendor/*.whl; do \
+      [ -e "$w" ] || continue; \
+      pip install --no-index --no-cache-dir "$w" || true; \
+    done
 # openssh-client: System/Command MCP가 대상 서버로 ssh 실행할 때 필요.
 RUN apt-get update && apt-get install -y --no-install-recommends openssh-client \
     && rm -rf /var/lib/apt/lists/*
