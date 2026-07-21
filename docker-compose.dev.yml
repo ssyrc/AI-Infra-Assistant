@@ -75,7 +75,7 @@ services:
     build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
     command: ["python", "mcp_servers/manual_mcp/server.py"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8001" }
-    ports: ["${MANUAL_MCP_PORT:-8001}:8001"]
+    ports: ["${MANUAL_MCP_PORT:-8501}:8001"]
     depends_on:
       dev-config: { condition: service_completed_successfully }
 
@@ -83,7 +83,7 @@ services:
     build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
     command: ["python", "mcp_servers/command_mcp/server.py"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8002" }
-    ports: ["${COMMAND_MCP_PORT:-8002}:8002"]
+    ports: ["${COMMAND_MCP_PORT:-8502}:8002"]
     depends_on:
       dev-config: { condition: service_completed_successfully }
 
@@ -91,7 +91,7 @@ services:
     build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
     command: ["python", "mcp_servers/voc_mcp/server.py"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8003" }
-    ports: ["${VOC_MCP_PORT:-8003}:8003"]
+    ports: ["${VOC_MCP_PORT:-8503}:8003"]
     depends_on:
       dev-config: { condition: service_completed_successfully }
 
@@ -99,7 +99,7 @@ services:
     build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
     command: ["python", "mcp_servers/system_mcp/server.py"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8004" }
-    ports: ["${SYSTEM_MCP_PORT:-8004}:8004"]
+    ports: ["${SYSTEM_MCP_PORT:-8504}:8004"]
     depends_on:
       dev-config: { condition: service_completed_successfully }
 
