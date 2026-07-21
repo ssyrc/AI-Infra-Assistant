@@ -79,7 +79,7 @@ docker compose -f docker-compose.dev.yml up -d --build
 > 다른 포트가 겹치면 `.env`의 `AGENT_PORT`/`ADMIN_PORT`/`OPENWEBUI_PORT`/`PG_PORT`/`*_MCP_PORT`만 빈 포트로 바꾼다.
 > 사용 중인 포트 확인:
 > ```bash
-> ss -tlnp | grep -E ':(3000|5432|8080|8500|8001|8002|8003|8004)\b'
+> ss -tlnp | grep -E ':(3000|5432|8080|8500|8501|8502|8503|8504)\b'
 > ```
 > mock-vllm은 호스트에 노출하지 않는다(내부망 전용).
 
