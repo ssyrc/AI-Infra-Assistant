@@ -1,23 +1,294 @@
-### 로컬 WSL 환경에서 실행하는 법
-git -C /home/yrc/AI-Infra-Assistant fetch origin main && git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
-rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/AI-Infra-Assistant/ 2>&1
-
 ### 에러 메시지
-## 0.31.0 버전은 다운 가능
-[root@24-gp19 AI-Infra-Assistant]# pip install asyncpg==0.31.0
+[root@24-gp19 AI-Infra-Assistant]# bash scripts/rebuild.sh
+== 사전 확인 ==
+vendor 휠: vendor/pip-22.1.2-py3-none-any.whl
+베이스 python:3.11 OK
+== 빌드 ==
+ID                                              RECLAIMABLE     SIZE            LAST ACCESSED
+r3vvfga6rrbocmfgfd8evmkt1*                      true            2.239MB         16 minutes ago
+53ewi68o0uinginyrqp6hmv0w*                      true    0B              16 minutes ago
+l7s2fyx00xi6abixll48fxudr*                      true    2.239MB         16 minutes ago
+xd4phy1wg533xv7z57f9ce7r6*                      true    1.845kB         16 minutes ago
+ntvt9s5dxdl56ecn9v1nv1qwu*                      true    2.166MB         16 minutes ago
+u4kktlcg6nokt3qmc2q13kex9*                      true    2.239MB         16 minutes ago
+za7mu6opf4b2fdcx6lurmie80*                      true    1.36kB          16 minutes ago
+zacsj2jphhb0wgvwe1hk8p4zj*                      true    1.676kB         16 minutes ago
+cvjmql6zc6tuf6v423h7efhd5*                      true    1.427kB         16 minutes ago
+q0jypkfbfc84dezew0j14a3lz*                      true    2.242MB         16 minutes ago
+f9tzwhtn813l32ukee6zgi61q*                      true    0B              16 minutes ago
+3q2gt6zafjapezuqm3d1dfvcm                       true    146B            16 minutes ago
+uf1qcha57ikk8amvhdl5s5lts*                      true    1.539kB         16 minutes ago
+o8j2lhhaxe4o57lc0rpqujs0y*                      true    1.845kB         16 minutes ago
+r56ho43hd0xzzx2ib73l4jzqp*                      true    2.239MB         16 minutes ago
+vqmxzi3v5hrbev4rl8o3cv2pk*                      true    2.317MB         16 minutes ago
+q9dmgu0jct9fmn2ha8sd5wwnn*                      true    2.146MB         16 minutes ago
+l1thux9t5syq9ece8p39d4r5l*                      true    0B              16 minutes ago
+vhulngm5oc5ubll6hxgp823hj                       true    238B            16 minutes ago
+80mna5yxsru1z1pteplot09m2*                      true    1.845kB         16 minutes ago
+jk6q5e7dvta0b4p07bp7h447j*                      true    0B              16 minutes ago
+cb5ve22oelrs2sczp5jevs2mh*                      true    0B              16 minutes ago
+ilo9ssbnclq9ws3vdlokfo3ya*                      true    0B              16 minutes ago
+xryfl8iifuhzhyarsadd999j3*                      true    0B              16 minutes ago
+b3l43j2t83h96yt6e9o1d79ix*                      true    0B              16 minutes ago
+fchmzvoccci0wzayh2gnolupe                       true    20.24MB         16 minutes ago
+zl26xup25aw03x3ta0s60lh5s*                      true    1.845kB         16 minutes ago
+y1576286sx6vuvpcfapot15wt                       true    2.143MB         16 minutes ago
+3ku6khl6k582o2tkszvntzma2                       true    0B              16 minutes ago
+biixfqou5s29x9yolh336kh5e                       true    0B              16 minutes ago
+xur9yv0c7v86hyraz909pf8i1                       true    0B              16 minutes ago
+qltpvoaan5z00kcytsmb1rkna                       true    0B              16 minutes ago
+u5r0wzo1cb74f0ho1simc6zly                       true    0B              16 minutes ago
+Total:  40.22MB
+[+] Building 4.5s (45/79)
+ => [internal] load local bake definitions                                                                                                         0.0s
+ => => reading from stdin 7.33kB                                                                                                                   0.0s
+ => [manual-mcp internal] load build definition from Dockerfile                                                                                    0.0s
+ => => transferring dockerfile: 1.88kB                                                                                                             0.0s
+ => [agent-server internal] load build definition from Dockerfile                                                                                  0.0s
+ => => transferring dockerfile: 1.58kB                                                                                                             0.0s
+ => [command-mcp internal] load build definition from Dockerfile                                                                                   0.0s
+ => => transferring dockerfile: 1.88kB                                                                                                             0.0s
+ => [db-init internal] load build definition from Dockerfile.db-init                                                                               0.0s
+ => => transferring dockerfile: 1.41kB                                                                                                             0.0s
+ => [admin-console internal] load build definition from Dockerfile.admin-dev                                                                       0.0s
+ => => transferring dockerfile: 1.73kB                                                                                                             0.0s
+ => [system-mcp internal] load build definition from Dockerfile                                                                                    0.0s
+ => => transferring dockerfile: 1.88kB                                                                                                             0.0s
+ => [mock-vllm internal] load build definition from Dockerfile.mock                                                                                0.0s
+ => => transferring dockerfile: 1.47kB                                                                                                             0.0s
+ => [voc-mcp internal] load build definition from Dockerfile                                                                                       0.0s
+ => => transferring dockerfile: 1.88kB                                                                                                             0.0s
+ => [command-mcp internal] load metadata for repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim                           0.1s
+ => [system-mcp internal] load .dockerignore                                                                                                       0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [mock-vllm internal] load .dockerignore                                                                                                        0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [manual-mcp internal] load .dockerignore                                                                                                       0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [command-mcp internal] load .dockerignore                                                                                                      0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [db-init internal] load .dockerignore                                                                                                          0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [agent-server internal] load .dockerignore                                                                                                     0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [admin-console internal] load .dockerignore                                                                                                    0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [voc-mcp internal] load .dockerignore                                                                                                          0.0s
+ => => transferring context: 2B                                                                                                                    0.0s
+ => [manual-mcp internal] load build context                                                                                                       0.0s
+ => => transferring context: 2.24MB                                                                                                                0.0s
+ => [manual-mcp 1/9] FROM repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47b  0.8s
+ => => resolve repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7  0.0s
+ => => extracting sha256:9775d166087aba0afe5ba9a88859c04c08090e82ae218742d09fec9119e0335d                                                          0.1s
+ => => sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93 10.37kB / 10.37kB                                                   0.0s
+ => => sha256:00af38ae2ed311628970782e8a2d7f014d8909dbc63cb97bc0a158187f4db045 1.75kB / 1.75kB                                                     0.0s
+ => => sha256:1c03896dbf0ef4a2b86f1462395249e810c589e25d8c0b002faabc38aa144686 5.48kB / 5.48kB                                                     0.0s
+ => => sha256:9775d166087aba0afe5ba9a88859c04c08090e82ae218742d09fec9119e0335d 1.29MB / 1.29MB                                                     0.0s
+ => => sha256:6b265b8eae4a26a263eb55546aa430c1eef37032a7cd86393d98c6b779f28319 14.42MB / 14.42MB                                                   0.3s
+ => => sha256:c89b9f64c028c19ba92e195d7589d914b9cd1fc69f3c3dfeb931e93876ac2064 248B / 248B                                                         0.0s
+ => => extracting sha256:6b265b8eae4a26a263eb55546aa430c1eef37032a7cd86393d98c6b779f28319                                                          0.5s
+ => => extracting sha256:c89b9f64c028c19ba92e195d7589d914b9cd1fc69f3c3dfeb931e93876ac2064                                                          0.0s
+ => [voc-mcp internal] load build context                                                                                                          0.0s
+ => => transferring context: 2.24MB                                                                                                                0.0s
+ => [system-mcp internal] load build context                                                                                                       0.0s
+ => => transferring context: 2.24MB                                                                                                                0.0s
+ => [mock-vllm internal] load build context                                                                                                        0.0s
+ => => transferring context: 2.15MB                                                                                                                0.0s
+ => [command-mcp internal] load build context                                                                                                      0.0s
+ => => transferring context: 2.24MB                                                                                                                0.0s
+ => [admin-console internal] load build context                                                                                                    0.0s
+ => => transferring context: 2.32MB                                                                                                                0.0s
+ => [agent-server internal] load build context                                                                                                     0.0s
+ => => transferring context: 2.24MB                                                                                                                0.0s
+ => [db-init internal] load build context                                                                                                          0.0s
+ => => transferring context: 2.17MB                                                                                                                0.0s
+ => [mock-vllm 2/9] WORKDIR /app                                                                                                                   0.1s
+ => [agent-server 3/9] COPY vendor/ /tmp/vendor/                                                                                                   0.0s
+ => [admin-console 4/9] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ;  2.3s
+ => CANCELED [manual-mcp 5/9] RUN apt-get update && apt-get install -y --no-install-recommends openssh-client     && rm -rf /var/lib/apt/lists/*   1.0s
+ => CACHED [admin-console  3/10] COPY vendor/ /tmp/vendor/                                                                                         0.0s
+ => CACHED [admin-console  4/10] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pi  0.0s
+ => [admin-console  5/10] COPY admin_console/backend/requirements.txt admin_console/backend/requirements.txt                                       0.0s
+ => CACHED [agent-server 3/9] COPY vendor/ /tmp/vendor/                                                                                            0.0s
+ => CACHED [agent-server 4/9] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*  0.0s
+ => [agent-server 5/9] COPY agent_server/requirements.txt agent_server/requirements.txt                                                            0.1s
+ => CACHED [mock-vllm 3/6] COPY vendor/ /tmp/vendor/                                                                                               0.0s
+ => CACHED [mock-vllm 4/6] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.wh  0.0s
+ => ERROR [mock-vllm 5/6] RUN pip install --no-cache-dir fastapi "uvicorn[standard]" pydantic                                                      0.9s
+ => CACHED [db-init 3/6] COPY vendor/ /tmp/vendor/                                                                                                 0.0s
+ => CACHED [db-init 4/6] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl   0.0s
+ => CANCELED [db-init 5/6] RUN pip install --no-cache-dir "asyncpg==0.31.0"                                                                        1.0s
+ => ERROR [admin-console  6/10] RUN pip install --no-cache-dir -r admin_console/backend/requirements.txt                                           0.9s
+ => CANCELED [agent-server 6/9] RUN pip install --no-cache-dir -r agent_server/requirements.txt                                                    1.0s
+------
+ > [mock-vllm 5/6] RUN pip install --no-cache-dir fastapi "uvicorn[standard]" pydantic:
+0.651 Looking in indexes: http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
+0.681 ERROR: Could not find a version that satisfies the requirement fastapi (from versions: none)
+0.681 ERROR: No matching distribution found for fastapi
+------
+------
+ > [admin-console  6/10] RUN pip install --no-cache-dir -r admin_console/backend/requirements.txt:
+0.676 Looking in indexes: http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
+0.714 ERROR: Could not find a version that satisfies the requirement fastapi==0.115.8 (from versions: none)
+0.714 ERROR: No matching distribution found for fastapi==0.115.8
+------
+[+] build 0/8
+ ⠙ Image ai-infra-assistant-manual-mcp    Building                                                                                                  4.6s
+ ⠙ Image ai-infra-assistant-command-mcp   Building                                                                                                  4.6s
+ ⠙ Image ai-infra-assistant-system-mcp    Building                                                                                                  4.6s
+ ⠙ Image ai-infra-assistant-admin-console Building                                                                                                  4.6s
+ ⠙ Image ai-infra-assistant-mock-vllm     Building                                                                                                  4.6s
+ ⠙ Image ai-infra-assistant-voc-mcp       Building                                                                                                  4.6s
+ ⠙ Image ai-infra-assistant-agent-server  Building                                                                                                  4.6s
+ ⠙ Image ai-infra-assistant-db-init       Building                                                                                                  4.6s
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+
+Dockerfile.mock:20
+
+--------------------
+
+  18 |           pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ; \
+
+  19 |         fi
+
+  20 | >>> RUN pip install --no-cache-dir fastapi "uvicorn[standard]" pydantic
+
+  21 |     ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
+
+  22 |     COPY dev/mock_vllm.py .
+
+--------------------
+
+target mock-vllm: failed to solve: process "/bin/sh -c pip install --no-cache-dir fastapi \"uvicorn[standard]\" pydantic" did not complete successfully: exit code: 1
+
+
+### faistapi 다운받으려고 하면 이런 에러가 뜨네. 
+[root@24-gp19 AI-Infra-Assistant]# pip install fastapi==0.115.8
 Looking in indexes: http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
-Requirement already satisfied: asyncpg==0.31.0 in /apps/python/Python-3.13.0/lib/python3.13/site-packages (0.31.0)
-WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+Collecting fastapi==0.115.8
+  Downloading http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/packages/fastapi/0.115.8/fastapi-0.115.8-py3-none-any.whl.metadata (27 kB)
 
 [notice] A new release of pip is available: 24.2 -> 26.1.2
 [notice] To update, run: /apps/python/Python-3.13.0/bin/python3 -m pip install --upgrade pip
-[root@24-gp19 AI-Infra-Assistant]#
+ERROR: Exception:
+Traceback (most recent call last):
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_internal/cli/base_command.py", line 105, in _run_wrapper
+    status = _inner_run()
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_internal/cli/base_command.py", line 96, in _inner_run
+    return self.run(options, args)
+           ~~~~~~~~^^^^^^^^^^^^^^^
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_internal/cli/req_command.py", line 67, in wrapper
+    return func(self, options, args)
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_internal/commands/install.py", line 379, in run
+    requirement_set = resolver.resolve(
+        reqs, check_supported_wheels=not options.target_dir
+    )
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_internal/resolution/resolvelib/resolver.py", line 95, in resolve
+    result = self._result = resolver.resolve(
+                            ~~~~~~~~~~~~~~~~^
+        collected.requirements, max_rounds=limit_how_complex_resolution_can_be
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_vendor/resolvelib/resolvers.py", line 546, in resolve
+    state = resolution.resolve(requirements, max_rounds=max_rounds)
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_vendor/resolvelib/resolvers.py", line 427, in resolve
+    failure_causes = self._attempt_to_pin_criterion(name)
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_vendor/resolvelib/resolvers.py", line 239, in _attempt_to_pin_criterion
+    criteria = self._get_updated_criteria(candidate)
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_vendor/resolvelib/resolvers.py", line 230, in _get_updated_criteria
+    self._add_to_criteria(criteria, requirement, parent=candidate)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_vendor/resolvelib/resolvers.py", line 173, in _add_to_criteria
+    if not criterion.candidates:
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_vendor/resolvelib/structs.py", line 156, in __bool__
+    return bool(self._sequence)
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_internal/resolution/resolvelib/found_candidates.py", line 174, in __bool__
+    return any(self)
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_internal/resolution/resolvelib/found_candidates.py", line 162, in <genexpr>
+    return (c for c in iterator if id(c) not in self._incompatible_ids)
+                       ^^^^^^^^
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_internal/resolution/resolvelib/found_candidates.py", line 49, in _iter_built
+    for version, func in infos:
+                         ^^^^^
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_internal/resolution/resolvelib/factory.py", line 301, in iter_index_candidate_infos
+    result = self._finder.find_best_candidate(
+        project_name=name,
+        specifier=specifier,
+        hashes=hashes,
+    )
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_internal/index/package_finder.py", line 883, in find_best_candidate
+    candidates = self.find_all_candidates(project_name)
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_internal/index/package_finder.py", line 824, in find_all_candidates
+    page_candidates = list(page_candidates_it)
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_internal/index/sources.py", line 194, in page_candidates
+    yield from self._candidates_from_page(self._link)
+               ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_internal/index/package_finder.py", line 788, in process_project_url
+    page_links = list(parse_links(index_response))
+                      ~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_internal/index/collector.py", line 218, in wrapper_wrapper
+    return list(fn(page))
+  File "/apps/python/Python-3.13.0/lib/python3.13/site-packages/pip/_internal/index/collector.py", line 231, in parse_links
+    data = json.loads(page.content)
+  File "/apps/python/Python-3.13.0/lib/python3.13/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/apps/python/Python-3.13.0/lib/python3.13/json/decoder.py", line 344, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/apps/python/Python-3.13.0/lib/python3.13/json/decoder.py", line 362, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
 
-## 0.30.0 버전은 다운 불가능
-[root@24-gp19 AI-Infra-Assistant]# pip install asyncpg==0.30.0
-Looking in indexes: http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
-ERROR: Could not find a version that satisfies the requirement asyncpg==0.30.0 (from versions: none)
 
-[notice] A new release of pip is available: 24.2 -> 26.1.2
-[notice] To update, run: /apps/python/Python-3.13.0/bin/python3 -m pip install --upgrade pip
-ERROR: No matching distribution found for asyncpg==0.30.0
+### 지금 있는 버전
+[root@24-gp19 AI-Infra-Assistant]# bash scripts/debug-now.sh fastapi
+date      : 2026-07-21 21:25:52
+index-url : http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
+proxy     : http://202.20.187.241:3128   (내부 미러도 프록시 경유 필수)
+
+========== fastapi ==========
+URL: http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple/fastapi/
+HTTP=200, 응답=223551bytes
+미러에 있는 버전 수: 602
+최근 버전들:
+   0.138.0
+   0.138.0.tar.gz
+   0.138.1
+   0.138.1.tar.gz
+   0.138.2
+   0.138.2.tar.gz
+   0.139.0
+   0.139.0.tar.gz
+   0.139.1
+   0.139.1.tar.gz
+   0.139.2
+   0.139.2.tar.gz
+
+------ 판정 ------
+- 특정 버전이 '없음 ❌' 이면: requirements의 그 핀을 '있음'인 버전으로 바꾸거나,
+  그 버전 휠을 vendor/에 넣어 오프라인 설치한다(아래).
+- 버전이 '0개' 로 아예 안 나오면: 인덱스 URL(PIP_INDEX_URL)이 잘못됐거나 프록시가 막힌 것.
+  HTTP 코드가 200이 아니면 프록시/방화벽, 200인데 0개면 이 URL이 simple 인덱스가 아님.
+
+------ 미러에 없는 버전을 vendor로 쓰는 법 ------
+  1) 인터넷 되는 곳(WSL 등)에서:  pip download '<pkg>==<ver>' -d vendor/    (의존성까지 받으려면 --no-deps 빼기)
+  2) rsync로 서버에 반영 후:       bash scripts/rebuild.sh
+  (Dockerfile은 requirements 설치 시 vendor/를 find-links로 함께 본다면 자동 사용 — 배선은 문의)
+
