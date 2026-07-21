@@ -23,7 +23,14 @@ _converter = None
 
 def _get_converter():
     """Docling은 무겁고 모델 다운로드가 필요하므로 실제로 문서를 파싱할 때 최초 1회만 로딩한다.
-    dev 환경에서 DISABLE_DOCLING=1이면 로딩하지 않는다(txt/xlsx는 Docling 없이도 동작)."""
+    dev 환경에서 DISABLE_DOCLING=1이면 로딩하지 않는다(txt/xlsx는 Docling 없이도 동작).
+
+    설정:
+    - 표 구조 인식(TableFormer)을 명시적으로 켠다 -> 표가 마크다운 표(| a | b |)로 추출된다.
+    - OCR은 기본 OFF. 텍스트가 살아있는 PDF(예: PPT를 PDF로 저장한 파일)는 OCR이 불필요하고,
+      폐쇄망에서 OCR 모델까지 반입하지 않아도 되게 한다. 스캔/이미지 PDF는 DOCLING_OCR=1로 켠다.
+    - 고급 옵션 API가 버전에 따라 다를 수 있어, 실패하면 기본 DocumentConverter로 폴백한다.
+    """
     global _converter
     if os.environ.get("DISABLE_DOCLING") == "1":
         raise RuntimeError(
@@ -32,7 +39,24 @@ def _get_converter():
         )
     if _converter is None:
         from docling.document_converter import DocumentConverter
-        _converter = DocumentConverter()
+        try:
+            from docling.document_converter import PdfFormatOption
+            from docling.datamodel.base_models import InputFormat
+            from docling.datamodel.pipeline_options import PdfPipelineOptions
+
+            popts = PdfPipelineOptions()
+            popts.do_table_structure = True
+            try:
+                popts.table_structure_options.do_cell_matching = True
+            except Exception:  # noqa: BLE001
+                pass
+            popts.do_ocr = os.environ.get("DOCLING_OCR", "0") == "1"
+            _converter = DocumentConverter(
+                format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=popts)}
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[parser] Docling 고급 옵션 미적용, 기본 설정으로 진행: {type(e).__name__}: {e}")
+            _converter = DocumentConverter()
     return _converter
 
 
