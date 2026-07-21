@@ -9,6 +9,14 @@ ENV PIP_INDEX_URL=${PIP_INDEX_URL} PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} PIP_DISA
     http_proxy=${BUILD_PROXY} https_proxy=${BUILD_PROXY} HTTP_PROXY=${BUILD_PROXY} HTTPS_PROXY=${BUILD_PROXY} \
     no_proxy=${NO_PROXY} NO_PROXY=${NO_PROXY}
 WORKDIR /app
+# 폐쇄망 사내 미러는 최신 pip의 JSON Simple API(PEP 691)를 지원하지 않아, 내장 최신 pip(24.x)가
+# 인덱스 응답을 json.loads()하다 JSONDecodeError로 빌드가 깨진다. HTML API만 쓰는 pip<22.3으로
+# 내려야 하는데 최신 pip로는 미러에서 그 pip조차 못 받으므로(닭-달걀), vendor/에 미리 받아둔 pip
+# 휠을 오프라인으로 먼저 설치한다. (vendor 휠이 없으면 건너뜀 = 공개 PyPI 등 정상 미러용)
+COPY vendor/ /tmp/vendor/
+RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then \
+      pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ; \
+    fi
 # openssh-client: System/Command MCP가 대상 서버로 ssh 실행할 때 필요.
 RUN apt-get update && apt-get install -y --no-install-recommends openssh-client \
     && rm -rf /var/lib/apt/lists/*
