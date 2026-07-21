@@ -57,11 +57,11 @@ NO_PROXY=localhost,127.0.0.1
 
 - `RUN pip install "pip<23"` 로 내리려 해도, 그 설치 자체가 최신 pip로 같은 미러를 조회하다
   **똑같이 JSONDecodeError로 실패**한다(닭-달걀). 게다가 `pip<23`=22.3.1은 여전히 JSON을 쓴다.
-- **해결(이 리포에 이미 반영됨):** `vendor/pip-22.2.2-py3-none-any.whl`(HTML API만 쓰는 순수
+- **해결(이 리포에 이미 반영됨):** `vendor/pip-22.1.2-py3-none-any.whl`(HTML API만 쓰는 순수
   파이썬 휠)을 각 Dockerfile이 빌드 첫 단계에서 **오프라인(`--no-index`)** 으로 먼저 설치한다.
   이후 모든 패키지는 옛 pip로 사내 미러에서 정상 다운로드된다. **추가 작업 없이 그냥 빌드하면 된다.**
 
-> 휠을 갱신/교체하려면 `vendor/README.md` 참고(`pip download pip==22.2.2 --no-deps -d vendor/`).
+> 휠을 갱신/교체하려면 `vendor/README.md` 참고(`pip download pip==22.1.2 --no-deps -d vendor/`).
 > `vendor/pip-*.whl`이 없으면 인덱스에서 직접 설치를 시도하므로, 공개 PyPI 같은 정상 미러에서는
 > 이 폴더가 비어 있어도 된다.
 
