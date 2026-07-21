@@ -6,6 +6,6 @@ uvicorn[standard]==0.34.0
 pydantic==2.10.6
 langfuse==2.60.9
 openinference-instrumentation-google-adk==0.1.2
-asyncpg==0.30.0
+asyncpg==0.31.0
 httpx==0.28.1
 sqlalchemy[asyncio]==2.0.38

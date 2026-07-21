@@ -17,7 +17,7 @@ COPY vendor/ /tmp/vendor/
 RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then \
       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ; \
     fi
-RUN pip install --no-cache-dir "asyncpg==0.30.0"
+RUN pip install --no-cache-dir "asyncpg==0.31.0"
 ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
 COPY shared/migrations.py .
 CMD ["python", "migrations.py"]
