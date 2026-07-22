@@ -51,3 +51,43 @@
 #11 557.8 Ign:3 http://deb.debian.org/debian-security trixie-security InRelease
 #11 621.8 Err:1 http://deb.debian.org/debian trixie InRelease
 #11 621.8   Connection failed [IP: 202.20.187.241 3128]
+
+
+
+
+# 프록시 구조
+1. 우리 agent 서버: 폐쇄망 내 202.20.183.30
+2. agent 서버가 있는 폐쇄망 내, 사내망으로의 http proxy: 202.20.187.241:3128
+3. 사내망 내 미러: repository.samsungds.net/{적절한repo...}
+4. 사내망 내 apt 사용 방법
+
+/etc/apt/ 폴더 내 sources.list 파일을 변경합니다.  아래는 Debian 11 버전 예이며, 다른 버전일 경우 환경에 맞는 버전 코드로 변경합니다. 또한 OS Architecture 별 저장소 명이 다릅니다.
+11.2 (Bullseye) - amd64 arch
+deb http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian bullseye main
+11.2 (Bullseye) - aarch64 arch
+deb http://repository.samsungds.net/repository/proxy-apt-deb.debian.org/debian bullseye main
+기존 설정 변경
+
+/etc/apt 내 기존 외부 저장소를 참고하는 리스트 파일이 남아있을 경우 접근 오류가 발생할 수 있습니다. 해당 파일들은 다른 폴더로 백업 후 삭제를 권장합니다.
+
+### 설정 확인
+apt-get update 이후 필요한 패키지 대상으로 install 을 진행합니다. 
+11.2 (Bullseye) - 적용 Test
+
+# cat /etc/issue
+Debian GNU/Linux 11 \n \l
+
+# apt-get update
+Hit:1 http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian bullseye InRelease
+Reading package lists... Done
+
+# apt-get install gpg
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+The following additional packages will be installed:
+dirmngr gnupg gnupg-l10n gnupg-utils gpg-agent gpg-wks-client gpg-wks-server gpgconf gpgsm libassuan0 libksba8
+libncursesw6 libnpth0 libreadline8 libsqlite3-0 pinentry-curses readline-common
+Suggested packages:
+... 중략 ...
+
