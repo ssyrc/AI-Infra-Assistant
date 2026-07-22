@@ -42,6 +42,8 @@ json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
   `google_adk-1.22.1` — 사내 미러에 `google-adk` 본체가 없을 때를 대비한다. 이 버전은
   `fastapi>=0.115,<0.124`, `starlette>=0.49.1,<1.0`, `watchdog>=6,<7` 조합이 필요하므로
   agent-server requirements와 vendor wheel을 함께 맞춘다.
+- `litellm-1.61.20`, `langfuse-2.60.9` — agent-server 런타임 요구사항. source archive(`.tar.gz`)는
+  빌드 의존성(`wheel`, `poetry-core` 등)을 다시 요구할 수 있으므로 wheel(`.whl`)로 보관한다.
 - `deb/` — MCP 이미지에서 `openssh-client`를 apt 미러 없이 설치하기 위한 Debian bullseye
   linux/amd64 `.deb` 묶음. Dockerfile은 이 디렉터리에 `.deb`가 있으면 `apt-get update`를 하지 않고
   `dpkg --unpack /tmp/vendor/deb/*.deb` 후 `dpkg --configure -a`로 로컬 설치한다.
@@ -51,8 +53,10 @@ json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
 각 Dockerfile은 `pip-*.whl`로 pip를 부트스트랩한 뒤, **`vendor/` 안의 pip 외 `*.whl`을
 `--no-index --no-deps`로 순회 설치**한다. 그러면 이후 `pip install -r requirements.txt`
 단계에서 그 패키지 본체는 이미 설치돼 있어 미러에 요청을 보내지 않는다. 이후 `pip install`
-단계도 `--find-links /tmp/vendor`를 같이 사용하므로, 미러에 없는 패키지가 직접 요구사항으로
-다시 등장해도 vendor wheel을 후보로 사용할 수 있다. 필요한 나머지 의존성은 평소처럼 미러에서 받는다.
+단계도 `--find-links /tmp/vendor-wheels`를 같이 사용하므로, 미러에 없는 패키지가 직접 요구사항으로
+다시 등장해도 vendor wheel을 후보로 사용할 수 있다. `/tmp/vendor-wheels`에는 `*.whl`만 복사되므로,
+실수로 `vendor/`에 `.tar.gz` source archive가 있어도 pip가 빌드 대상으로 집어가지 않는다.
+필요한 나머지 의존성은 평소처럼 미러에서 받는다.
 
 **즉, 미러가 특정 패키지/버전을 못 주거나(없음 또는 간헐적 빈 응답) 사내망에서 그 원인을 당장
 못 고칠 때, 그 패키지의 whl을 이 폴더에 넣기만 하면 Dockerfile을 손대지 않고 바로 해결된다.**
@@ -93,6 +97,9 @@ pip download --dest vendor --only-binary=:all: \
 
 # Google ADK 본체만 사내 미러에 없을 때:
 pip download --dest vendor --only-binary=:all: --no-deps 'google-adk==1.22.1'
+
+# Agent 런타임 본체가 사내 미러에 없을 때:
+pip download --dest vendor --only-binary=:all: --no-deps 'litellm==1.61.20' 'langfuse==2.60.9'
 ```
 
 폐쇄망 반입만 가능하면, 사내에서 동작하는 pip로 위 명령을 실행해 나온 `.whl`을 이 폴더에 두면 된다.

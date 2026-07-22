@@ -16,6 +16,7 @@ WORKDIR /app
 # 내려야 하는데 최신 pip로는 미러에서 그 pip조차 못 받으므로(닭-달걀), vendor/에 미리 받아둔 pip
 # 휠을 오프라인으로 먼저 설치한다. (vendor 휠이 없으면 건너뜀 = 공개 PyPI 등 정상 미러용)
 COPY vendor/ /tmp/vendor/
+RUN mkdir -p /tmp/vendor-wheels; cp /tmp/vendor/*.whl /tmp/vendor-wheels/ 2>/dev/null || true
 RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then \
       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ; \
     fi
@@ -51,7 +52,7 @@ RUN set -eux; \
     fi; \
     rm -rf /var/lib/apt/lists/* /tmp/vendor/deb
 COPY mcp_servers/requirements.txt .
-RUN pip install --no-cache-dir --find-links /tmp/vendor -r requirements.txt
+RUN pip install --no-cache-dir --find-links /tmp/vendor-wheels -r requirements.txt
 # 빌드 프록시를 런타임 컨테이너에 남기지 않는다(내부 서비스 통신이 프록시로 새지 않도록).
 ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
 COPY shared/ ./shared/

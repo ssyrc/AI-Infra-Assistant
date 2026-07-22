@@ -14,6 +14,7 @@ WORKDIR /app
 # 내려야 하는데 최신 pip로는 미러에서 그 pip조차 못 받으므로(닭-달걀), vendor/에 미리 받아둔 pip
 # 휠을 오프라인으로 먼저 설치한다. (vendor 휠이 없으면 건너뜀 = 공개 PyPI 등 정상 미러용)
 COPY vendor/ /tmp/vendor/
+RUN mkdir -p /tmp/vendor-wheels; cp /tmp/vendor/*.whl /tmp/vendor-wheels/ 2>/dev/null || true
 RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then \
       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ; \
     fi
@@ -26,8 +27,8 @@ RUN for w in /tmp/vendor/*.whl; do \
     done
 COPY admin_console/backend/requirements.txt admin_console/backend/requirements.txt
 COPY admin_console/backend/requirements-docling.txt admin_console/backend/requirements-docling.txt
-RUN pip install --no-cache-dir --find-links /tmp/vendor -r admin_console/backend/requirements.txt \
-    && pip install --no-cache-dir --find-links /tmp/vendor -r admin_console/backend/requirements-docling.txt
+RUN pip install --no-cache-dir --find-links /tmp/vendor-wheels -r admin_console/backend/requirements.txt \
+    && pip install --no-cache-dir --find-links /tmp/vendor-wheels -r admin_console/backend/requirements-docling.txt
 ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
 COPY shared/ shared/
 COPY mcp_servers/system_mcp/whitelist.py mcp_servers/system_mcp/whitelist.py
