@@ -4,6 +4,16 @@
 
 x-pg-pass: &pgpass devpass
 x-config-dsn: &configdsn postgresql://agent:devpass@postgres:5432/platform_config
+x-agent-source-volumes: &agent-source-volumes
+  - ./agent_server:/app/agent_server:ro
+  - ./shared:/app/shared:ro
+x-mcp-source-volumes: &mcp-source-volumes
+  - ./mcp_servers:/app/mcp_servers:ro
+  - ./shared:/app/shared:ro
+x-admin-source-volumes: &admin-source-volumes
+  - ./admin_console:/app/admin_console:ro
+  - ./shared:/app/shared:ro
+  - ./mcp_servers/system_mcp:/app/mcp_servers/system_mcp:ro
 
 # 폐쇄망: 사내 미러 레지스트리를 .env로 지정한다(기본은 공개 레지스트리).
 #   REGISTRY_DOCKERHUB=repository.samsungds.net/proxy-docker-registry-1.docker.io
@@ -24,7 +34,8 @@ x-mcp-build-args: &mcpargs
 
 x-mcp-image: &mcpimage
   image: ai-infra-assistant-mcp:dev
-  build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *mcpargs }
+  build: { context: ., dockerfile: dev/Dockerfile.mcp-dev, args: *mcpargs }
+  volumes: *mcp-source-volumes
 
 services:
   postgres:
@@ -44,7 +55,9 @@ services:
       retries: 20
 
   db-init:
-    build: { context: ., dockerfile: shared/Dockerfile.db-init, args: *pyargs }
+    build: { context: ., dockerfile: dev/Dockerfile.db-init-dev, args: *pyargs }
+    volumes:
+      - ./shared:/app/shared:ro
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_USER: agent
@@ -75,6 +88,8 @@ services:
 
   mock-vllm:
     build: { context: ., dockerfile: dev/Dockerfile.mock, args: *pyargs }
+    volumes:
+      - ./dev/mock_vllm.py:/app/mock_vllm.py:ro
     # 호스트 노출 불필요(agent가 도커 내부망 mock-vllm:8000으로 접속) → 8100 충돌을 피하려고
     # 기본적으로 호스트에 포트를 열지 않는다. 직접 curl 디버깅이 필요하면 아래 줄의 주석을 풀고
     # 빈 포트를 지정한다:  ports: ["8500:8000"] 등.
@@ -82,7 +97,7 @@ services:
 
   manual-mcp:
     <<: *mcpimage
-    command: ["python", "mcp_servers/manual_mcp/server.py"]
+    command: ["watchfiles", "--filter", "python", "python mcp_servers/manual_mcp/server.py", "mcp_servers/manual_mcp", "shared"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8001" }
     ports: ["${MANUAL_MCP_PORT:-8501}:8001"]
     depends_on:
@@ -90,7 +105,7 @@ services:
 
   command-mcp:
     <<: *mcpimage
-    command: ["python", "mcp_servers/command_mcp/server.py"]
+    command: ["watchfiles", "--filter", "python", "python mcp_servers/command_mcp/server.py", "mcp_servers/command_mcp", "shared"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8002" }
     ports: ["${COMMAND_MCP_PORT:-8502}:8002"]
     depends_on:
@@ -98,7 +113,7 @@ services:
 
   voc-mcp:
     <<: *mcpimage
-    command: ["python", "mcp_servers/voc_mcp/server.py"]
+    command: ["watchfiles", "--filter", "python", "python mcp_servers/voc_mcp/server.py", "mcp_servers/voc_mcp", "shared"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8003" }
     ports: ["${VOC_MCP_PORT:-8503}:8003"]
     depends_on:
@@ -106,14 +121,16 @@ services:
 
   system-mcp:
     <<: *mcpimage
-    command: ["python", "mcp_servers/system_mcp/server.py"]
+    command: ["watchfiles", "--filter", "python", "python mcp_servers/system_mcp/server.py", "mcp_servers/system_mcp", "shared"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8004" }
     ports: ["${SYSTEM_MCP_PORT:-8504}:8004"]
     depends_on:
       dev-config: { condition: service_completed_successfully }
 
   agent-server:
-    build: { context: ., dockerfile: agent_server/Dockerfile, args: *pyargs }
+    build: { context: ., dockerfile: dev/Dockerfile.agent-dev, args: *pyargs }
+    volumes: *agent-source-volumes
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/agent_server", "--reload-dir", "/app/shared"]
     environment:
       CONFIG_DB_DSN: *configdsn
       # LANGFUSE 키 없음 -> 트레이싱 자동 비활성화
@@ -129,6 +146,7 @@ services:
 
   admin-console:
     build: { context: ., dockerfile: dev/Dockerfile.admin-dev, args: *pyargs }
+    volumes: *admin-source-volumes
     environment:
       CONFIG_DB_DSN: *configdsn
       ADMIN_USER: admin

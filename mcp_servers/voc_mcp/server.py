@@ -116,5 +116,7 @@ async def search_voc(
 
 
 if __name__ == "__main__":
-    import os as _os
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=int(_os.environ.get("MCP_PORT", 8003)))
+    import uvicorn
+
+    port = int(os.environ.get("MCP_PORT", 8003))
+    uvicorn.run(mcp.streamable_http_app(), host="0.0.0.0", port=port)

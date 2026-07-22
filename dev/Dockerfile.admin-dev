@@ -27,11 +27,10 @@ RUN for w in /tmp/vendor/*.whl; do \
     done
 COPY admin_console/backend/requirements.txt admin_console/backend/requirements.txt
 RUN pip install --no-cache-dir --find-links /tmp/vendor-wheels -r admin_console/backend/requirements.txt
-ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
-COPY shared/ shared/
-COPY mcp_servers/system_mcp/whitelist.py mcp_servers/system_mcp/whitelist.py
-COPY admin_console/ admin_console/
+ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY= \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app/admin_console/backend
 ENV DISABLE_DOCLING=1
 EXPOSE 8080
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload", "--reload-dir", "/app/admin_console", "--reload-dir", "/app/shared", "--reload-dir", "/app/mcp_servers/system_mcp"]

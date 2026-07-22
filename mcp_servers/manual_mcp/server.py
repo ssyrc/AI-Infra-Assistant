@@ -182,5 +182,7 @@ async def get_document(manual_file_id: int, offset: int = 0, limit: int = 20,
 
 
 if __name__ == "__main__":
-    import os as _os
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=int(_os.environ.get("MCP_PORT", 8001)))
+    import uvicorn
+
+    port = int(os.environ.get("MCP_PORT", 8001))
+    uvicorn.run(mcp.streamable_http_app(), host="0.0.0.0", port=port)
