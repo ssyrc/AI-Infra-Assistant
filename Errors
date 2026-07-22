@@ -1,93 +1,45 @@
-======== 빌드: manual-mcp ========
- Image ai-infra-assistant-db-init Building
- Image ai-infra-assistant-mcp:dev Building
-#1 [internal] load local bake definitions
-#1 reading from stdin 1.82kB done
-#1 DONE 0.0s
+#11 3.217 + rm -rf /var/lib/apt/lists/auxfiles /var/lib/apt/lists/lock /var/lib/apt/lists/partial /var/lib/apt/lists/repository.samsungds.net_repository_proxy-apt-mirror.kakao.com-debian_dists_trixie_InRelease /var/lib/apt/lists/repository.samsungds.net_repository_proxy-apt-mirror.kakao.com-debian_dists_trixie_main_binary-amd64_Packages.lz4
+#11 DONE 3.3s
 
-#2 [internal] load build definition from Dockerfile
-#2 transferring dockerfile: 2.31kB done
-#2 DONE 0.0s
+#12 [ 7/10] COPY mcp_servers/requirements.txt .
+#12 DONE 0.0s
 
-#3 [internal] load metadata for repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim
-#3 DONE 0.0s
+#13 [ 8/10] RUN pip install --no-cache-dir -r requirements.txt
+#13 0.448 Looking in indexes: http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
+#13 0.494 Collecting mcp<2.0.0,>=1.28.1
+#13 0.503   Downloading http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/packages/mcp/1.28.1/mcp-1.28.1-py3-none-any.whl (222 kB)
+#13 0.506      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 222.6/222.6 kB 179.6 MB/s eta 0:00:00
+#13 0.533 ERROR: Could not find a version that satisfies the requirement uvicorn[standard]==0.34.0 (from versions: none)
+#13 0.533 ERROR: No matching distribution found for uvicorn[standard]==0.34.0
+#13 ERROR: process "/bin/sh -c pip install --no-cache-dir -r requirements.txt" did not complete successfully: exit code: 1
+------
+ > [ 8/10] RUN pip install --no-cache-dir -r requirements.txt:
+0.448 Looking in indexes: http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
+0.494 Collecting mcp<2.0.0,>=1.28.1
+0.503   Downloading http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/packages/mcp/1.28.1/mcp-1.28.1-py3-none-any.whl (222 kB)
+0.506      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 222.6/222.6 kB 179.6 MB/s eta 0:00:00
+0.533 ERROR: Could not find a version that satisfies the requirement uvicorn[standard]==0.34.0 (from versions: none)
+0.533 ERROR: No matching distribution found for uvicorn[standard]==0.34.0
+------
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
 
-#4 [internal] load .dockerignore
-#4 transferring context: 2B done
-#4 DONE 0.0s
+Dockerfile:39
 
-#5 [ 1/10] FROM repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim
-#5 DONE 0.0s
+--------------------
 
-#6 [internal] load build context
-#6 transferring context: 98.64kB done
-#6 DONE 0.0s
+  37 |         rm -rf /var/lib/apt/lists/*
 
-#7 [ 2/10] WORKDIR /app
-#7 CACHED
+  38 |     COPY mcp_servers/requirements.txt .
 
-#8 [ 4/10] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ;     fi
-#8 CACHED
+  39 | >>> RUN pip install --no-cache-dir -r requirements.txt
 
-#9 [ 3/10] COPY vendor/ /tmp/vendor/
-#9 CACHED
+  40 |     # 빌드 프록시를 런타임 컨테이너에 남기지 않는다(내부 서비스 통신이 프록시로 새지 않도록).
 
-#10 [ 5/10] RUN for w in /tmp/vendor/*.whl; do       [ -e "$w" ] || continue;       case "$(basename "$w")" in pip-*) continue ;; esac;       pip install --no-index --no-cache-dir --no-deps "$w";     done
-#10 CACHED
+  41 |     ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
 
-#11 [ 6/10] RUN apt-get update && apt-get install -y --no-install-recommends openssh-client     && rm -rf /var/lib/apt/lists/*
+--------------------
 
-
-#11 60.28 Ign:1 http://deb.debian.org/debian trixie InRelease
-#11 121.3 Ign:2 http://deb.debian.org/debian trixie-updates InRelease
-#11 182.4 Ign:3 http://deb.debian.org/debian-security trixie-security InRelease
-#11 243.5 Ign:1 http://deb.debian.org/debian trixie InRelease
-#11 305.5 Ign:2 http://deb.debian.org/debian trixie-updates InRelease
-
-#11 367.6 Ign:3 http://deb.debian.org/debian-security trixie-security InRelease
-#11 429.6 Ign:1 http://deb.debian.org/debian trixie InRelease
-#11 493.7 Ign:2 http://deb.debian.org/debian trixie-updates InRelease
-
-#11 557.8 Ign:3 http://deb.debian.org/debian-security trixie-security InRelease
-#11 621.8 Err:1 http://deb.debian.org/debian trixie InRelease
-#11 621.8   Connection failed [IP: 202.20.187.241 3128]
+failed to solve: process "/bin/sh -c pip install --no-cache-dir -r requirements.txt" did not complete successfully: exit code: 1
 
 
-
-
-# 프록시 구조
-1. 우리 agent 서버: 폐쇄망 내 202.20.183.30
-2. agent 서버가 있는 폐쇄망 내, 사내망으로의 http proxy: 202.20.187.241:3128
-3. 사내망 내 미러: repository.samsungds.net/{적절한repo...}
-4. 사내망 내 apt 사용 방법
-
-/etc/apt/ 폴더 내 sources.list 파일을 변경합니다.  아래는 Debian 11 버전 예이며, 다른 버전일 경우 환경에 맞는 버전 코드로 변경합니다. 또한 OS Architecture 별 저장소 명이 다릅니다.
-11.2 (Bullseye) - amd64 arch
-deb http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian bullseye main
-11.2 (Bullseye) - aarch64 arch
-deb http://repository.samsungds.net/repository/proxy-apt-deb.debian.org/debian bullseye main
-기존 설정 변경
-
-/etc/apt 내 기존 외부 저장소를 참고하는 리스트 파일이 남아있을 경우 접근 오류가 발생할 수 있습니다. 해당 파일들은 다른 폴더로 백업 후 삭제를 권장합니다.
-
-### 설정 확인
-apt-get update 이후 필요한 패키지 대상으로 install 을 진행합니다. 
-11.2 (Bullseye) - 적용 Test
-
-# cat /etc/issue
-Debian GNU/Linux 11 \n \l
-
-# apt-get update
-Hit:1 http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian bullseye InRelease
-Reading package lists... Done
-
-# apt-get install gpg
-Reading package lists... Done
-Building dependency tree... Done
-Reading state information... Done
-The following additional packages will be installed:
-dirmngr gnupg gnupg-l10n gnupg-utils gpg-agent gpg-wks-client gpg-wks-server gpgconf gpgsm libassuan0 libksba8
-libncursesw6 libnpth0 libreadline8 libsqlite3-0 pinentry-curses readline-common
-Suggested packages:
-... 중략 ...
-
+!!! 빌드 실패: manual-mcp
