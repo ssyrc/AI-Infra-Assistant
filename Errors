@@ -1,69 +1,37 @@
-#11 0.343 E: Internal Error, Pathname to install is not absolute 'libk5crypto3_1.18.3-6+deb11u8_amd64.deb'
-#11 0.343 6 upgraded, 6 newly installed, 0 to remove and 0 not upgraded.
-#11 0.343 After this operation, 5232 kB of additional disk space will be used.
-#11 ERROR: process "/bin/sh -c set -eux;     if ls /tmp/vendor/deb/*.deb >/dev/null 2>&1; then       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download /tmp/vendor/deb/*.deb;     else       if [ -n \"$APT_MIRROR\" ]; then         . /etc/os-release;         rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources;         printf 'deb %s %s main\\n' \"$APT_MIRROR\" \"$VERSION_CODENAME\" > /etc/apt/sources.list;       fi;       apt-get         -o Acquire::Retries=0         -o Acquire::http::Timeout=\"$APT_HTTP_TIMEOUT\"         -o Acquire::https::Timeout=\"$APT_HTTP_TIMEOUT\"         -o APT::Update::Error-Mode=any         update;       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-client;     fi;     rm -rf /var/lib/apt/lists/* /tmp/vendor/deb" did not complete successfully: exit code: 100
+#12 17.22 ERROR: Ignored the following versions that require a different python version: 2.10.0 Requires-Python >=3.6, <3.10; 2.11.0 Requires-Python >=3.6, <3.10; 2.12.0 Requires-Python >=3.6, <3.10; 2.13.0 Requires-Python >=3.6, <3.10; 2.13.1 Requires-Python >=3.6, <3.10; 2.14.0 Requires-Python >=3.6, <3.10; 2.15.0 Requires-Python >=3.6, <3.10; 2.16.0 Requires-Python >=3.6, <3.10; 2.16.1 Requires-Python >=3.6, <3.10; 2.17.0 Requires-Python >=3.6, <3.10; 2.18.0 Requires-Python >=3.6, <3.10; 2.19.0 Requires-Python >=3.6, <3.10; 2.20.0 Requires-Python >=3.6, <3.10; 2.21.0 Requires-Python >=3.6, <3.10; 2.22.0 Requires-Python >=3.6, <3.10; 2.22.1 Requires-Python >=3.6, <3.10; 2.23.0 Requires-Python >=3.6, <3.10; 2.23.1 Requires-Python >=3.6, <3.10; 2.23.2 Requires-Python >=3.6, <3.10; 2.23.3 Requires-Python >=3.6, <3.10; 2.24.0 Requires-Python >=3.6, <3.10; 2.24.1 Requires-Python >=3.6, <3.10; 2.25.0 Requires-Python >=3.6, <3.10; 2.25.1 Requires-Python >=3.6, <3.10; 2.25.2 Requires-Python >=3.6, <3.10; 2.26.0 Requires-Python >=3.6, <3.10; 2.27.0 Requires-Python >=3.6, <3.10; 2.27.1 Requires-Python >=3.6, <3.10; 2.28.0 Requires-Python >=3.6, <3.10; 2.28.1 Requires-Python >=3.6, <3.10; 2.29.0 Requires-Python >=3.6, <3.10; 2.30.0 Requires-Python >=3.6, <3.11; 2.30.1 Requires-Python >=3.6, <3.11; 2.31.0 Requires-Python >=3.6, <3.11; 2.32.0 Requires-Python >=3.6, <3.11; 2.33.0 Requires-Python >=3.6, <3.11; 2.34.0 Requires-Python >=3.6, <3.11; 2.34.1 Requires-Python >=3.6, <3.11; 2.34.2 Requires-Python >=3.6, <3.11; 2.34.3 Requires-Python >=3.6, <3.11; 2.34.4 Requires-Python >=3.6, <3.11; 2.6.2 Requires-Python >=3.6, <3.9; 2.7.0 Requires-Python >=3.6, <3.10; 2.8.0 Requires-Python >=3.6, <3.10; 2.9.0 Requires-Python >=3.6, <3.10; 3.0.0 Requires-Python >=3.6, <3.11; 3.0.0b1 Requires-Python >=3.6, <3.11; 3.0.1 Requires-Python >=3.6, <3.11; 3.1.0 Requires-Python >=3.6, <3.11; 3.2.0 Requires-Python >=3.6, <3.11; 3.3.0 Requires-Python >=3.7, <3.11; 3.3.1 Requires-Python >=3.7, <3.11; 3.3.2 Requires-Python >=3.7, <3.11; 3.3.3 Requires-Python >=3.7, <3.11; 3.3.5 Requires-Python >=3.7, <3.11; 3.3.6 Requires-Python >=3.7, <3.11
+#12 17.22 ERROR: Could not find a version that satisfies the requirement starlette<1.0.0,>=0.49.1 (from google-adk) (from versions: 0.45.3)
+#12 17.22 ERROR: No matching distribution found for starlette<1.0.0,>=0.49.1
+#12 ERROR: process "/bin/sh -c pip install --no-cache-dir --find-links /tmp/vendor -r agent_server/requirements.txt" did not complete successfully: exit code: 1
 ------
- > [ 6/10] RUN set -eux;     if ls /tmp/vendor/deb/*.deb >/dev/null 2>&1; then       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download /tmp/vendor/deb/*.deb;     else       if [ -n "http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian" ]; then         . /etc/os-release;         rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources;         printf 'deb %s %s main\n' "http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian" "$VERSION_CODENAME" > /etc/apt/sources.list;       fi;       apt-get         -o Acquire::Retries=0         -o Acquire::http::Timeout="10"         -o Acquire::https::Timeout="10"         -o APT::Update::Error-Mode=any         update;       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-client;     fi;     rm -rf /var/lib/apt/lists/* /tmp/vendor/deb:
-0.276   krb5-doc krb5-user keychain libpam-ssh monkeysphere ssh-askpass
-0.276 Recommended packages:
-0.276   krb5-locales xauth
-0.285 The following NEW packages will be installed:
-0.285   libbsd0 libcbor0 libedit2 libfido2-1 libmd0 openssh-client
-0.285 The following packages will be upgraded:
-0.285   libgssapi-krb5-2 libk5crypto3 libkrb5-3 libkrb5support0 libssl1.1 libudev1
-0.343 E: Internal Error, Pathname to install is not absolute 'libk5crypto3_1.18.3-6+deb11u8_amd64.deb'
-0.343 6 upgraded, 6 newly installed, 0 to remove and 0 not upgraded.
-0.343 After this operation, 5232 kB of additional disk space will be used.
+ > [ 7/10] RUN pip install --no-cache-dir --find-links /tmp/vendor -r agent_server/requirements.txt:
+16.41   Downloading http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/packages/requests/2.34.2/requests-2.34.2-py3-none-any.whl (73 kB)
+16.41      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.1/73.1 kB 338.1 MB/s eta 0:00:00
+16.76 Collecting sqlalchemy-spanner>=1.14.0
+17.07   Downloading http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/packages/sqlalchemy-spanner/1.19.0/sqlalchemy_spanner-1.19.0-py3-none-any.whl (31 kB)
+17.09 Collecting sqlalchemy<3.0.0,>=2.0
+17.11   Downloading http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/packages/sqlalchemy/2.0.51/sqlalchemy-2.0.51-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (3.3 MB)
+17.19      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.3/3.3 MB 39.9 MB/s eta 0:00:00
+17.22 ERROR: Ignored the following versions that require a different python version: 2.10.0 Requires-Python >=3.6, <3.10; 2.11.0 Requires-Python >=3.6, <3.10; 2.12.0 Requires-Python >=3.6, <3.10; 2.13.0 Requires-Python >=3.6, <3.10; 2.13.1 Requires-Python >=3.6, <3.10; 2.14.0 Requires-Python >=3.6, <3.10; 2.15.0 Requires-Python >=3.6, <3.10; 2.16.0 Requires-Python >=3.6, <3.10; 2.16.1 Requires-Python >=3.6, <3.10; 2.17.0 Requires-Python >=3.6, <3.10; 2.18.0 Requires-Python >=3.6, <3.10; 2.19.0 Requires-Python >=3.6, <3.10; 2.20.0 Requires-Python >=3.6, <3.10; 2.21.0 Requires-Python >=3.6, <3.10; 2.22.0 Requires-Python >=3.6, <3.10; 2.22.1 Requires-Python >=3.6, <3.10; 2.23.0 Requires-Python >=3.6, <3.10; 2.23.1 Requires-Python >=3.6, <3.10; 2.23.2 Requires-Python >=3.6, <3.10; 2.23.3 Requires-Python >=3.6, <3.10; 2.24.0 Requires-Python >=3.6, <3.10; 2.24.1 Requires-Python >=3.6, <3.10; 2.25.0 Requires-Python >=3.6, <3.10; 2.25.1 Requires-Python >=3.6, <3.10; 2.25.2 Requires-Python >=3.6, <3.10; 2.26.0 Requires-Python >=3.6, <3.10; 2.27.0 Requires-Python >=3.6, <3.10; 2.27.1 Requires-Python >=3.6, <3.10; 2.28.0 Requires-Python >=3.6, <3.10; 2.28.1 Requires-Python >=3.6, <3.10; 2.29.0 Requires-Python >=3.6, <3.10; 2.30.0 Requires-Python >=3.6, <3.11; 2.30.1 Requires-Python >=3.6, <3.11; 2.31.0 Requires-Python >=3.6, <3.11; 2.32.0 Requires-Python >=3.6, <3.11; 2.33.0 Requires-Python >=3.6, <3.11; 2.34.0 Requires-Python >=3.6, <3.11; 2.34.1 Requires-Python >=3.6, <3.11; 2.34.2 Requires-Python >=3.6, <3.11; 2.34.3 Requires-Python >=3.6, <3.11; 2.34.4 Requires-Python >=3.6, <3.11; 2.6.2 Requires-Python >=3.6, <3.9; 2.7.0 Requires-Python >=3.6, <3.10; 2.8.0 Requires-Python >=3.6, <3.10; 2.9.0 Requires-Python >=3.6, <3.10; 3.0.0 Requires-Python >=3.6, <3.11; 3.0.0b1 Requires-Python >=3.6, <3.11; 3.0.1 Requires-Python >=3.6, <3.11; 3.1.0 Requires-Python >=3.6, <3.11; 3.2.0 Requires-Python >=3.6, <3.11; 3.3.0 Requires-Python >=3.7, <3.11; 3.3.1 Requires-Python >=3.7, <3.11; 3.3.2 Requires-Python >=3.7, <3.11; 3.3.3 Requires-Python >=3.7, <3.11; 3.3.5 Requires-Python >=3.7, <3.11; 3.3.6 Requires-Python >=3.7, <3.11
+17.22 ERROR: Could not find a version that satisfies the requirement starlette<1.0.0,>=0.49.1 (from google-adk) (from versions: 0.45.3)
+17.22 ERROR: No matching distribution found for starlette<1.0.0,>=0.49.1
 ------
 WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
 
-Dockerfile:30
+Dockerfile:28
 
 --------------------
 
-  29 |     # openssh-client: System/Command MCP가 대상 서버로 ssh 실행할 때 필요.
+  26 |         done
 
-  30 | >>> RUN set -eux; \
+  27 |     COPY agent_server/requirements.txt agent_server/requirements.txt
 
-  31 | >>>     if ls /tmp/vendor/deb/*.deb >/dev/null 2>&1; then \
+  28 | >>> RUN pip install --no-cache-dir --find-links /tmp/vendor -r agent_server/requirements.txt
 
-  32 | >>>       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download /tmp/vendor/deb/*.deb; \
+  29 |     ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
 
-  33 | >>>     else \
-
-  34 | >>>       if [ -n "$APT_MIRROR" ]; then \
-
-  35 | >>>         . /etc/os-release; \
-
-  36 | >>>         rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; \
-
-  37 | >>>         printf 'deb %s %s main\n' "$APT_MIRROR" "$VERSION_CODENAME" > /etc/apt/sources.list; \
-
-  38 | >>>       fi; \
-
-  39 | >>>       apt-get \
-
-  40 | >>>         -o Acquire::Retries=0 \
-
-  41 | >>>         -o Acquire::http::Timeout="$APT_HTTP_TIMEOUT" \
-
-  42 | >>>         -o Acquire::https::Timeout="$APT_HTTP_TIMEOUT" \
-
-  43 | >>>         -o APT::Update::Error-Mode=any \
-
-  44 | >>>         update; \
-
-  45 | >>>       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-client; \
-
-  46 | >>>     fi; \
-
-  47 | >>>     rm -rf /var/lib/apt/lists/* /tmp/vendor/deb
-
-  48 |     COPY mcp_servers/requirements.txt .
+  30 |     COPY shared/ shared/
 
 --------------------
 
-failed to solve: process "/bin/sh -c set -eux;     if ls /tmp/vendor/deb/*.deb >/dev/null 2>&1; then       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download /tmp/vendor/deb/*.deb;     else       if [ -n \"$APT_MIRROR\" ]; then         . /etc/os-release;         rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources;         printf 'deb %s %s main\\n' \"$APT_MIRROR\" \"$VERSION_CODENAME\" > /etc/apt/sources.list;       fi;       apt-get         -o Acquire::Retries=0         -o Acquire::http::Timeout=\"$APT_HTTP_TIMEOUT\"         -o Acquire::https::Timeout=\"$APT_HTTP_TIMEOUT\"         -o APT::Update::Error-Mode=any         update;       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-client;     fi;     rm -rf /var/lib/apt/lists/* /tmp/vendor/deb" did not complete successfully: exit code: 100
+failed to solve: process "/bin/sh -c pip install --no-cache-dir --find-links /tmp/vendor -r agent_server/requirements.txt" did not complete successfully: exit code: 1
 
-
-!!! 빌드 실패: manual-mcp
