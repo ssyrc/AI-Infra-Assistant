@@ -44,6 +44,13 @@ json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
   agent-server requirements와 vendor wheel을 함께 맞춘다.
 - `litellm-1.61.20`, `langfuse-2.60.9` — agent-server 런타임 요구사항. source archive(`.tar.gz`)는
   빌드 의존성(`wheel`, `poetry-core` 등)을 다시 요구할 수 있으므로 wheel(`.whl`)로 보관한다.
+- OpenInference/Langfuse tracing stack:
+  `openinference_instrumentation_google_adk-0.1.2`, `openinference_instrumentation-0.1.54`,
+  `openinference_semantic_conventions-0.1.30`, `opentelemetry_api-1.37.0`,
+  `opentelemetry_sdk-1.37.0`, `opentelemetry_instrumentation-0.58b0`,
+  `opentelemetry_semantic_conventions-0.58b0`, `importlib_metadata-8.7.0`, `packaging-24.2`,
+  `wrapt-1.17.3`, `zipp-3.23.0`. OpenTelemetry는 API/SDK `1.37.0`과 beta package `0.58b0`가
+  한 세트라서, 더 최신 beta wheel과 섞지 않는다.
 - `deb/` — MCP 이미지에서 `openssh-client`를 apt 미러 없이 설치하기 위한 Debian bullseye
   linux/amd64 `.deb` 묶음. Dockerfile은 이 디렉터리에 `.deb`가 있으면 `apt-get update`를 하지 않고
   `dpkg --unpack /tmp/vendor/deb/*.deb` 후 `dpkg --configure -a`로 로컬 설치한다.
@@ -100,6 +107,15 @@ pip download --dest vendor --only-binary=:all: --no-deps 'google-adk==1.22.1'
 
 # Agent 런타임 본체가 사내 미러에 없을 때:
 pip download --dest vendor --only-binary=:all: --no-deps 'litellm==1.61.20' 'langfuse==2.60.9'
+
+# OpenInference/Langfuse tracing stack:
+pip download --dest vendor --only-binary=:all: --no-deps \
+  'openinference-instrumentation-google-adk==0.1.2' \
+  'openinference-instrumentation==0.1.54' \
+  'openinference-semantic-conventions==0.1.30' \
+  'opentelemetry-api==1.37.0' 'opentelemetry-sdk==1.37.0' \
+  'opentelemetry-instrumentation==0.58b0' 'opentelemetry-semantic-conventions==0.58b0' \
+  'importlib-metadata==8.7.0' 'packaging==24.2' 'wrapt==1.17.3' 'zipp==3.23.0'
 ```
 
 폐쇄망 반입만 가능하면, 사내에서 동작하는 pip로 위 명령을 실행해 나온 `.whl`을 이 폴더에 두면 된다.
