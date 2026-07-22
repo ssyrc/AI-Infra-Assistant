@@ -17,6 +17,10 @@ x-py-build-args: &pyargs
   BUILD_PROXY: ${BUILD_PROXY:-}
   NO_PROXY: ${NO_PROXY:-}
 
+x-mcp-image: &mcpimage
+  image: ai-infra-assistant-mcp:prod
+  build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
+
 services:
   postgres:
     image: ${REGISTRY_DOCKERHUB:-docker.io}/pgvector/pgvector:pg16
@@ -62,7 +66,7 @@ services:
     restart: "no"
 
   manual-mcp:
-    build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
+    <<: *mcpimage
     command: ["python", "mcp_servers/manual_mcp/server.py"]
     environment:
       CONFIG_DB_DSN: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD}@postgres:5432/platform_config
@@ -74,7 +78,7 @@ services:
     restart: unless-stopped
 
   command-mcp:
-    build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
+    <<: *mcpimage
     command: ["python", "mcp_servers/command_mcp/server.py"]
     environment:
       CONFIG_DB_DSN: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD}@postgres:5432/platform_config
@@ -94,7 +98,7 @@ services:
     restart: unless-stopped
 
   voc-mcp:
-    build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
+    <<: *mcpimage
     command: ["python", "mcp_servers/voc_mcp/server.py"]
     environment:
       CONFIG_DB_DSN: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD}@postgres:5432/platform_config
@@ -106,7 +110,7 @@ services:
     restart: unless-stopped
 
   system-mcp:
-    build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
+    <<: *mcpimage
     command: ["python", "mcp_servers/system_mcp/server.py"]
     environment:
       CONFIG_DB_DSN: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD}@postgres:5432/platform_config

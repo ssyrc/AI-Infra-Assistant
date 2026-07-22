@@ -17,6 +17,10 @@ x-py-build-args: &pyargs
   BUILD_PROXY: ${BUILD_PROXY:-}
   NO_PROXY: ${NO_PROXY:-}
 
+x-mcp-image: &mcpimage
+  image: ai-infra-assistant-mcp:dev
+  build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
+
 services:
   postgres:
     image: ${REGISTRY_DOCKERHUB:-docker.io}/pgvector/pgvector:pg16
@@ -72,7 +76,7 @@ services:
     # ports: ["${MOCK_VLLM_PORT:-8100}:8000"]
 
   manual-mcp:
-    build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
+    <<: *mcpimage
     command: ["python", "mcp_servers/manual_mcp/server.py"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8001" }
     ports: ["${MANUAL_MCP_PORT:-8501}:8001"]
@@ -80,7 +84,7 @@ services:
       dev-config: { condition: service_completed_successfully }
 
   command-mcp:
-    build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
+    <<: *mcpimage
     command: ["python", "mcp_servers/command_mcp/server.py"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8002" }
     ports: ["${COMMAND_MCP_PORT:-8502}:8002"]
@@ -88,7 +92,7 @@ services:
       dev-config: { condition: service_completed_successfully }
 
   voc-mcp:
-    build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
+    <<: *mcpimage
     command: ["python", "mcp_servers/voc_mcp/server.py"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8003" }
     ports: ["${VOC_MCP_PORT:-8503}:8003"]
@@ -96,7 +100,7 @@ services:
       dev-config: { condition: service_completed_successfully }
 
   system-mcp:
-    build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
+    <<: *mcpimage
     command: ["python", "mcp_servers/system_mcp/server.py"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8004" }
     ports: ["${SYSTEM_MCP_PORT:-8504}:8004"]

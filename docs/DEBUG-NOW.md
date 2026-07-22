@@ -16,19 +16,19 @@
   fastapi==0.115.8을 성공적으로 받음). 그런데 실제 `docker compose build`(8개 이미지 병렬)에서는
   `asyncpg`/`fastapi` 요청이 **간헐적으로 빈 응답**(`from versions: none`)을 받았다.
 - **해결**: 가장 자주 걸리는 두 패키지(`asyncpg==0.31.0`, `fastapi==0.115.8`)의 whl을
-  `vendor/`에 미리 받아두고, 모든 Dockerfile이 **오프라인으로 먼저 설치**하도록 배선했다.
-  그러면 이 두 패키지는 **미러 요청 자체를 안 한다** → 간헐 실패 원인이 원천 제거됨.
-  나머지 패키지는 평소처럼 미러에서 받는다(그래서 `rebuild.sh`의 순차+재시도도 함께 둔다).
+  `vendor/`에 미리 받아두고, 모든 Dockerfile이 **패키지 본체를 오프라인으로 먼저 설치**하도록 배선했다.
+  그러면 이 두 패키지 본체는 **미러 요청 자체를 안 한다** → 간헐 실패 원인이 원천 제거됨.
+  필요한 의존성과 나머지 패키지는 평소처럼 미러에서 받는다. `rebuild.sh`는 순차 빌드하되 실패 시 바로 멈춘다.
 
 ### vendor/ 동작 방식 (자동, Dockerfile 수정 불필요)
-`vendor/` 안의 `*.whl` 은 각 Dockerfile 빌드 초반에 **전부 자동으로 오프라인 설치**된다.
+`vendor/` 안의 `*.whl` 은 각 Dockerfile 빌드 초반에 **의존성 없이 본체만 오프라인 설치**된다.
 이후 `pip install -r requirements.txt`는 그 패키지를 "이미 만족"으로 보고 건너뛴다.
 → **앞으로 다른 패키지가 또 미러에서 말썽이면, 그 whl을 vendor/에 추가하기만 하면 된다**
 (Dockerfile을 다시 손댈 필요 없음). 자세한 건 `vendor/README.md`.
 
 ### 그래서 지금 할 것
 ```bash
-bash scripts/rebuild.sh          # 순차 빌드 + 미러 삑나면 자동 재시도(다른 패키지 대비)
+bash scripts/rebuild.sh          # 순차 빌드 + 첫 실패 즉시 중단
 # 캐시 없이 처음부터: NOCACHE=1 bash scripts/rebuild.sh
 ```
 로그에서 asyncpg/fastapi 설치 단계가 `Looking in indexes` 없이(즉 미러 요청 없이) 바로
@@ -63,4 +63,4 @@ pip download '<pkg>==<버전>' --no-deps -d vendor/ \
 ## 스크립트 목록 (`scripts/`)
 - `debug-now.sh` — 미러에 있는 패키지 버전 확인(프록시 경유).
 - `debug-net.sh` — curl은 되는데 pip만 실패할 때 A(Content-Type)/B(도달)/C(실제 다운로드) 진단.
-- `rebuild.sh` — 사전확인 + 순차 빌드(+실패 시 자동 재시도) + 기동 + health.
+- `rebuild.sh` — 사전확인 + 순차 빌드(실패 시 즉시 중단) + 기동 + health.

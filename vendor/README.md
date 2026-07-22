@@ -25,11 +25,12 @@ json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
   **cp311 + manylinux(x86_64) 휠** — 베이스 이미지(`python:3.11-slim`, linux/amd64)와 일치해야 한다.
 - `fastapi-0.115.8-py3-none-any.whl` — 순수 파이썬. 같은 이유(미러 간헐 실패)로 오프라인 고정.
 
-## 동작 방식 — vendor의 모든 whl은 자동으로 오프라인 설치된다
+## 동작 방식 — vendor의 모든 whl은 자동으로 먼저 반영된다
 
-각 Dockerfile은 `pip-*.whl`로 pip를 부트스트랩한 뒤, **`vendor/` 안의 모든 `*.whl`을
-`--no-index`로 순회 설치**한다. 그러면 이후 `pip install -r requirements.txt` 단계에서
-그 패키지는 이미 설치돼 있어 미러에 요청을 보내지 않는다(다른 패키지는 평소처럼 미러에서 받음).
+각 Dockerfile은 `pip-*.whl`로 pip를 부트스트랩한 뒤, **`vendor/` 안의 pip 외 `*.whl`을
+`--no-index --no-deps`로 순회 설치**한다. 그러면 이후 `pip install -r requirements.txt`
+단계에서 그 패키지 본체는 이미 설치돼 있어 미러에 요청을 보내지 않는다. 필요한 의존성은
+평소처럼 미러에서 받는다.
 
 **즉, 미러가 특정 패키지/버전을 못 주거나(없음 또는 간헐적 빈 응답) 사내망에서 그 원인을 당장
 못 고칠 때, 그 패키지의 whl을 이 폴더에 넣기만 하면 Dockerfile을 손대지 않고 바로 해결된다.**
