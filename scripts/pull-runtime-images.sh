@@ -3,24 +3,35 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DOCKERHUB_NS="${DOCKERHUB_NS:-ellie0}"
-TAG="${1:-${TAG:-main-$(git rev-parse --short HEAD)}}"
+TAG="${1:-${TAG:-}}"
 
-pull_and_tag() {
+if [ -z "$TAG" ]; then
+  echo "usage: bash scripts/pull-runtime-images.sh <runtime-image-tag>" >&2
+  echo "example: bash scripts/pull-runtime-images.sh main-10bc550" >&2
+  exit 2
+fi
+
+tag_existing() {
   local repo="$1"
   local local_tag="$2"
   local remote="${DOCKERHUB_NS}/${repo}:${TAG}"
 
-  docker pull "$remote"
+  if ! docker image inspect "$remote" >/dev/null 2>&1; then
+    echo "missing image: $remote" >&2
+    echo "pull it first: docker pull $remote" >&2
+    exit 1
+  fi
+
   docker tag "$remote" "$local_tag"
 }
 
-pull_and_tag ai-infra-assistant-db-init ai-infra-assistant-db-init:latest
-pull_and_tag ai-infra-assistant-mock-vllm ai-infra-assistant-mock-vllm:latest
-pull_and_tag ai-infra-assistant-mcp ai-infra-assistant-mcp:dev
-pull_and_tag ai-infra-assistant-agent-server ai-infra-assistant-agent-server:latest
-pull_and_tag ai-infra-assistant-admin-console ai-infra-assistant-admin-console:latest
-pull_and_tag ai-infra-assistant-pgvector pgvector/pgvector:pg16
-pull_and_tag ai-infra-assistant-postgres postgres:16-alpine
-pull_and_tag ai-infra-assistant-open-webui ghcr.io/open-webui/open-webui:v0.6.5
+tag_existing ai-infra-assistant-db-init ai-infra-assistant-db-init:latest
+tag_existing ai-infra-assistant-mock-vllm ai-infra-assistant-mock-vllm:latest
+tag_existing ai-infra-assistant-mcp ai-infra-assistant-mcp:dev
+tag_existing ai-infra-assistant-agent-server ai-infra-assistant-agent-server:latest
+tag_existing ai-infra-assistant-admin-console ai-infra-assistant-admin-console:latest
+tag_existing ai-infra-assistant-pgvector pgvector/pgvector:pg16
+tag_existing ai-infra-assistant-postgres postgres:16-alpine
+tag_existing ai-infra-assistant-open-webui ghcr.io/open-webui/open-webui:v0.6.5
 
-echo "pulled and retagged runtime images: ${TAG}"
+echo "retagged already-pulled runtime images: ${TAG}"

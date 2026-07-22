@@ -8,6 +8,16 @@ On an internet-connected machine:
 ```bash
 TAG=main-<commit>
 git pull origin main
+
+docker pull ellie0/ai-infra-assistant-db-init:$TAG
+docker pull ellie0/ai-infra-assistant-mock-vllm:$TAG
+docker pull ellie0/ai-infra-assistant-mcp:$TAG
+docker pull ellie0/ai-infra-assistant-agent-server:$TAG
+docker pull ellie0/ai-infra-assistant-admin-console:$TAG
+docker pull ellie0/ai-infra-assistant-pgvector:$TAG
+docker pull ellie0/ai-infra-assistant-postgres:$TAG
+docker pull ellie0/ai-infra-assistant-open-webui:$TAG
+
 bash scripts/pull-runtime-images.sh "$TAG"
 TAG="$TAG" bash scripts/save-runtime-images.sh
 ```
