@@ -9,6 +9,21 @@
 
 ---
 
+## apt 미러 설정
+
+MCP 이미지는 `openssh-client` 설치가 필요하다. `python:3.11-slim` 기본 sources는
+`deb.debian.org`를 바라보므로 폐쇄망에서 실패할 수 있다. `.env`에 아래 값을 둔다.
+
+```bash
+APT_MIRROR=http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian
+```
+
+`mcp_servers/Dockerfile`은 빌드 중 컨테이너의 `VERSION_CODENAME`을 읽어 `trixie`, `bookworm`,
+`bullseye` 등 현재 베이스 이미지에 맞는 apt source를 만들고, 기존 외부 Debian source 파일을 제거한다.
+apt 요청도 `BUILD_PROXY=http://202.20.187.241:3128`를 그대로 탄다.
+
+---
+
 ## 현재 상태 (2026-07-21) — 해결됨: asyncpg/fastapi를 vendor로 고정
 
 - 베이스 3.11 + pip 22.1.2 → JSON 에러 해결.

@@ -17,9 +17,13 @@ x-py-build-args: &pyargs
   BUILD_PROXY: ${BUILD_PROXY:-}
   NO_PROXY: ${NO_PROXY:-}
 
+x-mcp-build-args: &mcpargs
+  <<: *pyargs
+  APT_MIRROR: ${APT_MIRROR:-}
+
 x-mcp-image: &mcpimage
   image: ai-infra-assistant-mcp:prod
-  build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *pyargs }
+  build: { context: ., dockerfile: mcp_servers/Dockerfile, args: *mcpargs }
 
 services:
   postgres:

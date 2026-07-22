@@ -97,14 +97,19 @@ dev에 필요한 이미지 4종:
 프로덕션은 추가로 `langfuse/langfuse:3.130.0`, `langfuse/langfuse-worker:3.130.0`,
 `clickhouse/clickhouse-server:24.8`, `redis:7.4-alpine`, MinIO.
 
-### 1-2. pip 미러 (빌드 시 파이썬 패키지)
-`.env` 값을 사내 pip.conf와 동일하게:
+### 1-2. pip/apt 미러 (빌드 시 패키지)
+`.env` 값을 사내 pip.conf/apt mirror와 동일하게:
 ```bash
 PIP_INDEX_URL=http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
 PIP_TRUSTED_HOST=repository.samsungds.net
 BUILD_PROXY=http://202.20.187.241:3128
 NO_PROXY=localhost,127.0.0.1
+APT_MIRROR=http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian
 ```
+
+MCP 이미지의 `openssh-client` 설치는 기본 `deb.debian.org` 대신 `APT_MIRROR`를 사용한다.
+Dockerfile이 베이스 이미지의 `VERSION_CODENAME`을 읽어 `trixie`, `bookworm`, `bullseye` 등에 맞춰
+apt source를 만든다. 사내망에서는 apt 요청도 위 `BUILD_PROXY`를 탄다.
 
 > ⚠️ **빌드 중 `JSONDecodeError: Expecting value: line 1 column 1`** 이 나면 → 3장 참고.
 > 이건 프록시 문제가 아니라 **pip 버전** 문제이고, 리포에 이미 해결책(vendor 휠)이 포함돼 있다.

@@ -10,7 +10,14 @@ set -u
 cd "$(dirname "$0")/.."
 COMPOSE="docker compose -f docker-compose.dev.yml"
 
-[ -f .env ] || cp .env.example .env
+if [ ! -f .env ]; then
+  cp .env.example .env
+elif ! grep -q '^APT_MIRROR=' .env && grep -q '^APT_MIRROR=' .env.example; then
+  {
+    echo
+    grep '^APT_MIRROR=' .env.example
+  } >> .env
+fi
 
 echo "== 사전 확인 =="
 echo "vendor 휠:"
