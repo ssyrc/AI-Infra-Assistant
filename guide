@@ -4,7 +4,7 @@
 (3) 폐쇄망 proxy 가 요청을 보내는 사내망 mirror : repository.samsungds.net/{적절한저장소}
 (4) 사내망 mirror - 외부망으로 요청, 하지만 모든 외부망의 패키지를 가져오지는 않음. 사내망 mirror에 없을 경우 따로 whl, tar.gz 파일로 install 필요
 
-2. 사내망 git 연동 후, 폐쇄망 서버로 rsync --delete
+2. 사내망에서 git 연동 후, 폐쇄망 서버로 rsync --delete
 git -C /home/yrc/AI-Infra-Assistant fetch origin main && git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
 rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/AI-Infra-Assistant/ 2>&1
 
@@ -15,9 +15,8 @@ rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ yr9.choi@202.20.185
 # 우리 agent 서버에서 llm 띄우는 서버로 ssh 접속 가능
 # agent 서버에 /etc/hosts 에 ip, hostname 리스트 존재
 75.23.32.41     hgpu4041
-75.23.32.42     hgpu4042 
 ...
 
-4. agent - mcp 실행 방법
+4. 폐쇄망 agent - mcp 실행 방법
 1. command-mcp: S2 스케줄러 등 사용자 info 확인은, agent 서버에서 root권한으로 login 서버로 ssh , 이후 user-id 로 권한 변경 후 command 실행, 결과 반환
 2. system-mcp: agent 서버에서 root 권한으로 사용자가 요청한 서버로 ssh, 이후 user-id로 권한 변경 후 command 실행, 결과 반환
