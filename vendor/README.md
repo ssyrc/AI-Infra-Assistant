@@ -23,9 +23,12 @@ json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
 - `asyncpg-0.31.0-cp311-...manylinux...x86_64.whl` — 사내 미러가 asyncpg 인덱스 조회 시
   간헐적으로 빈 응답(`from versions: none`)을 줘서 오프라인으로 고정 설치.
   **cp311 + manylinux(x86_64) 휠** — 베이스 이미지(`python:3.11-slim-bullseye`, linux/amd64)와 일치해야 한다.
-- `fastapi-0.115.8-py3-none-any.whl` — 순수 파이썬. 같은 이유(미러 간헐 실패)로 오프라인 고정.
+- `fastapi-0.115.8-py3-none-any.whl`, `fastapi-0.123.10-py3-none-any.whl` — 순수 파이썬.
+  agent-server는 `google-adk==1.22.1`의 Starlette 요구사항 때문에 FastAPI 0.123.10을 사용하고,
+  admin/mock 이미지는 기존 0.115.8 요구사항을 계속 만족할 수 있게 둘 다 보관한다.
 - FastAPI/Uvicorn 실행 스택:
   `uvicorn-0.34.0`, `pydantic-2.11.10`, `pydantic_core-2.33.2`, `starlette-0.45.3`,
+  `starlette-0.50.0`, `annotated_doc-0.0.4`, `watchdog-6.0.0`,
   `python_multipart-0.0.20`, `anyio`, `annotated_types`, `click`, `h11`, `httptools`,
   `idna`, `python_dotenv`, `pyyaml`, `typing_extensions`, `uvloop`, `watchfiles`,
   `websockets`, `colorama` — 사내 미러에 특정 버전이 없을 때 빌드가 한 패키지씩 막히지 않도록
@@ -65,7 +68,8 @@ pip download '<pkg>==<버전>' --no-deps -d vendor/ \
 # FastAPI/Uvicorn 스택을 의존성까지 묶어서 갱신할 때:
 pip download --dest vendor --only-binary=:all: \
   --platform manylinux_2_17_x86_64 --python-version 311 --implementation cp --abi cp311 \
-  'fastapi==0.115.8' 'uvicorn[standard]==0.34.0' 'pydantic==2.11.10' 'python-multipart==0.0.20'
+  'fastapi==0.123.10' 'starlette==0.50.0' 'annotated-doc==0.0.4' 'watchdog==6.0.0' \
+  'uvicorn[standard]==0.34.0' 'pydantic==2.11.10' 'python-multipart==0.0.20'
 
 # Windows에서 위 명령을 실행하면 Linux 전용 marker 때문에 uvloop이 빠질 수 있어 별도로 받는다.
 pip download --dest vendor --only-binary=:all: \
