@@ -37,7 +37,7 @@ json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
   `certifi`, `pycparser` — 사내 미러에 MCP SDK 또는 하위 의존성이 없을 때를 대비한다.
 - `deb/` — MCP 이미지에서 `openssh-client`를 apt 미러 없이 설치하기 위한 Debian bullseye
   linux/amd64 `.deb` 묶음. Dockerfile은 이 디렉터리에 `.deb`가 있으면 `apt-get update`를 하지 않고
-  `apt-get install --no-download /tmp/vendor/deb/*.deb`로 로컬 설치한다.
+  `dpkg --unpack /tmp/vendor/deb/*.deb` 후 `dpkg --configure -a`로 로컬 설치한다.
 
 ## 동작 방식 — vendor의 모든 whl은 자동으로 먼저 반영된다
 

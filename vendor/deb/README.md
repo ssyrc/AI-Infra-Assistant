@@ -8,9 +8,9 @@ Target runtime:
 - Architecture: linux/amd64
 - OpenSSH package: `openssh-client_8.4p1-5+deb11u7_amd64.deb`
 
-The Dockerfile installs every `*.deb` in this directory with `apt-get install --no-download`, so missing
-dependencies fail immediately instead of falling back to the network. Keep only packages intended for this
-one local install set in this directory.
+The Dockerfile verifies `SHA256SUMS` when present, then installs every `*.deb` in this directory with
+`dpkg --unpack` followed by `dpkg --configure -a`, so missing dependencies fail immediately instead of
+falling back to the network. Keep only packages intended for this one local install set in this directory.
 
 The current files were downloaded from the official Debian bullseye and bullseye-security package indexes:
 - `https://deb.debian.org/debian/dists/bullseye/main/binary-amd64/Packages.gz`

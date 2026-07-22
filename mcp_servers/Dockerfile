@@ -29,7 +29,12 @@ RUN for w in /tmp/vendor/*.whl; do \
 # openssh-client: System/Command MCP가 대상 서버로 ssh 실행할 때 필요.
 RUN set -eux; \
     if ls /tmp/vendor/deb/*.deb >/dev/null 2>&1; then \
-      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download /tmp/vendor/deb/*.deb; \
+      if [ -f /tmp/vendor/deb/SHA256SUMS ]; then \
+        (cd /tmp/vendor/deb && sha256sum -c SHA256SUMS); \
+      fi; \
+      DEBIAN_FRONTEND=noninteractive dpkg --unpack /tmp/vendor/deb/*.deb; \
+      DEBIAN_FRONTEND=noninteractive dpkg --configure -a; \
+      ssh -V; \
     else \
       if [ -n "$APT_MIRROR" ]; then \
         . /etc/os-release; \

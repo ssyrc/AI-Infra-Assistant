@@ -109,7 +109,8 @@ APT_HTTP_TIMEOUT=10
 ```
 
 MCP 이미지의 `openssh-client` 설치는 `vendor/deb/*.deb`가 있으면 로컬 deb를 먼저 사용한다.
-이 경로는 `--no-download`라서 사내 apt 미러에 `openssh-client`가 없어도 빌드할 수 있다.
+이 경로는 `dpkg`만 사용해서 사내 apt 미러에 `openssh-client`가 없어도 빌드할 수 있다.
+`SHA256SUMS`가 있으면 설치 전에 파일 해시도 확인한다.
 `vendor/deb`가 비어 있으면 기본 `deb.debian.org` 대신 `APT_MIRROR`를 사용한다. Dockerfile이 베이스
 이미지의 `VERSION_CODENAME`을 읽어 `trixie`, `bookworm`, `bullseye` 등에 맞춰 apt source를 만든다.
 사내망에서는 apt 요청도 위 `BUILD_PROXY`를 탄다. apt 인덱스 fetch 실패는
