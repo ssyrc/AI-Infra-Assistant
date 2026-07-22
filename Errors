@@ -1,75 +1,38 @@
-#12 [ 7/10] RUN pip install --no-cache-dir --find-links /tmp/vendor -r agent_server/requirements.txt
-#12 0.489 Looking in indexes: http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
-#12 0.489 Looking in links: /tmp/vendor
-#12 0.490 Requirement already satisfied: google-adk==1.22.1 in /usr/local/lib/python3.11/site-packages (from -r agent_server/requirements.txt (line 1)) (1.22.1)
-#12 0.491 Requirement already satisfied: mcp<2.0.0,>=1.28.1 in /usr/local/lib/python3.11/site-packages (from -r agent_server/requirements.txt (line 2)) (1.28.1)
-#12 0.569 Processing /tmp/vendor/litellm-1.61.20.tar.gz
-#12 0.925   Installing build dependencies: started
-#12 2.454   Installing build dependencies: finished with status 'error'
-#12 2.457   error: subprocess-exited-with-error
-#12 2.457
-#12 2.457   × pip subprocess to install build dependencies did not run successfully.
-#12 2.457   │ exit code: 1
-#12 2.457   ╰─> [9 lines of output]
-#12 2.457       Looking in indexes: http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
-#12 2.457       Looking in links: /tmp/vendor
-#12 2.457       Processing /tmp/vendor/poetry_core-2.4.1.tar.gz
-#12 2.457         Getting requirements to build wheel: started
-#12 2.457         Getting requirements to build wheel: finished with status 'done'
-#12 2.457         Preparing metadata (pyproject.toml): started
-#12 2.457         Preparing metadata (pyproject.toml): finished with status 'done'
-#12 2.457       ERROR: Could not find a version that satisfies the requirement wheel (from versions: none)
-#12 2.457       ERROR: No matching distribution found for wheel
-#12 2.457       [end of output]
-#12 2.457
-#12 2.457   note: This error originates from a subprocess, and is likely not a problem with pip.
-#12 2.460 error: subprocess-exited-with-error
-#12 2.460
-#12 2.460 × pip subprocess to install build dependencies did not run successfully.
-#12 2.460 │ exit code: 1
-#12 2.460 ╰─> See above for output.
-#12 2.460
-#12 2.460 note: This error originates from a subprocess, and is likely not a problem with pip.
-#12 ERROR: process "/bin/sh -c pip install --no-cache-dir --find-links /tmp/vendor -r agent_server/requirements.txt" did not complete successfully: exit code: 1
+#13 0.502 ERROR: Could not find a version that satisfies the requirement openinference-instrumentation-google-adk==0.1.2 (from versions: none)
+#13 0.502 ERROR: No matching distribution found for openinference-instrumentation-google-adk==0.1.2
+#13 ERROR: process "/bin/sh -c pip install --no-cache-dir --find-links /tmp/vendor-wheels -r agent_server/requirements.txt" did not complete successfully: exit code: 1
 ------
- > [ 7/10] RUN pip install --no-cache-dir --find-links /tmp/vendor -r agent_server/requirements.txt:
-2.457       [end of output]
-2.457
-2.457   note: This error originates from a subprocess, and is likely not a problem with pip.
-2.460 error: subprocess-exited-with-error
-2.460
-2.460 × pip subprocess to install build dependencies did not run successfully.
-2.460 │ exit code: 1
-2.460 ╰─> See above for output.
-2.460
-2.460 note: This error originates from a subprocess, and is likely not a problem with pip.
+ > [ 8/11] RUN pip install --no-cache-dir --find-links /tmp/vendor-wheels -r agent_server/requirements.txt:
+0.463 Requirement already satisfied: mcp<2.0.0,>=1.28.1 in /usr/local/lib/python3.11/site-packages (from -r agent_server/requirements.txt (line 2)) (1.28.1)
+0.464 Requirement already satisfied: litellm==1.61.20 in /usr/local/lib/python3.11/site-packages (from -r agent_server/requirements.txt (line 3)) (1.61.20)
+0.465 Requirement already satisfied: fastapi==0.123.10 in /usr/local/lib/python3.11/site-packages (from -r agent_server/requirements.txt (line 4)) (0.123.10)
+0.466 Requirement already satisfied: starlette==0.50.0 in /usr/local/lib/python3.11/site-packages (from -r agent_server/requirements.txt (line 5)) (0.50.0)
+0.467 Requirement already satisfied: annotated-doc==0.0.4 in /usr/local/lib/python3.11/site-packages (from -r agent_server/requirements.txt (line 6)) (0.0.4)
+0.468 Requirement already satisfied: uvicorn[standard]==0.34.0 in /usr/local/lib/python3.11/site-packages (from -r agent_server/requirements.txt (line 7)) (0.34.0)
+0.469 Requirement already satisfied: pydantic==2.11.10 in /usr/local/lib/python3.11/site-packages (from -r agent_server/requirements.txt (line 8)) (2.11.10)
+0.470 Requirement already satisfied: langfuse==2.60.9 in /usr/local/lib/python3.11/site-packages (from -r agent_server/requirements.txt (line 9)) (2.60.9)
+0.502 ERROR: Could not find a version that satisfies the requirement openinference-instrumentation-google-adk==0.1.2 (from versions: none)
+0.502 ERROR: No matching distribution found for openinference-instrumentation-google-adk==0.1.2
 ------
 WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
 
-Dockerfile:28
+Dockerfile:29
 
 --------------------
 
-  26 |         done
+  27 |         done
 
-  27 |     COPY agent_server/requirements.txt agent_server/requirements.txt
+  28 |     COPY agent_server/requirements.txt agent_server/requirements.txt
 
-  28 | >>> RUN pip install --no-cache-dir --find-links /tmp/vendor -r agent_server/requirements.txt
+  29 | >>> RUN pip install --no-cache-dir --find-links /tmp/vendor-wheels -r agent_server/requirements.txt
 
-  29 |     ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
+  30 |     ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
 
-  30 |     COPY shared/ shared/
+  31 |     COPY shared/ shared/
 
 --------------------
 
-failed to solve: process "/bin/sh -c pip install --no-cache-dir --find-links /tmp/vendor -r agent_server/requirements.txt" did not complete successfully: exit code: 1
+failed to solve: process "/bin/sh -c pip install --no-cache-dir --find-links /tmp/vendor-wheels -r agent_server/requirements.txt" did not complete successfully: exit code: 1
 
 
 !!! 빌드 실패: agent-server
-
-
-
-# 내가 vendor 폴더에 다운받아서 추가한 패키지들
-litellm-1.61.20.tar.gz
-langfuse==2.60.9
-poetry_core-2.4.1.tar.gz
