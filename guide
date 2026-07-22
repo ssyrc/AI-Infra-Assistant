@@ -16,7 +16,37 @@ rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ yr9.choi@202.20.185
 # agent 서버에 /etc/hosts 에 ip, hostname 리스트 존재
 75.23.32.41     hgpu4041
 ...
+(4) pip config 설정 방법
+[root@24-gp19 ~]# pip config -v list
+For variant 'global', will try loading '/etc/xdg/pip/pip.conf'
+For variant 'global', will try loading '/etc/pip.conf'
+For variant 'user', will try loading '/root/.pip/pip.conf'
+For variant 'user', will try loading '/root/.config/pip/pip.conf'
+For variant 'site', will try loading '/apps/python/Python-3.13.0/pip.conf'
+global.index-url='http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple'
+global.proxy='http://202.20.187.241:3128'
+global.trusted-host='repository.samsungds.net'
+
 
 4. 폐쇄망 agent - mcp 실행 방법
 1. command-mcp: S2 스케줄러 등 사용자 info 확인은, agent 서버에서 root권한으로 login 서버로 ssh , 이후 user-id 로 권한 변경 후 command 실행, 결과 반환
 2. system-mcp: agent 서버에서 root 권한으로 사용자가 요청한 서버로 ssh, 이후 user-id로 권한 변경 후 command 실행, 결과 반환
+
+
+5. 사내망 guide
+(1) apt-get 사용
+/etc/apt/ 폴더 내 sources.list 파일을 변경합니다.  아래는 Debian 11 버전 예이며, 다른 버전일 경우 환경에 맞는 버전 코드로 변경합니다. 또한 OS Architecture 별 저장소 명이 다릅니다.
+
+# 11.2 (Bullseye) - amd64 arch 인 경우,
+deb http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian bullseye main
+# 11.2 (Bullseye) - aarch64 arch 인 경우,
+deb http://repository.samsungds.net/repository/proxy-apt-deb.debian.org/debian bullseye main
+
+(2) docker 저장소 사용
+Docker Hub 관련 이미지	https://docker.io/	docker pull repository.samsungds.net/proxy-docker-registry-1.docker.io/<이미지 이름>:<태그>	
+Google 관련 이미지	https://gcr.io/	docker pull repository.samsungds.net/proxy-docker-gcr.io/<이미지 이름>:<태그>	
+Red Hat 관련 이미지	https://quay.io/	docker pull repository.samsungds.net/proxy-docker-quay.io/<이미지 이름>:<태그>	
+NVIDA 관련 이미지	https://nvcr.io/	docker pull repository.samsungds.net/proxy-docker-nvcr.io/<이미지 이름>:<태그>	
+MS관련 이미지	https://mcr.microsoft.com/	docker pull repository.samsungds.net/proxy-docker-mcr.microsoft.com/<이미지 이름>:<태그>	
+Github Container Registry	https://ghcr.io/ docker pull repository.samsungds.net/proxy-docker-ghcr.io/<이미지 이름>:<태그>	
+Google Container Registry	https://k8s.gcr.io/ docker pull repository.samsungds.net/proxy-docker-k8s.gcr.io/<이미지 이름>:<태그>
