@@ -6,3 +6,4 @@ __pycache__/
 admin_console/frontend/vendor/*.js
 .DS_Store
 docling_cache/
+dist/
