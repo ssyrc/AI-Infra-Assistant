@@ -28,19 +28,23 @@ RUN for w in /tmp/vendor/*.whl; do \
     done
 # openssh-client: System/Command MCP가 대상 서버로 ssh 실행할 때 필요.
 RUN set -eux; \
-    if [ -n "$APT_MIRROR" ]; then \
-      . /etc/os-release; \
-      rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; \
-      printf 'deb %s %s main\n' "$APT_MIRROR" "$VERSION_CODENAME" > /etc/apt/sources.list; \
+    if ls /tmp/vendor/deb/*.deb >/dev/null 2>&1; then \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download /tmp/vendor/deb/*.deb; \
+    else \
+      if [ -n "$APT_MIRROR" ]; then \
+        . /etc/os-release; \
+        rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; \
+        printf 'deb %s %s main\n' "$APT_MIRROR" "$VERSION_CODENAME" > /etc/apt/sources.list; \
+      fi; \
+      apt-get \
+        -o Acquire::Retries=0 \
+        -o Acquire::http::Timeout="$APT_HTTP_TIMEOUT" \
+        -o Acquire::https::Timeout="$APT_HTTP_TIMEOUT" \
+        -o APT::Update::Error-Mode=any \
+        update; \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-client; \
     fi; \
-    apt-get \
-      -o Acquire::Retries=0 \
-      -o Acquire::http::Timeout="$APT_HTTP_TIMEOUT" \
-      -o Acquire::https::Timeout="$APT_HTTP_TIMEOUT" \
-      -o APT::Update::Error-Mode=any \
-      update; \
-    apt-get install -y --no-install-recommends openssh-client; \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* /tmp/vendor/deb
 COPY mcp_servers/requirements.txt .
 RUN pip install --no-cache-dir --find-links /tmp/vendor -r requirements.txt
 # 빌드 프록시를 런타임 컨테이너에 남기지 않는다(내부 서비스 통신이 프록시로 새지 않도록).

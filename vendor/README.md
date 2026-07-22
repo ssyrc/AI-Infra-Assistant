@@ -1,4 +1,4 @@
-# vendor/ — 폐쇄망 빌드용 오프라인 pip 휠
+# vendor/ — 폐쇄망 빌드용 오프라인 패키지
 
 폐쇄망 사내 미러(Nexus)는 **최신 pip의 JSON Simple API(PEP 691)** 를 지원하지 않는다.
 `python:3.12-slim`이 내장한 최신 pip(24.x)는 인덱스 응답을 `json.loads()` 하다가
@@ -35,6 +35,9 @@ json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
   `jsonschema`, `pydantic_settings`, `pyjwt`, `cryptography`, `cffi`, `sse_starlette-2.2.1`,
   `typing_inspection`, `attrs`, `jsonschema_specifications`, `referencing`, `rpds_py`,
   `certifi`, `pycparser` — 사내 미러에 MCP SDK 또는 하위 의존성이 없을 때를 대비한다.
+- `deb/` — MCP 이미지에서 `openssh-client`를 apt 미러 없이 설치하기 위한 Debian bullseye
+  linux/amd64 `.deb` 묶음. Dockerfile은 이 디렉터리에 `.deb`가 있으면 `apt-get update`를 하지 않고
+  `apt-get install --no-download /tmp/vendor/deb/*.deb`로 로컬 설치한다.
 
 ## 동작 방식 — vendor의 모든 whl은 자동으로 먼저 반영된다
 

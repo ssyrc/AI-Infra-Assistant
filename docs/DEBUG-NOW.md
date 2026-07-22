@@ -19,11 +19,14 @@ APT_MIRROR=http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com
 APT_HTTP_TIMEOUT=10
 ```
 
-`mcp_servers/Dockerfile`은 빌드 중 컨테이너의 `VERSION_CODENAME`을 읽어 `trixie`, `bookworm`,
+`vendor/deb/*.deb`가 있으면 Dockerfile은 `openssh-client`와 필요한 런타임 라이브러리를 로컬 deb로
+먼저 설치한다. 이 경로는 `--no-download`를 사용하므로 사내 apt 미러에 패키지가 없어도 네트워크 보완을
+시도하지 않는다.
+
+`vendor/deb`가 비어 있으면 기존처럼 빌드 중 컨테이너의 `VERSION_CODENAME`을 읽어 `trixie`, `bookworm`,
 `bullseye` 등 현재 베이스 이미지에 맞는 apt source를 만들고, 기존 외부 Debian source 파일을 제거한다.
-apt 요청도 `BUILD_PROXY=http://202.20.187.241:3128`를 그대로 탄다.
-`apt-get update`는 미러 fetch 실패를 경고로 넘기지 않고 즉시 실패 처리한다. 프록시/미러가 죽어 있으면
-`APT_HTTP_TIMEOUT` 초 안에 멈추고, 빈 apt 캐시로 `openssh-client` 설치까지 진행하지 않는다.
+apt 요청도 `BUILD_PROXY=http://202.20.187.241:3128`를 그대로 탄다. 이때 `apt-get update`는 미러 fetch
+실패를 경고로 넘기지 않고 즉시 실패 처리한다.
 
 ---
 
