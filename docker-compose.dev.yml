@@ -55,6 +55,7 @@ services:
       retries: 20
 
   db-init:
+    image: ai-infra-assistant-db-init:latest
     build: { context: ., dockerfile: dev/Dockerfile.db-init-dev, args: *pyargs }
     volumes:
       - ./shared:/app/shared:ro
@@ -87,6 +88,7 @@ services:
     restart: "no"
 
   mock-vllm:
+    image: ai-infra-assistant-mock-vllm:latest
     build: { context: ., dockerfile: dev/Dockerfile.mock, args: *pyargs }
     volumes:
       - ./dev/mock_vllm.py:/app/mock_vllm.py:ro
@@ -128,6 +130,7 @@ services:
       dev-config: { condition: service_completed_successfully }
 
   agent-server:
+    image: ai-infra-assistant-agent-server:latest
     build: { context: ., dockerfile: dev/Dockerfile.agent-dev, args: *pyargs }
     volumes: *agent-source-volumes
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/agent_server", "--reload-dir", "/app/shared"]
@@ -145,6 +148,7 @@ services:
       system-mcp: { condition: service_started }
 
   admin-console:
+    image: ai-infra-assistant-admin-console:latest
     build: { context: ., dockerfile: dev/Dockerfile.admin-dev, args: *pyargs }
     volumes: *admin-source-volumes
     environment:
