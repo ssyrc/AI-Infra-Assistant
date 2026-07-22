@@ -6,6 +6,7 @@ ARG PIP_TRUSTED_HOST=
 ARG BUILD_PROXY=
 ARG NO_PROXY=
 ARG APT_MIRROR=
+ARG APT_HTTP_TIMEOUT=10
 ENV PIP_INDEX_URL=${PIP_INDEX_URL} PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} PIP_DISABLE_PIP_VERSION_CHECK=1 \
     http_proxy=${BUILD_PROXY} https_proxy=${BUILD_PROXY} HTTP_PROXY=${BUILD_PROXY} HTTPS_PROXY=${BUILD_PROXY} \
     no_proxy=${NO_PROXY} NO_PROXY=${NO_PROXY}
@@ -32,7 +33,12 @@ RUN set -eux; \
       rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; \
       printf 'deb %s %s main\n' "$APT_MIRROR" "$VERSION_CODENAME" > /etc/apt/sources.list; \
     fi; \
-    apt-get update; \
+    apt-get \
+      -o Acquire::Retries=0 \
+      -o Acquire::http::Timeout="$APT_HTTP_TIMEOUT" \
+      -o Acquire::https::Timeout="$APT_HTTP_TIMEOUT" \
+      -o APT::Update::Error-Mode=any \
+      update; \
     apt-get install -y --no-install-recommends openssh-client; \
     rm -rf /var/lib/apt/lists/*
 COPY mcp_servers/requirements.txt .

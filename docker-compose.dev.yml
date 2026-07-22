@@ -20,6 +20,7 @@ x-py-build-args: &pyargs
 x-mcp-build-args: &mcpargs
   <<: *pyargs
   APT_MIRROR: ${APT_MIRROR:-}
+  APT_HTTP_TIMEOUT: ${APT_HTTP_TIMEOUT:-10}
 
 x-mcp-image: &mcpimage
   image: ai-infra-assistant-mcp:dev

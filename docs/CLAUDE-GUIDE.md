@@ -105,11 +105,14 @@ PIP_TRUSTED_HOST=repository.samsungds.net
 BUILD_PROXY=http://202.20.187.241:3128
 NO_PROXY=localhost,127.0.0.1
 APT_MIRROR=http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian
+APT_HTTP_TIMEOUT=10
 ```
 
 MCP 이미지의 `openssh-client` 설치는 기본 `deb.debian.org` 대신 `APT_MIRROR`를 사용한다.
 Dockerfile이 베이스 이미지의 `VERSION_CODENAME`을 읽어 `trixie`, `bookworm`, `bullseye` 등에 맞춰
 apt source를 만든다. 사내망에서는 apt 요청도 위 `BUILD_PROXY`를 탄다.
+apt 인덱스 fetch 실패는 `APT::Update::Error-Mode=any`로 즉시 실패 처리하고, `APT_HTTP_TIMEOUT`으로
+대기 시간을 제한한다.
 
 > ⚠️ **빌드 중 `JSONDecodeError: Expecting value: line 1 column 1`** 이 나면 → 3장 참고.
 > 이건 프록시 문제가 아니라 **pip 버전** 문제이고, 리포에 이미 해결책(vendor 휠)이 포함돼 있다.

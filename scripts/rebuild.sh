@@ -12,11 +12,15 @@ COMPOSE="docker compose -f docker-compose.dev.yml"
 
 if [ ! -f .env ]; then
   cp .env.example .env
-elif ! grep -q '^APT_MIRROR=' .env && grep -q '^APT_MIRROR=' .env.example; then
-  {
-    echo
-    grep '^APT_MIRROR=' .env.example
-  } >> .env
+else
+  for key in APT_MIRROR APT_HTTP_TIMEOUT; do
+    if ! grep -q "^${key}=" .env && grep -q "^${key}=" .env.example; then
+      {
+        echo
+        grep "^${key}=" .env.example
+      } >> .env
+    fi
+  done
 fi
 
 echo "== 사전 확인 =="
