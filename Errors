@@ -1,425 +1,53 @@
-[root@24-gp19 AI-Infra-Assistant]# bash scripts/rebuild.sh
-== 사전 확인 ==
-vendor 휠: vendor/pip-22.1.2-py3-none-any.whl
-
-======== 빌드: db-init ========
-[+] Building 0.8s (10/11)
- => [internal] load local bake definitions                                                                                                         0.0s
- => => reading from stdin 960B                                                                                                                     0.0s
- => [internal] load build definition from Dockerfile.db-init                                                                                       0.0s
- => => transferring dockerfile: 1.41kB                                                                                                             0.0s
- => [internal] load metadata for repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim                                       0.0s
- => [internal] load .dockerignore                                                                                                                  0.0s
- => => transferring context: 2B                                                                                                                    0.0s
- => [1/6] FROM repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim                                                         0.0s
- => [internal] load build context                                                                                                                  0.0s
- => => transferring context: 187B                                                                                                                  0.0s
- => CACHED [2/6] WORKDIR /app                                                                                                                      0.0s
- => CACHED [3/6] COPY vendor/ /tmp/vendor/                                                                                                         0.0s
- => CACHED [4/6] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ;     fi  0.0s
- => ERROR [5/6] RUN pip install --no-cache-dir "asyncpg==0.31.0"                                                                                   0.7s
-------
- > [5/6] RUN pip install --no-cache-dir "asyncpg==0.31.0":
-0.544 Looking in indexes: http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
-0.584 ERROR: Could not find a version that satisfies the requirement asyncpg==0.31.0 (from versions: none)
-0.584 ERROR: No matching distribution found for asyncpg==0.31.0
-------
-[+] build 0/1
- ⠙ Image ai-infra-assistant-db-init Building                                                                                                        0.8s
-WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
-
-Dockerfile.db-init:20
-
---------------------
-
-  18 |           pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ; \
-
-  19 |         fi
-
-  20 | >>> RUN pip install --no-cache-dir "asyncpg==0.31.0"
-
-  21 |     ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
-
-  22 |     COPY shared/migrations.py .
-
---------------------
-
-failed to solve: process "/bin/sh -c pip install --no-cache-dir \"asyncpg==0.31.0\"" did not complete successfully: exit code: 1
-
-
-======== 빌드: mock-vllm ========
-[+] Building 0.9s (10/11)
- => [internal] load local bake definitions                                                                                                         0.0s
- => => reading from stdin 962B                                                                                                                     0.0s
- => [internal] load build definition from Dockerfile.mock                                                                                          0.0s
- => => transferring dockerfile: 1.47kB                                                                                                             0.0s
- => [internal] load metadata for repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim                                       0.0s
- => [internal] load .dockerignore                                                                                                                  0.0s
- => => transferring context: 2B                                                                                                                    0.0s
- => [internal] load build context                                                                                                                  0.0s
- => => transferring context: 3.41kB                                                                                                                0.0s
- => [1/6] FROM repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim                                                         0.0s
- => CACHED [2/6] WORKDIR /app                                                                                                                      0.0s
- => CACHED [3/6] COPY vendor/ /tmp/vendor/                                                                                                         0.0s
- => CACHED [4/6] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ;     fi  0.0s
- => ERROR [5/6] RUN pip install --no-cache-dir fastapi "uvicorn[standard]" pydantic                                                                0.8s
-------
- > [5/6] RUN pip install --no-cache-dir fastapi "uvicorn[standard]" pydantic:
-0.455 Looking in indexes: http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
-0.584 ERROR: Could not find a version that satisfies the requirement fastapi (from versions: none)
-0.584 ERROR: No matching distribution found for fastapi
-------
-[+] build 0/1
- ⠙ Image ai-infra-assistant-mock-vllm Building                                                                                                      0.9s
-WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
-
-Dockerfile.mock:20
-
---------------------
-
-  18 |           pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ; \
-
-  19 |         fi
-
-  20 | >>> RUN pip install --no-cache-dir fastapi "uvicorn[standard]" pydantic
-
-  21 |     ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
-
-  22 |     COPY dev/mock_vllm.py .
-
---------------------
-
-failed to solve: process "/bin/sh -c pip install --no-cache-dir fastapi \"uvicorn[standard]\" pydantic" did not complete successfully: exit code: 1
-
-
+>> mock-vllm OK
 
 ======== 빌드: manual-mcp ========
-[+] Building 742.1s (10/14)
- => [internal] load local bake definitions                                                                                                         0.0s
- => => reading from stdin 1.82kB                                                                                                                   0.0s
- => [internal] load build definition from Dockerfile                                                                                               0.0s
- => => transferring dockerfile: 1.88kB                                                                                                             0.0s
- => [internal] load metadata for repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim                                       0.0s
- => [internal] load .dockerignore                                                                                                                  0.0s
- => => transferring context: 2B                                                                                                                    0.0s
- => [1/9] FROM repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim                                                         0.0s
- => [internal] load build context                                                                                                                  0.0s
- => => transferring context: 97.57kB                                                                                                               0.0s
- => CACHED [2/9] WORKDIR /app                                                                                                                      0.0s
- => CACHED [3/9] COPY vendor/ /tmp/vendor/                                                                                                         0.0s
- => CACHED [4/9] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ;     fi  0.0s
- => ERROR [5/9] RUN apt-get update && apt-get install -y --no-install-recommends openssh-client     && rm -rf /var/lib/apt/lists/*               742.0s
-------
- > [5/9] RUN apt-get update && apt-get install -y --no-install-recommends openssh-client     && rm -rf /var/lib/apt/lists/*:
-60.23 Ign:1 http://deb.debian.org/debian trixie InRelease
-121.3 Ign:2 http://deb.debian.org/debian trixie-updates InRelease
-182.3 Ign:3 http://deb.debian.org/debian-security trixie-security InRelease
-243.4 Ign:1 http://deb.debian.org/debian trixie InRelease
-305.5 Ign:2 http://deb.debian.org/debian trixie-updates InRelease
-367.5 Ign:3 http://deb.debian.org/debian-security trixie-security InRelease
-429.6 Ign:1 http://deb.debian.org/debian trixie InRelease
-493.6 Ign:2 http://deb.debian.org/debian trixie-updates InRelease
-557.7 Ign:3 http://deb.debian.org/debian-security trixie-security InRelease
-621.8 Err:1 http://deb.debian.org/debian trixie InRelease
-621.8   Connection failed [IP: 202.20.187.241 3128]
-681.8 Err:2 http://deb.debian.org/debian trixie-updates InRelease
-681.8   Connection failed [IP: 202.20.187.241 3128]
-741.9 Err:3 http://deb.debian.org/debian-security trixie-security InRelease
-741.9   Connection failed [IP: 202.20.187.241 3128]
-741.9 Reading package lists...
-741.9 W: Failed to fetch http://deb.debian.org/debian/dists/trixie/InRelease  Connection failed [IP: 202.20.187.241 3128]
-741.9 W: Failed to fetch http://deb.debian.org/debian/dists/trixie-updates/InRelease  Connection failed [IP: 202.20.187.241 3128]
-741.9 W: Failed to fetch http://deb.debian.org/debian-security/dists/trixie-security/InRelease  Connection failed [IP: 202.20.187.241 3128]
-741.9 W: Some index files failed to download. They have been ignored, or old ones used instead.
-741.9 Reading package lists...
-741.9 Building dependency tree...
-741.9 Reading state information...
-741.9 Package openssh-client is not available, but is referred to by another package.
-741.9 This may mean that the package is missing, has been obsoleted, or
-741.9 is only available from another source
-741.9
-741.9 E: Package 'openssh-client' has no installation candidate
-------
-[+] build 0/2
- ⠙ Image ai-infra-assistant-manual-mcp Building                                                                                                   742.1s
- ⠙ Image ai-infra-assistant-db-init    Building                                                                                                   742.1s
-WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+ Image ai-infra-assistant-db-init Building
+ Image ai-infra-assistant-mcp:dev Building
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.82kB done
+#1 DONE 0.0s
 
-Dockerfile:21
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 2.31kB done
+#2 DONE 0.0s
 
---------------------
+#3 [internal] load metadata for repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim
+#3 DONE 0.0s
 
-  20 |     # openssh-client: System/Command MCP가 대상 서버로 ssh 실행할 때 필요.
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
 
-  21 | >>> RUN apt-get update && apt-get install -y --no-install-recommends openssh-client \
+#5 [ 1/10] FROM repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim
+#5 DONE 0.0s
 
-  22 | >>>     && rm -rf /var/lib/apt/lists/*
+#6 [internal] load build context
+#6 transferring context: 98.64kB done
+#6 DONE 0.0s
 
-  23 |     COPY mcp_servers/requirements.txt .
+#7 [ 2/10] WORKDIR /app
+#7 CACHED
 
---------------------
+#8 [ 4/10] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ;     fi
+#8 CACHED
 
-failed to solve: process "/bin/sh -c apt-get update && apt-get install -y --no-install-recommends openssh-client     && rm -rf /var/lib/apt/lists/*" did not complete successfully: exit code: 100
+#9 [ 3/10] COPY vendor/ /tmp/vendor/
+#9 CACHED
+
+#10 [ 5/10] RUN for w in /tmp/vendor/*.whl; do       [ -e "$w" ] || continue;       case "$(basename "$w")" in pip-*) continue ;; esac;       pip install --no-index --no-cache-dir --no-deps "$w";     done
+#10 CACHED
+
+#11 [ 6/10] RUN apt-get update && apt-get install -y --no-install-recommends openssh-client     && rm -rf /var/lib/apt/lists/*
 
 
+#11 60.28 Ign:1 http://deb.debian.org/debian trixie InRelease
+#11 121.3 Ign:2 http://deb.debian.org/debian trixie-updates InRelease
+#11 182.4 Ign:3 http://deb.debian.org/debian-security trixie-security InRelease
+#11 243.5 Ign:1 http://deb.debian.org/debian trixie InRelease
+#11 305.5 Ign:2 http://deb.debian.org/debian trixie-updates InRelease
+
+#11 367.6 Ign:3 http://deb.debian.org/debian-security trixie-security InRelease
+#11 429.6 Ign:1 http://deb.debian.org/debian trixie InRelease
+#11 493.7 Ign:2 http://deb.debian.org/debian trixie-updates InRelease
 
 
-======== 빌드: command-mcp ========
-[+] Building 742.1s (10/14)
- => [internal] load local bake definitions                                                                                                         0.0s
- => => reading from stdin 1.83kB                                                                                                                   0.0s
- => [internal] load build definition from Dockerfile                                                                                               0.0s
- => => transferring dockerfile: 1.96kB                                                                                                             0.0s
- => [internal] load metadata for repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim                                       0.0s
- => [internal] load .dockerignore                                                                                                                  0.0s
- => => transferring context: 2B                                                                                                                    0.0s
- => [1/9] FROM repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim                                                         0.0s
- => [internal] load build context                                                                                                                  0.0s
- => => transferring context: 1.29kB                                                                                                                0.0s
- => CACHED [2/9] WORKDIR /app                                                                                                                      0.0s
- => CACHED [3/9] COPY vendor/ /tmp/vendor/                                                                                                         0.0s
- => CACHED [4/9] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ;     fi  0.0s
- => ERROR [5/9] RUN apt-get update && apt-get install -y --no-install-recommends openssh-client     && rm -rf /var/lib/apt/lists/*               742.0s
-------
- > [5/9] RUN apt-get update && apt-get install -y --no-install-recommends openssh-client     && rm -rf /var/lib/apt/lists/*:
-60.27 Ign:1 http://deb.debian.org/debian trixie InRelease
-121.3 Ign:2 http://deb.debian.org/debian trixie-updates InRelease
-182.4 Ign:3 http://deb.debian.org/debian-security trixie-security InRelease
-243.5 Ign:1 http://deb.debian.org/debian trixie InRelease
-305.5 Ign:2 http://deb.debian.org/debian trixie-updates InRelease
-367.6 Ign:3 http://deb.debian.org/debian-security trixie-security InRelease
-429.6 Ign:1 http://deb.debian.org/debian trixie InRelease
-493.7 Ign:2 http://deb.debian.org/debian trixie-updates InRelease
-557.7 Ign:3 http://deb.debian.org/debian-security trixie-security InRelease
-621.8 Err:1 http://deb.debian.org/debian trixie InRelease
-621.8   Connection failed [IP: 202.20.187.241 3128]
-681.8 Err:2 http://deb.debian.org/debian trixie-updates InRelease
-681.8   Connection failed [IP: 202.20.187.241 3128]
-741.9 Err:3 http://deb.debian.org/debian-security trixie-security InRelease
-741.9   Connection failed [IP: 202.20.187.241 3128]
-741.9 Reading package lists...
-741.9 W: Failed to fetch http://deb.debian.org/debian/dists/trixie/InRelease  Connection failed [IP: 202.20.187.241 3128]
-741.9 W: Failed to fetch http://deb.debian.org/debian/dists/trixie-updates/InRelease  Connection failed [IP: 202.20.187.241 3128]
-741.9 W: Failed to fetch http://deb.debian.org/debian-security/dists/trixie-security/InRelease  Connection failed [IP: 202.20.187.241 3128]
-741.9 W: Some index files failed to download. They have been ignored, or old ones used instead.
-741.9 Reading package lists...
-741.9 Building dependency tree...
-741.9 Reading state information...
-741.9 Package openssh-client is not available, but is referred to by another package.
-741.9 This may mean that the package is missing, has been obsoleted, or
-741.9 is only available from another source
-741.9
-741.9 E: Package 'openssh-client' has no installation candidate
-------
-[+] build 0/2
- ⠙ Image ai-infra-assistant-command-mcp Building                                                                                                  742.1s
- ⠙ Image ai-infra-assistant-db-init     Building                                                                                                  742.1s
-WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
-
-Dockerfile:21
-
---------------------
-
-  20 |     # openssh-client: System/Command MCP가 대상 서버로 ssh 실행할 때 필요.
-
-  21 | >>> RUN apt-get update && apt-get install -y --no-install-recommends openssh-client \
-
-  22 | >>>     && rm -rf /var/lib/apt/lists/*
-
-  23 |     COPY mcp_servers/requirements.txt .
-
---------------------
-
-failed to solve: process "/bin/sh -c apt-get update && apt-get install -y --no-install-recommends openssh-client     && rm -rf /var/lib/apt/lists/*" did not complete successfully: exit code: 100
-
-
-
-
--- system-mcp 재시도 4/4 (미러 일시 실패 추정, 20s 후) --
-[+] Building 742.2s (10/14)
- => [internal] load local bake definitions                                                                                                         0.0s
- => => reading from stdin 1.82kB                                                                                                                   0.0s
- => [internal] load build definition from Dockerfile                                                                                               0.0s
- => => transferring dockerfile: 1.96kB                                                                                                             0.0s
- => [internal] load metadata for repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim                                       0.0s
- => [internal] load .dockerignore                                                                                                                  0.0s
- => => transferring context: 2B                                                                                                                    0.0s
- => [internal] load build context                                                                                                                  0.0s
- => => transferring context: 1.29kB                                                                                                                0.0s
- => [1/9] FROM repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim                                                         0.0s
- => CACHED [2/9] WORKDIR /app                                                                                                                      0.0s
- => CACHED [3/9] COPY vendor/ /tmp/vendor/                                                                                                         0.0s
- => CACHED [4/9] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ;     fi  0.0s
- => ERROR [5/9] RUN apt-get update && apt-get install -y --no-install-recommends openssh-client     && rm -rf /var/lib/apt/lists/*               742.1s
-------
- > [5/9] RUN apt-get update && apt-get install -y --no-install-recommends openssh-client     && rm -rf /var/lib/apt/lists/*:
-60.42 Ign:1 http://deb.debian.org/debian trixie InRelease
-121.5 Ign:2 http://deb.debian.org/debian trixie-updates InRelease
-182.5 Ign:3 http://deb.debian.org/debian-security trixie-security InRelease
-243.6 Ign:1 http://deb.debian.org/debian trixie InRelease
-305.6 Ign:2 http://deb.debian.org/debian trixie-updates InRelease
-367.7 Ign:3 http://deb.debian.org/debian-security trixie-security InRelease
-429.8 Ign:1 http://deb.debian.org/debian trixie InRelease
-493.8 Ign:2 http://deb.debian.org/debian trixie-updates InRelease
-557.9 Ign:3 http://deb.debian.org/debian-security trixie-security InRelease
-621.9 Err:1 http://deb.debian.org/debian trixie InRelease
-621.9   Connection failed [IP: 202.20.187.241 3128]
-682.0 Err:2 http://deb.debian.org/debian trixie-updates InRelease
-682.0   Connection failed [IP: 202.20.187.241 3128]
-742.1 Err:3 http://deb.debian.org/debian-security trixie-security InRelease
-742.1   Connection failed [IP: 202.20.187.241 3128]
-742.1 Reading package lists...
-742.1 W: Failed to fetch http://deb.debian.org/debian/dists/trixie/InRelease  Connection failed [IP: 202.20.187.241 3128]
-742.1 W: Failed to fetch http://deb.debian.org/debian/dists/trixie-updates/InRelease  Connection failed [IP: 202.20.187.241 3128]
-742.1 W: Failed to fetch http://deb.debian.org/debian-security/dists/trixie-security/InRelease  Connection failed [IP: 202.20.187.241 3128]
-742.1 W: Some index files failed to download. They have been ignored, or old ones used instead.
-742.1 Reading package lists...
-742.1 Building dependency tree...
-742.1 Reading state information...
-742.1 Package openssh-client is not available, but is referred to by another package.
-742.1 This may mean that the package is missing, has been obsoleted, or
-742.1 is only available from another source
-742.1
-742.1 E: Package 'openssh-client' has no installation candidate
-------
-[+] build 0/2
- ⠙ Image ai-infra-assistant-system-mcp Building                                                                                                   742.3s
- ⠙ Image ai-infra-assistant-db-init    Building                                                                                                   742.3s
-WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
-
-Dockerfile:21
-
---------------------
-
-  20 |     # openssh-client: System/Command MCP가 대상 서버로 ssh 실행할 때 필요.
-
-  21 | >>> RUN apt-get update && apt-get install -y --no-install-recommends openssh-client \
-
-  22 | >>>     && rm -rf /var/lib/apt/lists/*
-
-  23 |     COPY mcp_servers/requirements.txt .
-
---------------------
-
-failed to solve: process "/bin/sh -c apt-get update && apt-get install -y --no-install-recommends openssh-client     && rm -rf /var/lib/apt/lists/*" did not complete successfully: exit code: 100
-
-
-======== 빌드: voc-mcp ========
-[+] Building 742.1s (10/14)
- => [internal] load local bake definitions                                                                                                         0.0s
- => => reading from stdin 1.81kB                                                                                                                   0.0s
- => [internal] load build definition from Dockerfile                                                                                               0.0s
- => => transferring dockerfile: 1.96kB                                                                                                             0.0s
- => [internal] load metadata for repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim                                       0.0s
- => [internal] load .dockerignore                                                                                                                  0.0s
- => => transferring context: 2B                                                                                                                    0.0s
- => [internal] load build context                                                                                                                  0.0s
- => => transferring context: 1.29kB                                                                                                                0.0s
- => [1/9] FROM repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim                                                         0.0s
- => CACHED [2/9] WORKDIR /app                                                                                                                      0.0s
- => CACHED [3/9] COPY vendor/ /tmp/vendor/                                                                                                         0.0s
- => CACHED [4/9] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ;     fi  0.0s
- => ERROR [5/9] RUN apt-get update && apt-get install -y --no-install-recommends openssh-client     && rm -rf /var/lib/apt/lists/*               741.9s
-------
- > [5/9] RUN apt-get update && apt-get install -y --no-install-recommends openssh-client     && rm -rf /var/lib/apt/lists/*:
-60.24 Ign:1 http://deb.debian.org/debian trixie InRelease
-121.3 Ign:2 http://deb.debian.org/debian trixie-updates InRelease
-182.4 Ign:3 http://deb.debian.org/debian-security trixie-security InRelease
-243.4 Ign:1 http://deb.debian.org/debian trixie InRelease
-305.5 Ign:2 http://deb.debian.org/debian trixie-updates InRelease
-367.5 Ign:3 http://deb.debian.org/debian-security trixie-security InRelease
-429.6 Ign:1 http://deb.debian.org/debian trixie InRelease
-493.6 Ign:2 http://deb.debian.org/debian trixie-updates InRelease
-557.7 Ign:3 http://deb.debian.org/debian-security trixie-security InRelease
-621.7 Err:1 http://deb.debian.org/debian trixie InRelease
-621.7   Connection failed [IP: 202.20.187.241 3128]
-681.8 Err:2 http://deb.debian.org/debian trixie-updates InRelease
-681.8   Connection failed [IP: 202.20.187.241 3128]
-741.9 Err:3 http://deb.debian.org/debian-security trixie-security InRelease
-741.9   Connection failed [IP: 202.20.187.241 3128]
-741.9 Reading package lists...
-741.9 W: Failed to fetch http://deb.debian.org/debian/dists/trixie/InRelease  Connection failed [IP: 202.20.187.241 3128]
-741.9 W: Failed to fetch http://deb.debian.org/debian/dists/trixie-updates/InRelease  Connection failed [IP: 202.20.187.241 3128]
-741.9 W: Failed to fetch http://deb.debian.org/debian-security/dists/trixie-security/InRelease  Connection failed [IP: 202.20.187.241 3128]
-741.9 W: Some index files failed to download. They have been ignored, or old ones used instead.
-741.9 Reading package lists...
-741.9 Building dependency tree...
-741.9 Reading state information...
-741.9 Package openssh-client is not available, but is referred to by another package.
-741.9 This may mean that the package is missing, has been obsoleted, or
-741.9 is only available from another source
-741.9
-741.9 E: Package 'openssh-client' has no installation candidate
-------
-[+] build 0/2
- ⠙ Image ai-infra-assistant-voc-mcp Building                                                                                                      742.1s
- ⠙ Image ai-infra-assistant-db-init Building                                                                                                      742.1s
-WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
-
-Dockerfile:21
-
---------------------
-
-  20 |     # openssh-client: System/Command MCP가 대상 서버로 ssh 실행할 때 필요.
-
-  21 | >>> RUN apt-get update && apt-get install -y --no-install-recommends openssh-client \
-
-  22 | >>>     && rm -rf /var/lib/apt/lists/*
-
-  23 |     COPY mcp_servers/requirements.txt .
-
---------------------
-
-failed to solve: process "/bin/sh -c apt-get update && apt-get install -y --no-install-recommends openssh-client     && rm -rf /var/lib/apt/lists/*" did not complete successfully: exit code: 100
-
-
-
-======== 빌드: agent-server ========
-[+] Building 0.8s (11/14)
- => [internal] load local bake definitions                                                                                                         0.0s
- => => reading from stdin 6.12kB                                                                                                                   0.0s
- => [internal] load build definition from Dockerfile                                                                                               0.0s
- => => transferring dockerfile: 1.65kB                                                                                                             0.0s
- => [internal] load metadata for repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim                                       0.0s
- => [internal] load .dockerignore                                                                                                                  0.0s
- => => transferring context: 2B                                                                                                                    0.0s
- => [internal] load build context                                                                                                                  0.0s
- => => transferring context: 38.57kB                                                                                                               0.0s
- => [1/9] FROM repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim                                                         0.0s
- => CACHED [2/9] WORKDIR /app                                                                                                                      0.0s
- => CACHED [3/9] COPY vendor/ /tmp/vendor/                                                                                                         0.0s
- => CACHED [4/9] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ;     fi  0.0s
- => [5/9] COPY agent_server/requirements.txt agent_server/requirements.txt                                                                         0.0s
- => ERROR [6/9] RUN pip install --no-index --no-cache-dir /tmp/vendor/asyncpg-*.whl     && pip install --no-cache-dir -r agent_server/requirement  0.6s
-------
- > [6/9] RUN pip install --no-index --no-cache-dir /tmp/vendor/asyncpg-*.whl     && pip install --no-cache-dir -r agent_server/requirements.txt:
-0.542 ERROR: asyncpg-0.31.0-cp311-cp311-musllinux_1_2_x86_64.whl is not a supported wheel on this platform.
-------
-[+] build 0/7
- ⠙ Image ai-infra-assistant-agent-server Building                                                                                                   0.8s
- ⠙ Image ai-infra-assistant-mock-vllm    Building                                                                                                   0.8s
- ⠙ Image ai-infra-assistant-command-mcp  Building                                                                                                   0.8s
- ⠙ Image ai-infra-assistant-voc-mcp      Building                                                                                                   0.8s
- ⠙ Image ai-infra-assistant-system-mcp   Building                                                                                                   0.8s
- ⠙ Image ai-infra-assistant-db-init      Building                                                                                                   0.8s
- ⠙ Image ai-infra-assistant-manual-mcp   Building                                                                                                   0.8s
-WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
-
-Dockerfile:21
-
---------------------
-
-  20 |     COPY agent_server/requirements.txt agent_server/requirements.txt
-
-  21 | >>> RUN pip install --no-index --no-cache-dir /tmp/vendor/asyncpg-*.whl \
-
-  22 | >>>     && pip install --no-cache-dir -r agent_server/requirements.txt
-
-  23 |     ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
-
---------------------
-
-failed to solve: process "/bin/sh -c pip install --no-index --no-cache-dir /tmp/vendor/asyncpg-*.whl     && pip install --no-cache-dir -r agent_server/requirements.txt" did not complete successfully: exit code: 1
-
-[root@24-gp19 AI-Infra-Assistant]# ls vendor
-asyncpg-0.31.0-cp311-cp311-musllinux_1_2_x86_64.whl  fastapi-0.115.8.tar.gz  pip-22.1.2-py3-none-any.whl  README.md
