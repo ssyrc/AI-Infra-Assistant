@@ -6,7 +6,7 @@
 
 2. 사내망에서 git 연동 후, 폐쇄망 서버로 rsync --delete
 git -C /home/yrc/AI-Infra-Assistant fetch origin main && git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
-rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/AI-Infra-Assistant/ 2>&1
+rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/ 2>&1
 
 3. 폐쇄망 서버 구조
 (1) 로그인 서버: 202.20.185.100 (hostname: login07)
