@@ -1,4 +1,4 @@
-ARG PYTHON_IMAGE=python:3.11-slim
+ARG PYTHON_IMAGE=python:3.11-slim-bullseye
 FROM ${PYTHON_IMAGE}
 # 폐쇄망 빌드: pip 미러/프록시 (기본값=공개 PyPI 직접). compose가 .env에서 전달한다.
 ARG PIP_INDEX_URL=https://pypi.org/simple

@@ -15,14 +15,14 @@ json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
 이후 패키지들을 사내 미러에서 받는다.
 
 > 그리고 이 옛 pip는 **Python 3.12에서 `pkgutil.ImpImporter` 에러로 실행되지 않으므로** 베이스
-> 이미지는 **`python:3.11-slim`** 이어야 한다(compose·Dockerfile에 반영됨).
+> 이미지는 **`python:3.11-slim-bullseye`** 이어야 한다(compose·Dockerfile에 반영됨).
 
 ## 들어있는 파일
 
 - `pip-22.1.2-py3-none-any.whl` — 순수 파이썬 휠. pip 자체 부트스트랩 전용(위 문제 해결).
 - `asyncpg-0.31.0-cp311-...manylinux...x86_64.whl` — 사내 미러가 asyncpg 인덱스 조회 시
   간헐적으로 빈 응답(`from versions: none`)을 줘서 오프라인으로 고정 설치.
-  **cp311 + manylinux(x86_64) 휠** — 베이스 이미지(`python:3.11-slim`, linux/amd64)와 일치해야 한다.
+  **cp311 + manylinux(x86_64) 휠** — 베이스 이미지(`python:3.11-slim-bullseye`, linux/amd64)와 일치해야 한다.
 - `fastapi-0.115.8-py3-none-any.whl` — 순수 파이썬. 같은 이유(미러 간헐 실패)로 오프라인 고정.
 - FastAPI/Uvicorn 실행 스택:
   `uvicorn-0.34.0`, `pydantic-2.10.6`, `pydantic_core-2.27.2`, `starlette-0.45.3`,
@@ -48,7 +48,7 @@ json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
 pip download '<pkg>==<버전>' --no-deps -d vendor/
 
 # C 확장이 있는 패키지(예: asyncpg)는 베이스 이미지와 플랫폼이 맞아야 한다.
-# 이 리포 베이스는 python:3.11-slim, linux/amd64 이므로:
+# 이 리포 베이스는 python:3.11-slim-bullseye, linux/amd64 이므로:
 pip download '<pkg>==<버전>' --no-deps -d vendor/ \
   --platform manylinux_2_17_x86_64 --python-version 311 --implementation cp --abi cp311 \
   --only-binary=:all:

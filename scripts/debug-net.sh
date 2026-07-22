@@ -17,7 +17,7 @@ if [ -f .env ]; then
 fi
 INDEX_BASE="${INDEX_BASE%/}"
 URL="$INDEX_BASE/fastapi/"
-IMG="$REG/python:3.11-slim"
+IMG="$REG/python:3.11-slim-bullseye"
 
 echo "index : $INDEX_BASE"
 echo "proxy : $PROXY"

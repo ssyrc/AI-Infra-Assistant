@@ -10,7 +10,7 @@
 #   REGISTRY_DOCKERHUB=repository.samsungds.net/proxy-docker-registry-1.docker.io
 #   REGISTRY_GHCR=repository.samsungds.net/proxy-docker-ghcr.io
 x-py-build-args: &pyargs
-  PYTHON_IMAGE: ${REGISTRY_DOCKERHUB:-docker.io}/python:3.11-slim
+  PYTHON_IMAGE: ${REGISTRY_DOCKERHUB:-docker.io}/python:3.11-slim-bullseye
   # 폐쇄망 pip 미러/프록시(.env). 비우면 공개 PyPI 직접.
   PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
   PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}

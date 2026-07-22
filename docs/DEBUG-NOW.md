@@ -11,7 +11,7 @@
 
 ## apt 미러 설정
 
-MCP 이미지는 `openssh-client` 설치가 필요하다. `python:3.11-slim` 기본 sources는
+MCP 이미지는 `openssh-client` 설치가 필요하다. `python:3.11-slim-bullseye` 기본 sources는
 `deb.debian.org`를 바라보므로 폐쇄망에서 실패할 수 있다. `.env`에 아래 값을 둔다.
 
 ```bash
@@ -66,7 +66,7 @@ bash scripts/debug-now.sh <pkg>==<버전>   # 그 버전이 미러에 있는지 
 # 순수 파이썬 패키지
 pip download '<pkg>==<버전>' --no-deps -d vendor/
 
-# C 확장 패키지(예: asyncpg류) — 베이스가 python:3.11-slim, linux/amd64 이므로 플랫폼 지정 필수
+# C 확장 패키지(예: asyncpg류) — 베이스가 python:3.11-slim-bullseye, linux/amd64 이므로 플랫폼 지정 필수
 pip download '<pkg>==<버전>' --no-deps -d vendor/ \
   --platform manylinux_2_17_x86_64 --python-version 311 --implementation cp --abi cp311 \
   --only-binary=:all:

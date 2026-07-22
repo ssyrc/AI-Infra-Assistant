@@ -55,7 +55,7 @@ curl -s http://localhost:8500/health ; echo
 빌드 로그에서 `pip install ... -r requirements.txt` 자리에 **`json.loads` 트레이스백 없이**
 `Collecting fastapi ...` / `Downloading ...` 이 뜨면 통과. (실패해온 자리가 여기였다.)
 
-> 현재 조합: **python:3.11-slim + pip 22.1.2(HTML-only)**. 이 둘이 맞아야 폐쇄망 미러가 동작한다.
+> 현재 조합: **python:3.11-slim-bullseye + pip 22.1.2(HTML-only)**. 이 둘이 맞아야 폐쇄망 미러가 동작한다.
 > 배경/원리는 아래 3장, git 안 쓰고 직접 패치하려면 3-A 참고.
 
 ---
@@ -91,7 +91,7 @@ dev에 필요한 이미지 4종:
 ```
 <REGISTRY_DOCKERHUB>/pgvector/pgvector:pg16
 <REGISTRY_DOCKERHUB>/postgres:16-alpine
-<REGISTRY_DOCKERHUB>/python:3.11-slim
+<REGISTRY_DOCKERHUB>/python:3.11-slim-bullseye
 <REGISTRY_GHCR>/open-webui/open-webui:v0.6.5
 ```
 프로덕션은 추가로 `langfuse/langfuse:3.130.0`, `langfuse/langfuse-worker:3.130.0`,
@@ -171,9 +171,9 @@ json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
 > - 미러 호환 위해 pip **< 22.2** 필요 → 그런데 그 pip는 **3.12에서 못 돎**
 > - 3.12 호환 pip(≥23)은 다시 **JSON API** → 미러 실패
 >
-> 그래서 베이스 이미지를 **`python:3.11-slim`** 으로 고정했다(3.11엔 `pkgutil.ImpImporter`가 있어
+> 그래서 베이스 이미지를 **`python:3.11-slim-bullseye`** 로 고정했다(3.11엔 `pkgutil.ImpImporter`가 있어
 > pip 22.1.2가 정상 실행되고, HTML API로 미러도 OK). compose `x-py-build-args`와 6개 Dockerfile의
-> `ARG PYTHON_IMAGE`가 모두 3.11-slim이다. 사내 미러에 `python:3.11-slim` 이미지가 있어야 한다.
+> `ARG PYTHON_IMAGE`가 모두 3.11-slim-bullseye다. 사내 미러에 `python:3.11-slim-bullseye` 이미지가 있어야 한다.
 
 빌드 로그에서 아래처럼 나오면 정상:
 ```
@@ -203,7 +203,7 @@ rm -f vendor/pip-22.2.2*.whl vendor/pip-22.3.1*.whl
 ls -l vendor/pip-*.whl
 
 # 1-b) 베이스 이미지를 Python 3.11로 (pip 22.1.2는 Python 3.12에서 ImpImporter 에러로 못 돎)
-sed -i 's#python:3.12-slim#python:3.11-slim#g' \
+sed -i 's#python:3.12-slim#python:3.11-slim-bullseye#g' \
   docker-compose.yml docker-compose.dev.yml \
   agent_server/Dockerfile admin_console/Dockerfile mcp_servers/Dockerfile \
   shared/Dockerfile.db-init dev/Dockerfile.mock dev/Dockerfile.admin-dev
@@ -248,7 +248,7 @@ docker compose -f docker-compose.dev.yml up -d
 > **왜 22.1.2인가**: pip는 **22.2부터** JSON Simple API(PEP 691)를 쓴다(22.2.2도 JSON을 씀).
 > 그래서 22.2 이상을 오프라인으로 깔아도 이후 미러 조회에서 **똑같이 JSONDecodeError**가 난다.
 > HTML API만 쓰는 마지막 버전 **22.1.2(<22.2)** 여야 한다. 그리고 이 옛 pip는 Python 3.12에서
-> `pkgutil.ImpImporter` 에러로 못 도니 베이스 이미지는 **3.11-slim**이어야 한다(둘 다 이 리포에 반영됨).
+> `pkgutil.ImpImporter` 에러로 못 도니 베이스 이미지는 **3.11-slim-bullseye**여야 한다(둘 다 이 리포에 반영됨).
 
 ---
 
@@ -349,12 +349,12 @@ docker compose up -d --build
 
 ### 8-1-b. 빌드 중 `AttributeError: module 'pkgutil' has no attribute 'ImpImporter'`
 → pip 22.1.2를 **Python 3.12** 위에서 돌려서 나는 에러(3.12가 `ImpImporter`를 제거함). 베이스
-이미지가 **`python:3.11-slim`** 인지 확인한다:
+이미지가 **`python:3.11-slim-bullseye`** 인지 확인한다:
 ```bash
 grep -rn 'python:3.1[12]' docker-compose*.yml */Dockerfile*
 ```
-`3.12`가 보이면 3장 3-A의 **1-b 단계**(`sed ... 3.12-slim → 3.11-slim`)를 실행하고 다시 빌드한다.
-사내 미러에 `python:3.11-slim`이 있어야 한다(없으면 미러 관리자에게 요청).
+`3.12`가 보이면 3장 3-A의 **1-b 단계**(`sed ... 3.12-slim → 3.11-slim-bullseye`)를 실행하고 다시 빌드한다.
+사내 미러에 `python:3.11-slim-bullseye`가 있어야 한다(없으면 미러 관리자에게 요청).
 
 ### 8-2. 포트 충돌 (`address already in use`, 8000/8100 등)
 → agent-server는 기본 **8500**으로 노출된다. 그래도 겹치면 `.env`에서 해당 `*_PORT`만 빈 포트로 바꾼다.
