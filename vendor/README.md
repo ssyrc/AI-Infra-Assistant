@@ -38,6 +38,10 @@ json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
   `jsonschema`, `pydantic_settings`, `pyjwt`, `cryptography`, `cffi`, `sse_starlette-2.2.1`,
   `typing_inspection`, `attrs`, `jsonschema_specifications`, `referencing`, `rpds_py`,
   `certifi`, `pycparser` — 사내 미러에 MCP SDK 또는 하위 의존성이 없을 때를 대비한다.
+- Agent 실행 스택:
+  `google_adk-1.22.1` — 사내 미러에 `google-adk` 본체가 없을 때를 대비한다. 이 버전은
+  `fastapi>=0.115,<0.124`, `starlette>=0.49.1,<1.0`, `watchdog>=6,<7` 조합이 필요하므로
+  agent-server requirements와 vendor wheel을 함께 맞춘다.
 - `deb/` — MCP 이미지에서 `openssh-client`를 apt 미러 없이 설치하기 위한 Debian bullseye
   linux/amd64 `.deb` 묶음. Dockerfile은 이 디렉터리에 `.deb`가 있으면 `apt-get update`를 하지 않고
   `dpkg --unpack /tmp/vendor/deb/*.deb` 후 `dpkg --configure -a`로 로컬 설치한다.
@@ -86,6 +90,9 @@ pip download --dest vendor --only-binary=:all: \
   'pydantic-settings>=2.5.2' 'pyjwt[crypto]>=2.10.1' \
   'sse-starlette==2.2.1' 'typing-inspection>=0.4.1' \
   'httpx==0.28.1' 'redis==5.2.1'
+
+# Google ADK 본체만 사내 미러에 없을 때:
+pip download --dest vendor --only-binary=:all: --no-deps 'google-adk==1.22.1'
 ```
 
 폐쇄망 반입만 가능하면, 사내에서 동작하는 pip로 위 명령을 실행해 나온 `.whl`을 이 폴더에 두면 된다.
