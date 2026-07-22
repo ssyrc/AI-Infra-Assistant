@@ -1,45 +1,195 @@
-#11 3.217 + rm -rf /var/lib/apt/lists/auxfiles /var/lib/apt/lists/lock /var/lib/apt/lists/partial /var/lib/apt/lists/repository.samsungds.net_repository_proxy-apt-mirror.kakao.com-debian_dists_trixie_InRelease /var/lib/apt/lists/repository.samsungds.net_repository_proxy-apt-mirror.kakao.com-debian_dists_trixie_main_binary-amd64_Packages.lz4
-#11 DONE 3.3s
+======== 빌드: manual-mcp ========
+ Image ai-infra-assistant-db-init Building
+ Image ai-infra-assistant-mcp:dev Building
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.92kB done
+#1 DONE 0.0s
 
-#12 [ 7/10] COPY mcp_servers/requirements.txt .
-#12 DONE 0.0s
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 2.60kB done
+#2 DONE 0.0s
 
-#13 [ 8/10] RUN pip install --no-cache-dir -r requirements.txt
-#13 0.448 Looking in indexes: http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
-#13 0.494 Collecting mcp<2.0.0,>=1.28.1
-#13 0.503   Downloading http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/packages/mcp/1.28.1/mcp-1.28.1-py3-none-any.whl (222 kB)
-#13 0.506      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 222.6/222.6 kB 179.6 MB/s eta 0:00:00
-#13 0.533 ERROR: Could not find a version that satisfies the requirement uvicorn[standard]==0.34.0 (from versions: none)
-#13 0.533 ERROR: No matching distribution found for uvicorn[standard]==0.34.0
-#13 ERROR: process "/bin/sh -c pip install --no-cache-dir -r requirements.txt" did not complete successfully: exit code: 1
+#3 [internal] load metadata for repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim
+#3 DONE 0.0s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [ 1/10] FROM repository.samsungds.net/proxy-docker-registry-1.docker.io/python:3.11-slim
+#5 DONE 0.0s
+
+#6 [internal] load build context
+#6 transferring context: 100.31kB done
+#6 DONE 0.0s
+
+#7 [ 2/10] WORKDIR /app
+#7 CACHED
+
+#8 [ 3/10] COPY vendor/ /tmp/vendor/
+#8 CACHED
+
+#9 [ 4/10] RUN if ls /tmp/vendor/pip-*.whl >/dev/null 2>&1; then       pip install --no-index --no-cache-dir /tmp/vendor/pip-*.whl ;     fi
+#9 1.211 Processing /tmp/vendor/pip-22.1.2-py3-none-any.whl
+#9 1.249 Installing collected packages: pip
+#9 1.249   Attempting uninstall: pip
+#9 1.251     Found existing installation: pip 24.0
+#9 1.282     Uninstalling pip-24.0:
+#9 1.386       Successfully uninstalled pip-24.0
+#9 2.132 Successfully installed pip-22.1.2
+#9 2.132 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#9 DONE 2.3s
+
+#10 [ 5/10] RUN for w in /tmp/vendor/*.whl; do       [ -e "$w" ] || continue;       case "$(basename "$w")" in pip-*) continue ;; esac;       pip install --no-index --no-cache-dir --no-deps "$w";     done
+#10 0.492 Processing /tmp/vendor/annotated_types-0.7.0-py3-none-any.whl
+#10 0.495 Installing collected packages: annotated-types
+#10 0.502 Successfully installed annotated-types-0.7.0
+#10 0.503 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 0.781 Processing /tmp/vendor/anyio-4.14.2-py3-none-any.whl
+#10 0.784 Installing collected packages: anyio
+#10 0.852 Successfully installed anyio-4.14.2
+#10 0.852 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 1.128 Processing /tmp/vendor/asyncpg-0.31.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+#10 1.131 Installing collected packages: asyncpg
+#10 1.209 Successfully installed asyncpg-0.31.0
+#10 1.209 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 1.497 Processing /tmp/vendor/click-8.4.2-py3-none-any.whl
+#10 1.499 Installing collected packages: click
+#10 1.544 Successfully installed click-8.4.2
+#10 1.544 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 1.825 Processing /tmp/vendor/colorama-0.4.6-py2.py3-none-any.whl
+#10 1.828 Installing collected packages: colorama
+#10 1.844 Successfully installed colorama-0.4.6
+#10 1.844 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 2.119 Processing /tmp/vendor/fastapi-0.115.8-py3-none-any.whl
+#10 2.122 Installing collected packages: fastapi
+#10 2.172 Successfully installed fastapi-0.115.8
+#10 2.172 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 2.449 Processing /tmp/vendor/h11-0.16.0-py3-none-any.whl
+#10 2.451 Installing collected packages: h11
+#10 2.466 Successfully installed h11-0.16.0
+#10 2.466 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 2.740 Processing /tmp/vendor/httptools-0.6.4-cp311-cp311-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+#10 2.742 Installing collected packages: httptools
+#10 2.754 Successfully installed httptools-0.6.4
+#10 2.755 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 3.023 Processing /tmp/vendor/idna-3.18-py3-none-any.whl
+#10 3.025 Installing collected packages: idna
+#10 3.056 Successfully installed idna-3.18
+#10 3.057 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 3.331 Processing /tmp/vendor/pydantic-2.10.6-py3-none-any.whl
+#10 3.333 Installing collected packages: pydantic
+#10 3.503 Successfully installed pydantic-2.10.6
+#10 3.504 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 3.777 Processing /tmp/vendor/pydantic_core-2.27.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+#10 3.779 Installing collected packages: pydantic-core
+#10 3.885 Successfully installed pydantic-core-2.27.2
+#10 3.886 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 4.166 Processing /tmp/vendor/python_dotenv-1.2.2-py3-none-any.whl
+#10 4.169 Installing collected packages: python-dotenv
+#10 4.183 Successfully installed python-dotenv-1.2.2
+#10 4.183 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 4.455 Processing /tmp/vendor/python_multipart-0.0.20-py3-none-any.whl
+#10 4.456 Installing collected packages: python-multipart
+#10 4.472 Successfully installed python-multipart-0.0.20
+#10 4.472 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 4.741 Processing /tmp/vendor/pyyaml-6.0.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+#10 4.743 Installing collected packages: pyyaml
+#10 4.783 Successfully installed pyyaml-6.0.3
+#10 4.783 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 5.062 Processing /tmp/vendor/starlette-0.45.3-py3-none-any.whl
+#10 5.064 Installing collected packages: starlette
+#10 5.139 Successfully installed starlette-0.45.3
+#10 5.139 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 5.411 Processing /tmp/vendor/typing_extensions-4.16.0-py3-none-any.whl
+#10 5.413 Installing collected packages: typing-extensions
+#10 5.435 Successfully installed typing-extensions-4.16.0
+#10 5.435 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 5.702 Processing /tmp/vendor/uvicorn-0.34.0-py3-none-any.whl
+#10 5.704 Installing collected packages: uvicorn
+#10 5.742 Successfully installed uvicorn-0.34.0
+#10 5.742 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 6.013 Processing /tmp/vendor/uvloop-0.22.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+#10 6.016 Installing collected packages: uvloop
+#10 6.073 Successfully installed uvloop-0.22.1
+#10 6.073 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 6.349 Processing /tmp/vendor/watchfiles-1.2.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+#10 6.351 Installing collected packages: watchfiles
+#10 6.369 Successfully installed watchfiles-1.2.0
+#10 6.369 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 6.642 Processing /tmp/vendor/websockets-16.1.1-py3-none-any.whl
+#10 6.644 Installing collected packages: websockets
+#10 6.709 Successfully installed websockets-16.1.1
+#10 6.709 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 DONE 7.0s
+
+#11 [ 6/10] RUN set -eux;     if [ -n "http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian" ]; then       . /etc/os-release;       rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources;       printf 'deb %s %s main\n' "http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian" "$VERSION_CODENAME" > /etc/apt/sources.list;     fi;     apt-get update;     apt-get install -y --no-install-recommends openssh-client;     rm -rf /var/lib/apt/lists/*
+#11 0.216 + [ -n http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian ]
+#11 0.216 + . /etc/os-release
+#11 0.216 + PRETTY_NAME=Debian GNU/Linux 13 (trixie)
+#11 0.216 + NAME=Debian GNU/Linux
+#11 0.216 + VERSION_ID=13
+#11 0.216 + VERSION=13 (trixie)
+#11 0.216 + VERSION_CODENAME=trixie
+#11 0.216 + DEBIAN_VERSION_FULL=13.6
+#11 0.216 + ID=debian
+#11 0.216 + HOME_URL=https://www.debian.org/
+#11 0.216 + SUPPORT_URL=https://www.debian.org/support
+#11 0.216 + BUG_REPORT_URL=https://bugs.debian.org/
+#11 0.216 + rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/debian.sources
+#11 0.217 + printf deb %s %s main\n http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian trixie
+#11 0.217 + apt-get update
+#11 0.258 Get:1 http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian trixie InRelease
+#11 0.258 Err:1 http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian trixie InRelease
+#11 0.258   Clearsigned file isn't valid, got 'NOSPLIT' (does the network require authentication?)
+#11 0.261 Reading package lists...
+#11 0.266 E: Failed to fetch http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian/dists/trixie/InRelease  Clearsigned file isn't valid, got 'NOSPLIT' (does the network require authentication?)
+#11 0.266 E: The repository 'http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian trixie InRelease' is not signed.
+#11 ERROR: process "/bin/sh -c set -eux;     if [ -n \"$APT_MIRROR\" ]; then       . /etc/os-release;       rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources;       printf 'deb %s %s main\\n' \"$APT_MIRROR\" \"$VERSION_CODENAME\" > /etc/apt/sources.list;     fi;     apt-get update;     apt-get install -y --no-install-recommends openssh-client;     rm -rf /var/lib/apt/lists/*" did not complete successfully: exit code: 100
 ------
- > [ 8/10] RUN pip install --no-cache-dir -r requirements.txt:
-0.448 Looking in indexes: http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/simple
-0.494 Collecting mcp<2.0.0,>=1.28.1
-0.503   Downloading http://repository.samsungds.net/repository/proxy-pypi-files.pythonhosted.org/packages/mcp/1.28.1/mcp-1.28.1-py3-none-any.whl (222 kB)
-0.506      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 222.6/222.6 kB 179.6 MB/s eta 0:00:00
-0.533 ERROR: Could not find a version that satisfies the requirement uvicorn[standard]==0.34.0 (from versions: none)
-0.533 ERROR: No matching distribution found for uvicorn[standard]==0.34.0
+ > [ 6/10] RUN set -eux;     if [ -n "http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian" ]; then       . /etc/os-release;       rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources;       printf 'deb %s %s main\n' "http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian" "$VERSION_CODENAME" > /etc/apt/sources.list;     fi;     apt-get update;     apt-get install -y --no-install-recommends openssh-client;     rm -rf /var/lib/apt/lists/*:
+0.216 + BUG_REPORT_URL=https://bugs.debian.org/
+0.216 + rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/debian.sources
+0.217 + printf deb %s %s main\n http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian trixie
+0.217 + apt-get update
+0.258 Get:1 http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian trixie InRelease
+0.258 Err:1 http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian trixie InRelease
+0.258   Clearsigned file isn't valid, got 'NOSPLIT' (does the network require authentication?)
+0.261 Reading package lists...
+0.266 E: Failed to fetch http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian/dists/trixie/InRelease  Clearsigned file isn't valid, got 'NOSPLIT' (does the network require authentication?)
+0.266 E: The repository 'http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian trixie InRelease' is not signed.
 ------
 WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
 
-Dockerfile:39
+Dockerfile:29
 
 --------------------
 
-  37 |         rm -rf /var/lib/apt/lists/*
+  28 |     # openssh-client: System/Command MCP가 대상 서버로 ssh 실행할 때 필요.
+
+  29 | >>> RUN set -eux; \
+
+  30 | >>>     if [ -n "$APT_MIRROR" ]; then \
+
+  31 | >>>       . /etc/os-release; \
+
+  32 | >>>       rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; \
+
+  33 | >>>       printf 'deb %s %s main\n' "$APT_MIRROR" "$VERSION_CODENAME" > /etc/apt/sources.list; \
+
+  34 | >>>     fi; \
+
+  35 | >>>     apt-get update; \
+
+  36 | >>>     apt-get install -y --no-install-recommends openssh-client; \
+
+  37 | >>>     rm -rf /var/lib/apt/lists/*
 
   38 |     COPY mcp_servers/requirements.txt .
 
-  39 | >>> RUN pip install --no-cache-dir -r requirements.txt
-
-  40 |     # 빌드 프록시를 런타임 컨테이너에 남기지 않는다(내부 서비스 통신이 프록시로 새지 않도록).
-
-  41 |     ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
-
 --------------------
 
-failed to solve: process "/bin/sh -c pip install --no-cache-dir -r requirements.txt" did not complete successfully: exit code: 1
+failed to solve: process "/bin/sh -c set -eux;     if [ -n \"$APT_MIRROR\" ]; then       . /etc/os-release;       rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources;       printf 'deb %s %s main\\n' \"$APT_MIRROR\" \"$VERSION_CODENAME\" > /etc/apt/sources.list;     fi;     apt-get update;     apt-get install -y --no-install-recommends openssh-client;     rm -rf /var/lib/apt/lists/*" did not complete successfully: exit code: 100
 
 
 !!! 빌드 실패: manual-mcp
