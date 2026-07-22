@@ -1,60 +1,69 @@
-#11 0.181 + apt-get update
-#11 0.218 Get:1 http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian bullseye InRelease
-#11 30.25 Err:1 http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian bullseye InRelease
-#11 30.25   Connection timed out [IP: 202.20.187.241 3128]
-#11 30.25 Reading package lists...
-#11 30.26 W: Failed to fetch http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian/dists/bullseye/InRelease  Connection timed out [IP: 202.20.187.241 3128]
-#11 30.26 W: Some index files failed to download. They have been ignored, or old ones used instead.
-#11 30.26 + apt-get install -y --no-install-recommends openssh-client
-#11 30.27 Reading package lists...
-#11 30.27 Building dependency tree...
-#11 30.27 Reading state information...
-#11 30.27 E: Unable to locate package openssh-client
-#11 ERROR: process "/bin/sh -c set -eux;     if [ -n \"$APT_MIRROR\" ]; then       . /etc/os-release;       rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources;       printf 'deb %s %s main\\n' \"$APT_MIRROR\" \"$VERSION_CODENAME\" > /etc/apt/sources.list;     fi;     apt-get update;     apt-get install -y --no-install-recommends openssh-client;     rm -rf /var/lib/apt/lists/*" did not complete successfully: exit code: 100
+#11 0.343 E: Internal Error, Pathname to install is not absolute 'libk5crypto3_1.18.3-6+deb11u8_amd64.deb'
+#11 0.343 6 upgraded, 6 newly installed, 0 to remove and 0 not upgraded.
+#11 0.343 After this operation, 5232 kB of additional disk space will be used.
+#11 ERROR: process "/bin/sh -c set -eux;     if ls /tmp/vendor/deb/*.deb >/dev/null 2>&1; then       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download /tmp/vendor/deb/*.deb;     else       if [ -n \"$APT_MIRROR\" ]; then         . /etc/os-release;         rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources;         printf 'deb %s %s main\\n' \"$APT_MIRROR\" \"$VERSION_CODENAME\" > /etc/apt/sources.list;       fi;       apt-get         -o Acquire::Retries=0         -o Acquire::http::Timeout=\"$APT_HTTP_TIMEOUT\"         -o Acquire::https::Timeout=\"$APT_HTTP_TIMEOUT\"         -o APT::Update::Error-Mode=any         update;       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-client;     fi;     rm -rf /var/lib/apt/lists/* /tmp/vendor/deb" did not complete successfully: exit code: 100
 ------
- > [ 6/10] RUN set -eux;     if [ -n "http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian" ]; then       . /etc/os-release;       rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources;       printf 'deb %s %s main\n' "http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian" "$VERSION_CODENAME" > /etc/apt/sources.list;     fi;     apt-get update;     apt-get install -y --no-install-recommends openssh-client;     rm -rf /var/lib/apt/lists/*:
-30.25 Err:1 http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian bullseye InRelease
-30.25   Connection timed out [IP: 202.20.187.241 3128]
-30.25 Reading package lists...
-30.26 W: Failed to fetch http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian/dists/bullseye/InRelease  Connection timed out [IP: 202.20.187.241 3128]
-30.26 W: Some index files failed to download. They have been ignored, or old ones used instead.
-30.26 + apt-get install -y --no-install-recommends openssh-client
-30.27 Reading package lists...
-30.27 Building dependency tree...
-30.27 Reading state information...
-30.27 E: Unable to locate package openssh-client
+ > [ 6/10] RUN set -eux;     if ls /tmp/vendor/deb/*.deb >/dev/null 2>&1; then       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download /tmp/vendor/deb/*.deb;     else       if [ -n "http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian" ]; then         . /etc/os-release;         rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources;         printf 'deb %s %s main\n' "http://repository.samsungds.net/repository/proxy-apt-mirror.kakao.com-debian" "$VERSION_CODENAME" > /etc/apt/sources.list;       fi;       apt-get         -o Acquire::Retries=0         -o Acquire::http::Timeout="10"         -o Acquire::https::Timeout="10"         -o APT::Update::Error-Mode=any         update;       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-client;     fi;     rm -rf /var/lib/apt/lists/* /tmp/vendor/deb:
+0.276   krb5-doc krb5-user keychain libpam-ssh monkeysphere ssh-askpass
+0.276 Recommended packages:
+0.276   krb5-locales xauth
+0.285 The following NEW packages will be installed:
+0.285   libbsd0 libcbor0 libedit2 libfido2-1 libmd0 openssh-client
+0.285 The following packages will be upgraded:
+0.285   libgssapi-krb5-2 libk5crypto3 libkrb5-3 libkrb5support0 libssl1.1 libudev1
+0.343 E: Internal Error, Pathname to install is not absolute 'libk5crypto3_1.18.3-6+deb11u8_amd64.deb'
+0.343 6 upgraded, 6 newly installed, 0 to remove and 0 not upgraded.
+0.343 After this operation, 5232 kB of additional disk space will be used.
 ------
 WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
 
-Dockerfile:29
+Dockerfile:30
 
 --------------------
 
-  28 |     # openssh-client: System/Command MCP가 대상 서버로 ssh 실행할 때 필요.
+  29 |     # openssh-client: System/Command MCP가 대상 서버로 ssh 실행할 때 필요.
 
-  29 | >>> RUN set -eux; \
+  30 | >>> RUN set -eux; \
 
-  30 | >>>     if [ -n "$APT_MIRROR" ]; then \
+  31 | >>>     if ls /tmp/vendor/deb/*.deb >/dev/null 2>&1; then \
 
-  31 | >>>       . /etc/os-release; \
+  32 | >>>       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download /tmp/vendor/deb/*.deb; \
 
-  32 | >>>       rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; \
+  33 | >>>     else \
 
-  33 | >>>       printf 'deb %s %s main\n' "$APT_MIRROR" "$VERSION_CODENAME" > /etc/apt/sources.list; \
+  34 | >>>       if [ -n "$APT_MIRROR" ]; then \
 
-  34 | >>>     fi; \
+  35 | >>>         . /etc/os-release; \
 
-  35 | >>>     apt-get update; \
+  36 | >>>         rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; \
 
-  36 | >>>     apt-get install -y --no-install-recommends openssh-client; \
+  37 | >>>         printf 'deb %s %s main\n' "$APT_MIRROR" "$VERSION_CODENAME" > /etc/apt/sources.list; \
 
-  37 | >>>     rm -rf /var/lib/apt/lists/*
+  38 | >>>       fi; \
 
-  38 |     COPY mcp_servers/requirements.txt .
+  39 | >>>       apt-get \
+
+  40 | >>>         -o Acquire::Retries=0 \
+
+  41 | >>>         -o Acquire::http::Timeout="$APT_HTTP_TIMEOUT" \
+
+  42 | >>>         -o Acquire::https::Timeout="$APT_HTTP_TIMEOUT" \
+
+  43 | >>>         -o APT::Update::Error-Mode=any \
+
+  44 | >>>         update; \
+
+  45 | >>>       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-client; \
+
+  46 | >>>     fi; \
+
+  47 | >>>     rm -rf /var/lib/apt/lists/* /tmp/vendor/deb
+
+  48 |     COPY mcp_servers/requirements.txt .
 
 --------------------
 
-failed to solve: process "/bin/sh -c set -eux;     if [ -n \"$APT_MIRROR\" ]; then       . /etc/os-release;       rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources;       printf 'deb %s %s main\\n' \"$APT_MIRROR\" \"$VERSION_CODENAME\" > /etc/apt/sources.list;     fi;     apt-get update;     apt-get install -y --no-install-recommends openssh-client;     rm -rf /var/lib/apt/lists/*" did not complete successfully: exit code: 100
+failed to solve: process "/bin/sh -c set -eux;     if ls /tmp/vendor/deb/*.deb >/dev/null 2>&1; then       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-download /tmp/vendor/deb/*.deb;     else       if [ -n \"$APT_MIRROR\" ]; then         . /etc/os-release;         rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources;         printf 'deb %s %s main\\n' \"$APT_MIRROR\" \"$VERSION_CODENAME\" > /etc/apt/sources.list;       fi;       apt-get         -o Acquire::Retries=0         -o Acquire::http::Timeout=\"$APT_HTTP_TIMEOUT\"         -o Acquire::https::Timeout=\"$APT_HTTP_TIMEOUT\"         -o APT::Update::Error-Mode=any         update;       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-client;     fi;     rm -rf /var/lib/apt/lists/* /tmp/vendor/deb" did not complete successfully: exit code: 100
 
 
 !!! 빌드 실패: manual-mcp
