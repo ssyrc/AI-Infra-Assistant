@@ -26,8 +26,8 @@ RUN for w in /tmp/vendor/*.whl; do \
     done
 COPY admin_console/backend/requirements.txt admin_console/backend/requirements.txt
 COPY admin_console/backend/requirements-docling.txt admin_console/backend/requirements-docling.txt
-RUN pip install --no-cache-dir -r admin_console/backend/requirements.txt \
-    && pip install --no-cache-dir -r admin_console/backend/requirements-docling.txt
+RUN pip install --no-cache-dir --find-links /tmp/vendor -r admin_console/backend/requirements.txt \
+    && pip install --no-cache-dir --find-links /tmp/vendor -r admin_console/backend/requirements-docling.txt
 ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
 COPY shared/ shared/
 COPY mcp_servers/system_mcp/whitelist.py mcp_servers/system_mcp/whitelist.py

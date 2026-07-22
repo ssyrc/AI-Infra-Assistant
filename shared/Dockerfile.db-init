@@ -24,7 +24,7 @@ RUN for w in /tmp/vendor/*.whl; do \
       case "$(basename "$w")" in pip-*) continue ;; esac; \
       pip install --no-index --no-cache-dir --no-deps "$w"; \
     done
-RUN pip show asyncpg >/dev/null 2>&1 || pip install --no-cache-dir "asyncpg==0.31.0"
+RUN pip show asyncpg >/dev/null 2>&1 || pip install --no-cache-dir --find-links /tmp/vendor "asyncpg==0.31.0"
 ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
 COPY shared/migrations.py .
 CMD ["python", "migrations.py"]

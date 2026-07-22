@@ -36,7 +36,7 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends openssh-client; \
     rm -rf /var/lib/apt/lists/*
 COPY mcp_servers/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --find-links /tmp/vendor -r requirements.txt
 # 빌드 프록시를 런타임 컨테이너에 남기지 않는다(내부 서비스 통신이 프록시로 새지 않도록).
 ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
 COPY shared/ ./shared/

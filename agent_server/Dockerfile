@@ -25,7 +25,7 @@ RUN for w in /tmp/vendor/*.whl; do \
       pip install --no-index --no-cache-dir --no-deps "$w"; \
     done
 COPY agent_server/requirements.txt agent_server/requirements.txt
-RUN pip install --no-cache-dir -r agent_server/requirements.txt
+RUN pip install --no-cache-dir --find-links /tmp/vendor -r agent_server/requirements.txt
 ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
 COPY shared/ shared/
 COPY agent_server/ agent_server/
