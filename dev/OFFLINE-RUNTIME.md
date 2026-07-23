@@ -18,7 +18,7 @@ docker pull ellie0/ai-infra-assistant-pgvector:$TAG
 docker pull ellie0/ai-infra-assistant-postgres:$TAG
 docker pull ellie0/ai-infra-assistant-open-webui:$TAG
 
-bash scripts/pull-runtime-images.sh "$TAG"
+bash scripts/retag-runtime-images.sh "$TAG"
 TAG="$TAG" bash scripts/save-runtime-images.sh
 ```
 
@@ -31,6 +31,14 @@ cd /opt/AI-Infra-Assistant
 docker load -i ai-infra-assistant-runtime-<tag>.tar
 docker compose -f docker-compose.dev.yml up -d --no-build
 curl http://localhost:8500/health
+```
+
+If the tar was created manually from `ellie0/...:<tag>` images instead of by `scripts/save-runtime-images.sh`, retag the loaded images before compose:
+
+```bash
+TAG=main-10bc550
+bash scripts/retag-runtime-images.sh "$TAG"
+docker compose -f docker-compose.dev.yml up -d --no-build
 ```
 
 For code-only updates after that:

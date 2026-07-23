@@ -44,7 +44,7 @@ docker pull ellie0/ai-infra-assistant-open-webui:$RUNTIME_TAG
 이미지 태그를 compose용으로 맞추고, 빌드 없이 실행한다:
 
 ```bash
-bash scripts/pull-runtime-images.sh "$RUNTIME_TAG"
+bash scripts/retag-runtime-images.sh "$RUNTIME_TAG"
 docker compose -f docker-compose.dev.yml up -d --no-build
 docker compose -f docker-compose.dev.yml ps
 curl http://localhost:8500/health
@@ -142,13 +142,13 @@ docker pull ellie0/ai-infra-assistant-open-webui:$RUNTIME_TAG
 `docker-compose.dev.yml` uses local image names such as `ai-infra-assistant-agent-server:latest` and `ai-infra-assistant-mcp:dev`. After the Docker Hub pulls, retag the already-pulled images:
 
 ```bash
-bash scripts/pull-runtime-images.sh "$RUNTIME_TAG"
+bash scripts/retag-runtime-images.sh "$RUNTIME_TAG"
 ```
 
 Expected final line:
 
 ```text
-retagged already-pulled runtime images: main-10bc550
+retagged runtime images for docker-compose.dev.yml: main-10bc550
 ```
 
 ## 6. Start The Stack Without Build
@@ -234,7 +234,21 @@ docker login
 
 Then repeat the failed `docker pull`.
 
-If `scripts/pull-runtime-images.sh` says `missing image`, the corresponding Docker Hub image was not pulled yet. Pull the exact image shown in the error message, then rerun the script.
+If `scripts/retag-runtime-images.sh` says `missing image`, the corresponding Docker Hub image was not pulled or loaded yet. Pull or load the exact image shown in the error message, then rerun the script.
+
+If `docker compose up -d --no-build` fails with `No such image: ai-infra-assistant-admin-console:latest`, the Docker Hub image exists but has not been retagged for compose yet. Run:
+
+```bash
+RUNTIME_TAG=main-10bc550
+bash scripts/retag-runtime-images.sh "$RUNTIME_TAG"
+docker compose -f docker-compose.dev.yml up -d --no-build
+```
+
+If the server has not pulled the latest repository code yet and `scripts/retag-runtime-images.sh` does not exist, use the compatibility wrapper:
+
+```bash
+bash scripts/pull-runtime-images.sh "$RUNTIME_TAG"
+```
 
 If `docker compose up -d --no-build` tries to build images, stop and check that the command includes `--no-build`.
 
