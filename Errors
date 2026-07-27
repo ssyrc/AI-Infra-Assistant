@@ -22,7 +22,42 @@ docker run -dit --gpus '"device=1"' --network host --ipc host \
     --port 8020 --served-model-name bge-reranker-v2-m3
 
 
-# 관리자 콘솔 아직도 이상함
+# 관리자 콘솔 변경 필요 사항들
+0. docker compose 에러
+[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml build admin-console
+[+] Building 0.0s (0/1)
+[+] Building 241.1s (3/3) FINISHED
+ => [internal] load local bake definitions                                                                                                         0.0s
+ => => reading from stdin 1.58kB                                                                                                                   0.0s
+ => [internal] load build definition from Dockerfile.admin-dev                                                                                     0.0s
+ => => transferring dockerfile: 2.34kB                                                                                                             0.0s
+ => ERROR [internal] load metadata for docker.io/library/python:3.11-slim-bullseye                                                               241.0s
+------
+ > [internal] load metadata for docker.io/library/python:3.11-slim-bullseye:
+------
+[+] build 0/2
+ ⠙ Image ai-infra-assistant-db-init:latest       Building                                                                                         241.1s
+ ⠙ Image ai-infra-assistant-admin-console:latest Building                                                                                         241.1s
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+
+Dockerfile.admin-dev:2
+
+--------------------
+
+   1 |     ARG PYTHON_IMAGE=python:3.11-slim-bullseye
+
+   2 | >>> FROM ${PYTHON_IMAGE}
+
+   3 |     # 폐쇄망 빌드: pip 미러/프록시 (기본값=공개 PyPI 직접). compose가 .env에서 전달한다.
+
+   4 |     ARG PIP_INDEX_URL=https://pypi.org/simple
+
+--------------------
+
+failed to solve: docker.io/python:3.11-slim-bullseye: failed to resolve source metadata for docker.io/library/python:3.11-slim-bullseye: failed to do request: Head "https://registry-1.docker.io/v2/library/python/manifests/3.11-slim-bullseye": Service Unavailable
+
+
+
 1. 설정 탭 
   - 여전히 이런식으로 나와있어. vllm_embed_base_url = http://mock-vllm:8000/v1, command_mcp_url = http://command-mcp:8002/mcp 이걸 실제 ip랑 port로 바꾸라니까? 실제 agent 서버 202.20.183.30, llm 서버 ip 75.23.32.41 적용
   - reranker 도 받고 있는데 llm 뭐 띄워야 해?
