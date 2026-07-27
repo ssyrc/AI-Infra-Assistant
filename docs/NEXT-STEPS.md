@@ -68,7 +68,7 @@ curl http://75.23.32.41:8010/v1/models
 
 ## 7. admin_console 설정 탭에서 연결
 
-`http://<agent서버>:8080` → 설정 탭 (저장 즉시 반영, 재시작 불필요):
+`http://<agent서버>:8501` → 설정 탭 (저장 즉시 반영, 재시작 불필요):
 
 | 키 | 값 |
 |---|---|
@@ -84,5 +84,5 @@ curl http://75.23.32.41:8010/v1/models
 ```bash
 curl http://<agent서버>:8500/v1/models   # qwen3-235b-a22b 나오는지
 ```
-- open-webui (`:3000`) 채팅 → 실제 응답 확인
+- open-webui (`:8502`) 채팅 → 실제 응답 확인
 - admin_console 메모리/RAG 기능 → 임베딩 연결 확인

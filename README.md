@@ -83,7 +83,7 @@ docs/NEXT-STEPS.md       # 지금 할 일
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d --build
-# 사용자 웹 :3000 · 관리자 콘솔 :8080 (admin/admin) · Agent :8000
+# 사용자 웹 :8502 · 관리자 콘솔 :8501 (admin/admin) · Agent :8500
 ```
 mock vLLM으로 전체 흐름을 확인한다. 실행 커맨드는 **`docs/RUN-LOG.md`**.
 

@@ -13,19 +13,19 @@ docker compose -f docker-compose.dev.yml up -d --build
 
 | 웹/서비스 | 주소 | 비고 |
 |---|---|---|
-| Open WebUI (사용자) | http://localhost:3000 | 인증 없음(dev), agent-server에 자동 연결 |
-| 관리자 콘솔 | http://localhost:8080 | ID/PW: `admin` / `admin` |
-| Agent Server | http://localhost:8000/v1 | OpenAI 호환 |
-| mock vLLM | http://localhost:8100/v1 | 가짜 임베딩/LLM |
-| Manual/Command/VOC/System MCP | 8001~8004 | |
-| PostgreSQL | localhost:5432 | user/pw: `agent`/`devpass` |
+| Open WebUI (사용자) | http://localhost:8502 | 인증 없음(dev), agent-server에 자동 연결 |
+| 관리자 콘솔 | http://localhost:8501 | ID/PW: `admin` / `admin` |
+| Agent Server | http://localhost:8500/v1 | OpenAI 호환 |
+| mock vLLM | 기본 비노출(내부망 전용) | 디버깅 시 `docker-compose.dev.yml`에서 8508로 노출 |
+| Manual/Command/VOC/System MCP | 8503~8506 | |
+| PostgreSQL | localhost:8507 | user/pw: `agent`/`devpass` |
 
 Langfuse는 dev 구성에서 제외했습니다(무겁고 키 발급 과정 필요). agent-server는
 Langfuse 키가 없으면 트레이싱을 자동으로 비활성화하고 정상 동작합니다.
 
 ## 확인 시나리오
 
-1. **관리자 콘솔에서 데이터 넣기** (http://localhost:8080)
+1. **관리자 콘솔에서 데이터 넣기** (http://localhost:8501)
    - VOC 이력 탭: 질문/답변을 직접 등록하거나 엑셀(`question`,`answer` 컬럼) 업로드
    - 커맨드 카탈로그 탭: 커맨드 몇 개 등록
    - 매뉴얼 탭: **엑셀**은 열 선택, **PPT/txt**는 자동 분할이 dev에서도 동작
@@ -33,7 +33,7 @@ Langfuse 키가 없으면 트레이싱을 자동으로 비활성화하고 정상
      업로드 시 HTML·제어문자·과도한 공백은 자동 정제되고, 정제 옵션을 토글할 수 있음.
    - 설정 탭: mock으로 세팅된 vLLM 주소 등을 확인/변경
 
-2. **사용자 웹에서 질문** (http://localhost:3000)
+2. **사용자 웹에서 질문** (http://localhost:8502)
    - 메시지를 보내면 agent가 mock LLM으로 응답. mock은 요청을 에코하지만,
      실제로 MCP 툴 호출 흐름(에이전트→MCP→DB 검색)은 그대로 동작함을 로그로 확인 가능.
 

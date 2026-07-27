@@ -47,7 +47,7 @@ services:
     volumes:
       - ./shared/init-db:/docker-entrypoint-initdb.d
     # 호스트 포트 충돌 시 .env에서 *_PORT 변수만 바꾸면 된다(컨테이너 내부 포트는 고정).
-    ports: ["${PG_PORT:-5432}:5432"]
+    ports: ["${PG_PORT:-8507}:5432"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U agent -d postgres"]
       interval: 5s
@@ -92,16 +92,15 @@ services:
     build: { context: ., dockerfile: dev/Dockerfile.mock, args: *pyargs }
     volumes:
       - ./dev/mock_vllm.py:/app/mock_vllm.py:ro
-    # 호스트 노출 불필요(agent가 도커 내부망 mock-vllm:8000으로 접속) → 8100 충돌을 피하려고
-    # 기본적으로 호스트에 포트를 열지 않는다. 직접 curl 디버깅이 필요하면 아래 줄의 주석을 풀고
-    # 빈 포트를 지정한다:  ports: ["8500:8000"] 등.
-    # ports: ["${MOCK_VLLM_PORT:-8100}:8000"]
+    # 호스트 노출 불필요(agent가 도커 내부망 mock-vllm:8000으로 접속) → 기본적으로
+    # 호스트에 포트를 열지 않는다. 직접 curl 디버깅이 필요하면 아래 줄의 주석을 풀어라.
+    # ports: ["${MOCK_VLLM_PORT:-8508}:8000"]
 
   manual-mcp:
     <<: *mcpimage
     command: ["watchfiles", "--filter", "python", "python mcp_servers/manual_mcp/server.py", "mcp_servers/manual_mcp", "shared"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8001" }
-    ports: ["${MANUAL_MCP_PORT:-8501}:8001"]
+    ports: ["${MANUAL_MCP_PORT:-8503}:8001"]
     depends_on:
       dev-config: { condition: service_completed_successfully }
 
@@ -109,7 +108,7 @@ services:
     <<: *mcpimage
     command: ["watchfiles", "--filter", "python", "python mcp_servers/command_mcp/server.py", "mcp_servers/command_mcp", "shared"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8002" }
-    ports: ["${COMMAND_MCP_PORT:-8502}:8002"]
+    ports: ["${COMMAND_MCP_PORT:-8504}:8002"]
     depends_on:
       dev-config: { condition: service_completed_successfully }
 
@@ -117,7 +116,7 @@ services:
     <<: *mcpimage
     command: ["watchfiles", "--filter", "python", "python mcp_servers/voc_mcp/server.py", "mcp_servers/voc_mcp", "shared"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8003" }
-    ports: ["${VOC_MCP_PORT:-8503}:8003"]
+    ports: ["${VOC_MCP_PORT:-8505}:8003"]
     depends_on:
       dev-config: { condition: service_completed_successfully }
 
@@ -125,7 +124,7 @@ services:
     <<: *mcpimage
     command: ["watchfiles", "--filter", "python", "python mcp_servers/system_mcp/server.py", "mcp_servers/system_mcp", "shared"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8004" }
-    ports: ["${SYSTEM_MCP_PORT:-8504}:8004"]
+    ports: ["${SYSTEM_MCP_PORT:-8506}:8004"]
     depends_on:
       dev-config: { condition: service_completed_successfully }
 
@@ -155,7 +154,7 @@ services:
       CONFIG_DB_DSN: *configdsn
       ADMIN_USER: admin
       ADMIN_PASSWORD: admin
-    ports: ["${ADMIN_PORT:-8080}:8080"]
+    ports: ["${ADMIN_PORT:-8501}:8080"]
     depends_on:
       dev-config: { condition: service_completed_successfully }
 
@@ -165,6 +164,6 @@ services:
       OPENAI_API_BASE_URL: http://agent-server:8000/v1
       OPENAI_API_KEY: not-needed
       WEBUI_AUTH: "false"
-    ports: ["${OPENWEBUI_PORT:-3000}:8080"]
+    ports: ["${OPENWEBUI_PORT:-8502}:8080"]
     depends_on:
       agent-server: { condition: service_started }

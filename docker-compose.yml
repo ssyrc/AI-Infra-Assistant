@@ -165,7 +165,7 @@ services:
       ADMIN_USER: ${ADMIN_USER:?ADMIN_USER를 .env에 설정하세요}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD를 .env에 설정하세요}
     ports:
-      - "127.0.0.1:8080:8080"   # reverse proxy를 통해서만 공개
+      - "127.0.0.1:${ADMIN_PORT:-8501}:8080"   # reverse proxy를 통해서만 공개
     depends_on:
       db-init:
         condition: service_completed_successfully
@@ -182,7 +182,7 @@ services:
     volumes:
       - open_webui_data:/app/backend/data
     ports:
-      - "127.0.0.1:3000:8080"
+      - "127.0.0.1:${OPENWEBUI_PORT:-8502}:8080"
     depends_on:
       agent-server:
         condition: service_started
@@ -201,10 +201,10 @@ services:
       minio:
         condition: service_healthy
     ports:
-      - "127.0.0.1:3001:3000"
+      - "127.0.0.1:${LANGFUSE_PORT:-8509}:3000"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD}@postgres:5432/langfuse
-      NEXTAUTH_URL: ${LANGFUSE_NEXTAUTH_URL:-http://localhost:3001}
+      NEXTAUTH_URL: ${LANGFUSE_NEXTAUTH_URL:-http://localhost:8509}
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?설정 필요}
       SALT: ${LANGFUSE_SALT:?설정 필요}
       ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?openssl rand -hex 32 로 생성해 설정}
