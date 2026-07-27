@@ -1,12 +1,4 @@
-# 이건 제대로 띄워짐
-docker run -dit --gpus '"device=1"' --network host --ipc host \
-    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
-    --name serve-vllm-rerank repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
-    --model /workspace/models/bge-reranker-v2-m3 \
-    --task score --gpu-memory-utilization 0.1 \
-    --port 8020 --served-model-name bge-reranker-v2-m3
-
-# 현재 상태 아래였는데도 vllm serve 띄워보고 있는데 계속 둘다 RuntimeError: CUDA error: CUDA-capable device(s) is/are busy or unavailable 뜸, 235B 가 너무 큰건가?
+# llm 자체가 안 띄워짐
 docker run -dit --gpus all --network host --ipc host \
     -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
     --name serve-vllm-llm repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
@@ -14,60 +6,32 @@ docker run -dit --gpus all --network host --ipc host \
     --tensor-parallel-size 4 --gpu-memory-utilization 0.85 \
     --port 8000 --served-model-name qwen3-235b-a22b
 
-docker run -dit --gpus '"device=0"' --network host --ipc host \
-    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
-    --name serve-vllm-embed repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
-    --model /workspace/models/Qwen3-Embedding-8B \
-    --task embed --gpu-memory-utilization 0.15 \
-    --port 8010 --served-model-name qwen3-embedding-8b
-
-# 현재 상태
-[root@hgpu4041 models]# docker ps -a
-CONTAINER ID   IMAGE                                                  COMMAND                  CREATED          STATUS          PORTS     NAMES
-2a3e4ad4595f   repo.samsungds.net/docker.io/vllm/vllm-openai:latest   "python3 -m vllm.ent…"   24 minutes ago   Up 24 minutes             serve-vllm-rerank
-[root@hgpu4041 models]# nvidia-smi
-Mon Jul 27 19:56:57 2026
-+-----------------------------------------------------------------------------------------+
-| NVIDIA-SMI 560.35.05              Driver Version: 560.35.05      CUDA Version: 12.6     |
-|-----------------------------------------+------------------------+----------------------+
-| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
-| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
-|                                         |                        |               MIG M. |
-|=========================================+========================+======================|
-|   0  NVIDIA H100 80GB HBM3          On  |   00000000:55:00.0 Off |                    0 |
-| N/A   35C    P0             68W /  700W |       1MiB /  81559MiB |      0%   E. Process |
-|                                         |                        |             Disabled |
-+-----------------------------------------+------------------------+----------------------+
-|   1  NVIDIA H100 80GB HBM3          On  |   00000000:68:00.0 Off |                    0 |
-| N/A   33C    P0            119W /  700W |    2355MiB /  81559MiB |      0%   E. Process |
-|                                         |                        |             Disabled |
-+-----------------------------------------+------------------------+----------------------+
-|   2  NVIDIA H100 80GB HBM3          On  |   00000000:D2:00.0 Off |                    0 |
-| N/A   33C    P0             69W /  700W |       1MiB /  81559MiB |      0%   E. Process |
-|                                         |                        |             Disabled |
-+-----------------------------------------+------------------------+----------------------+
-|   3  NVIDIA H100 80GB HBM3          On  |   00000000:E4:00.0 Off |                    0 |
-| N/A   33C    P0             69W /  700W |       1MiB /  81559MiB |      0%   E. Process |
-|                                         |                        |             Disabled |
-+-----------------------------------------+------------------------+----------------------+
-
-+-----------------------------------------------------------------------------------------+
-| Processes:                                                                              |
-|  GPU   GI   CI        PID   Type   Process name                              GPU Memory |
-|        ID   ID                                                               Usage      |
-|=========================================================================================|
-|    1   N/A  N/A   2209676      C   VLLM::EngineCore                             2344MiB |
-+-----------------------------------------------------------------------------------------+
+(EngineCore_0 pid=180) ERROR 07-27 04:25:50 [core.py:700] EngineCore failed to start.
+(EngineCore_0 pid=180) ERROR 07-27 04:25:50 [core.py:700] Traceback (most recent call last):
+(EngineCore_0 pid=180) ERROR 07-27 04:25:50 [core.py:700]   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py", line 691, in run_engine_core
+(EngineCore_0 pid=180) ERROR 07-27 04:25:50 [core.py:700]     engine_core = EngineCoreProc(*args, **kwargs)
+(EngineCore_0 pid=180) ERROR 07-27 04:25:50 [core.py:700]                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore_0 pid=180) ERROR 07-27 04:25:50 [core.py:700]   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py", line 492, in __init__
+(EngineCore_0 pid=180) ERROR 07-27 04:25:50 [core.py:700]     super().__init__(vllm_config, executor_class, log_stats,
+(EngineCore_0 pid=180) ERROR 07-27 04:25:50 [core.py:700]   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py", line 89, in __init__
+(EngineCore_0 pid=180) ERROR 07-27 04:25:50 [core.py:700]     self._initialize_kv_caches(vllm_config)
+(EngineCore_0 pid=180) ERROR 07-27 04:25:50 [core.py:700]   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py", line 189, in _initialize_kv_caches
+(EngineCore_0 pid=180) ERROR 07-27 04:25:50 [core.py:700]     get_kv_cache_config(vllm_config, kv_cache_spec_one_worker,
+(EngineCore_0 pid=180) ERROR 07-27 04:25:50 [core.py:700]   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/core/kv_cache_utils.py", line 1095, in get_kv_cache_config
+(EngineCore_0 pid=180) ERROR 07-27 04:25:50 [core.py:700]     check_enough_kv_cache_memory(vllm_config, kv_cache_spec, available_memory)
+(EngineCore_0 pid=180) ERROR 07-27 04:25:50 [core.py:700]   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/core/kv_cache_utils.py", line 699, in check_enough_kv_cache_memory
+(EngineCore_0 pid=180) ERROR 07-27 04:25:50 [core.py:700]     raise ValueError(
+(EngineCore_0 pid=180) ERROR 07-27 04:25:50 [core.py:700] ValueError: To serve at least one request with the models's max seq len (262144), (11.75 GiB KV cache is needed, which is larger than the available KV cache memory (8.03 GiB). Based on the available memory, the estimated maximum model length is 179088. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine.
 
 
 # 관리자 콘솔 변경 필요 사항들
 
-1. 설정 탭 
-  - 여전히!!!!! 이런식으로 나와있어. vllm_embed_base_url = http://mock-vllm:8000/v1, vllm_llm_base_url = http://mock-vllm:8000/v1 이걸 llm 서버 ip 75.23.32.41에 llm 띄우고 난 다음 적용해서 저장 버튼 누르면 되는거야?
-  - mcp 엔드포인트 저렇게 할거면 port 만 변경할 수 있게 해줘. ip 는 내부적으로 쓰는거잖아. service hub mcp 는 외부 ip 써야 하는거고.
-  - 데이터 베이스/시크릿에 있는 파라미터들은 뭔지 설명해. 이 콘솔 화면에서 변경을 못하게 되어있는데, 변경할 수 있어야해. 이 화면에서 변경하면 .env 에 적용이 되어야 한다고. 
-  - 여기서 바꾸고 저장버튼을 누르면 어떤 스크립트들이 변경되는거야? agent 재마운트돼서 재실행 자동으로 되는거야?
+1. 설정 탭
+  - 여기서 바꾸고 저장버튼을 누르면, 각 mcp restart 할 수 있는 버튼이 활성화되게 해줘.
 2. System MCP 탭
-  - 지금 있는 whitelist 들 전부 전체 허용 해주고, 설명도 너가 알아서 추가해줘.
-3. VoC 이력 탭 에서 내가 이전에 말한 양식, html 구조 반영되게 되었는지 확인해
-4. 매뉴얼, Voc 이력, 커맨드 카탈로그, System MCP 에서 파일 업로드는 202.20.183.30 서버에 마운트되어 있는 파일 중 하나를 선택하게 해줘. 
+  - 이것도 마찬가지로 저장버튼을 누르거나 enabled를 누르거나, 커맨드 추가하면 mcp restart 할 수 있는 버튼 활서오하되게 해줘.
+3. 매뉴얼 탭 - 서버 파일에서 선택하고 확인 버튼 누르면, 전처리가 안돼. 전처리 미리보기 버튼을 눌러도 이런 메시지가 떠. '제목과 파일을 먼저 선택하세요.' 서버 파일 전처리되게 해줘. 이건 모든 탭에 적용되어야 해.
+4. VoC 이력 관리
+  - 내가 기존에 얘기했던 파일 형식 말고 다르게 정제된 엑셀 파일을 넣으니까 이런 에러가 떴어. 기존 형식과 다르면 자동으로 인지해서 행, 열 뽑아내게 해줘. 내가 넣은 엑셀은 1행이 Question, Answer 이고, 2행부터 쭉 정제된 데이터가 있어. 가져오기 실패: {"detail":"지원하지 않는 형식입니다. 지원: .xlsx"}
+5. 커맨드 카탈로그 탭 
+  - 이건 특정 양식이 있어야 하는거야?
