@@ -20,9 +20,10 @@ from parser import parse_file, SUPPORTED_EXTS
 from cleaning import clean_text, clean_options_from_dict, CleanOptions
 from spreadsheet import read_excel_meta, load_excel_rows
 from uploads import (
-    read_upload, create_upload_session, get_upload_session,
+    create_upload_session, get_upload_session,
     delete_upload_session, load_options,
 )
+from server_files import read_upload_or_server_file
 
 router = APIRouter(prefix="/api/manuals", tags=["manuals"])
 
@@ -100,7 +101,8 @@ async def _insert_draft(title: str, filename: str, source_type: str, uploaded_by
 
 @router.post("/preview")
 async def preview_document(
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    server_path: str | None = Form(None),
     strip_html: bool = Form(True),
     collapse_space: bool = Form(True),
     drop_urls: bool = Form(False),
@@ -108,13 +110,14 @@ async def preview_document(
     admin: str = Depends(require_admin),
 ):
     """docx/pptx/pdf/txt/md 전처리 미리보기. 아직 DB에 저장하지 않는다.
-    정제 옵션은 서버가 세션에 저장하고, commit 때 그 옵션을 그대로 사용한다."""
-    ext, content = await read_upload(file, SUPPORTED_EXTS)
+    정제 옵션은 서버가 세션에 저장하고, commit 때 그 옵션을 그대로 사용한다.
+    file(브라우저 업로드) 또는 server_path(서버에 마운트된 폴더에서 선택) 중 하나를 받는다."""
+    ext, content, filename = await read_upload_or_server_file(file, server_path, SUPPORTED_EXTS)
     options = {
         "strip_html": strip_html, "collapse_space": collapse_space,
         "drop_urls": drop_urls, "include_speaker_notes": include_speaker_notes,
     }
-    upload_id = await create_upload_session(_DSN, admin, file.filename, ext, "document", content, options)
+    upload_id = await create_upload_session(_DSN, admin, filename, ext, "document", content, options)
     session = await get_upload_session(_DSN, upload_id, admin, "document")
 
     opts = CleanOptions(strip_html=strip_html, collapse_space=collapse_space, drop_urls=drop_urls)
@@ -134,7 +137,7 @@ async def preview_document(
          "chunk_text": c.chunk_text, "char_count": len(c.chunk_text)}
         for i, c in enumerate(chunks[:50])
     ]
-    return {"upload_id": upload_id, "filename": file.filename,
+    return {"upload_id": upload_id, "filename": filename,
             "total_chunks": len(chunks), "preview_chunks": preview, "options": options}
 
 
@@ -166,16 +169,17 @@ async def commit_document(body: DocCommitIn, uploaded_by: str = Depends(require_
 
 @router.post("/excel/preview")
 async def preview_excel(
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    server_path: str | None = Form(None),
     strip_html: bool = Form(True),
     collapse_space: bool = Form(True),
     drop_urls: bool = Form(False),
     admin: str = Depends(require_admin),
 ):
     """엑셀 컬럼 목록과 샘플 행, 전체 행 수를 반환한다."""
-    ext, content = await read_upload(file, {".xlsx", ".xls"})
+    ext, content, filename = await read_upload_or_server_file(file, server_path, {".xlsx", ".xls"})
     options = {"strip_html": strip_html, "collapse_space": collapse_space, "drop_urls": drop_urls}
-    upload_id = await create_upload_session(_DSN, admin, file.filename, ext, "spreadsheet", content, options)
+    upload_id = await create_upload_session(_DSN, admin, filename, ext, "spreadsheet", content, options)
     session = await get_upload_session(_DSN, upload_id, admin, "spreadsheet")
 
     try:
@@ -188,7 +192,7 @@ async def preview_excel(
         await delete_upload_session(_DSN, upload_id)
         raise HTTPException(422, "빈 엑셀 파일입니다.")
 
-    return {"upload_id": upload_id, "filename": file.filename, "sheet": sheet,
+    return {"upload_id": upload_id, "filename": filename, "sheet": sheet,
             "columns": header, "sample_rows": sample, "total_rows": total, "options": options}
 
 

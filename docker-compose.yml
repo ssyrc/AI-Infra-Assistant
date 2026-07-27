@@ -164,6 +164,9 @@ services:
       CONFIG_DB_DSN: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD}@postgres:5432/platform_config
       ADMIN_USER: ${ADMIN_USER:?ADMIN_USER를 .env에 설정하세요}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD를 .env에 설정하세요}
+    volumes:
+      # "서버 파일에서 선택" 업로드용. 호스트 경로는 .env의 UPLOAD_SOURCE_HOST_DIR로 바꿀 수 있다.
+      - ${UPLOAD_SOURCE_HOST_DIR:-/home/gpu1/yr9.choi/05_halo/datasets}:/data/uploads:ro
     ports:
       - "127.0.0.1:${ADMIN_PORT:-8501}:8080"   # reverse proxy를 통해서만 공개
     depends_on:

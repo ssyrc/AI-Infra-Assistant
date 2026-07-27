@@ -7,7 +7,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../../shared"))
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from routers import manuals, voc, commands, system, settings, accounts
+from routers import manuals, voc, commands, system, settings, accounts, files
 
 app = FastAPI(title="Agent Platform Admin Console")
 
@@ -17,6 +17,7 @@ app.include_router(commands.router)
 app.include_router(system.router)
 app.include_router(settings.router)
 app.include_router(accounts.router)
+app.include_router(files.router)
 
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "../frontend")
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

@@ -149,7 +149,12 @@ services:
   admin-console:
     image: ai-infra-assistant-admin-console:latest
     build: { context: ., dockerfile: dev/Dockerfile.admin-dev, args: *pyargs }
-    volumes: *admin-source-volumes
+    volumes:
+      - ./admin_console:/app/admin_console:ro
+      - ./shared:/app/shared:ro
+      - ./mcp_servers/system_mcp:/app/mcp_servers/system_mcp:ro
+      # "서버 파일에서 선택" 업로드용. 호스트 경로는 .env의 UPLOAD_SOURCE_HOST_DIR로 바꿀 수 있다.
+      - ${UPLOAD_SOURCE_HOST_DIR:-/home/gpu1/yr9.choi/05_halo/datasets}:/data/uploads:ro
     environment:
       CONFIG_DB_DSN: *configdsn
       ADMIN_USER: admin

@@ -115,7 +115,8 @@ function ManualsPanel() {
   const [detail, setDetail] = useState(null);
   const [versions, setVersions] = useState([]);
   const [title, setTitle] = useState("");
-  const [file, setFile] = useState(null);
+  const [file, setFile] = useState(null); // 브라우저 File 또는 {name, serverPath} (서버 파일 선택)
+  const [showBrowser, setShowBrowser] = useState(false);
   const [busy, setBusy] = useState(false);
 
   // 정제 옵션 (업로드 시 공통 적용)
@@ -149,6 +150,8 @@ function ManualsPanel() {
 
   const resetPreviews = () => { setDocPreview(null); setExcelPreview(null); setContentCols([]); setTitleCol(""); };
 
+  const appendFile = (fd, f) => { if (f.serverPath) fd.append("server_path", f.serverPath); else fd.append("file", f); };
+
   const analyze = async () => {
     if (!file || !title) return alert("제목과 파일을 먼저 선택하세요.");
     setBusy(true);
@@ -156,7 +159,7 @@ function ManualsPanel() {
     try {
       if (isExcel(file)) {
         const fd = new FormData();
-        fd.append("file", file);
+        appendFile(fd, file);
         fd.append("strip_html", opts.strip_html);
         fd.append("collapse_space", opts.collapse_space);
         fd.append("drop_urls", opts.drop_urls);
@@ -165,7 +168,7 @@ function ManualsPanel() {
         setExcelPreview(await r.json());
       } else {
         const fd = new FormData();
-        fd.append("file", file);
+        appendFile(fd, file);
         fd.append("strip_html", opts.strip_html);
         fd.append("collapse_space", opts.collapse_space);
         fd.append("drop_urls", opts.drop_urls);
@@ -256,11 +259,21 @@ function ManualsPanel() {
           <input placeholder="문서 제목 (버전 그룹핑 키)" value={title} onChange={e => setTitle(e.target.value)} style={{width: 260}} />
           <input type="file" accept=".xlsx,.xls,.docx,.pptx,.pdf,.txt,.md"
                  onChange={e => { setFile(e.target.files[0]); resetPreviews(); }} />
-          {file && <span className="badge" style={{borderColor: "var(--muted)", color: "var(--muted)"}}>{fileKind(file)}</span>}
+          <button onClick={() => setShowBrowser(true)}>서버 파일에서 선택</button>
+          {file && <span className="badge" style={{borderColor: "var(--muted)", color: "var(--muted)"}}>
+            {file.serverPath ? `서버: ${file.name}` : fileKind(file)}
+          </span>}
           <button className="primary" disabled={busy} onClick={analyze}>{busy ? "처리 중..." : "전처리 미리보기"}</button>
         </div>
         <div style={{marginTop: 10}}><OptToggles /></div>
       </div>
+
+      {showBrowser && (
+        <ServerFileBrowser
+          onClose={() => setShowBrowser(false)}
+          onPick={(path, name) => { setFile({ name, serverPath: path }); resetPreviews(); setShowBrowser(false); }}
+        />
+      )}
 
       {/* 문서 미리보기 */}
       {docPreview && (
@@ -384,6 +397,7 @@ function VocPanel() {
   const [q, setQ] = useState("");
   const [form, setForm] = useState({ question: "", answer: "", department: "", resolved: true });
   const [editingId, setEditingId] = useState(null);
+  const [showBrowser, setShowBrowser] = useState(false);
 
   const load = useCallback(async () => {
     const qs = q ? `?q=${encodeURIComponent(q)}` : "";
@@ -408,7 +422,7 @@ function VocPanel() {
 
   const importFile = async (f) => {
     const fd = new FormData();
-    fd.append("file", f);
+    if (f.serverPath) fd.append("server_path", f.serverPath); else fd.append("file", f);
     const r = await fetch("/api/voc/import", { method: "POST", body: fd });
     const data = await r.json();
     if (!r.ok) return alert("가져오기 실패: " + JSON.stringify(data));
@@ -431,12 +445,20 @@ function VocPanel() {
         <div className="toolbar" style={{marginTop: 8}}>
           <button className="primary" onClick={submit}>{editingId ? "수정 저장" : "등록"}</button>
           {editingId && <button onClick={() => { setEditingId(null); setForm({ question: "", answer: "", department: "", resolved: true }); }}>취소</button>}
-          <span style={{marginLeft: "auto"}}>
+          <span style={{marginLeft: "auto", display: "flex", alignItems: "center", gap: 6}}>
             <input type="file" accept=".xlsx" onChange={e => e.target.files[0] && importFile(e.target.files[0])} />
-            <span style={{fontSize: 11.5, color: "var(--muted)", marginLeft: 6}}>사내 VOC 엑셀 일괄 등록 (4행 헤더: 의뢰내용/조치일/처리내용/만족도)</span>
+            <button onClick={() => setShowBrowser(true)}>서버 파일에서 선택</button>
+            <span style={{fontSize: 11.5, color: "var(--muted)"}}>사내 VOC 엑셀 일괄 등록 (4행 헤더: 의뢰내용/조치일/처리내용/만족도)</span>
           </span>
         </div>
       </div>
+
+      {showBrowser && (
+        <ServerFileBrowser
+          onClose={() => setShowBrowser(false)}
+          onPick={(path, name) => { setShowBrowser(false); importFile({ name, serverPath: path }); }}
+        />
+      )}
 
       <div className="toolbar">
         <input placeholder="질문 검색..." value={q} onChange={e => setQ(e.target.value)} style={{width: 260}} />
@@ -471,6 +493,7 @@ function CommandsPanel() {
   const [form, setForm] = useState({ name: "", description: "", usage: "", category: "" });
   const [editingId, setEditingId] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [showBrowser, setShowBrowser] = useState(false);
 
   // 엑셀 미리보기 + 열 매핑 상태
   const [excel, setExcel] = useState(null); // {upload_id, filename, columns, sample_rows, total_rows}
@@ -499,7 +522,7 @@ function CommandsPanel() {
     setExcel(null);
     try {
       const fd = new FormData();
-      fd.append("file", f);
+      if (f.serverPath) fd.append("server_path", f.serverPath); else fd.append("file", f);
       const r = await fetch("/api/commands/excel/preview", { method: "POST", body: fd });
       if (!r.ok) throw new Error(await r.text());
       const data = await r.json();
@@ -564,13 +587,21 @@ function CommandsPanel() {
         <div className="toolbar" style={{marginTop: 8}}>
           <button className="primary" onClick={submit}>{editingId ? "수정 저장" : "등록"}</button>
           {editingId && <button onClick={() => { setEditingId(null); setForm({ name: "", description: "", usage: "", category: "" }); }}>취소</button>}
-          <span style={{marginLeft: "auto"}}>
+          <span style={{marginLeft: "auto", display: "flex", alignItems: "center", gap: 6}}>
             <input type="file" accept=".xlsx,.xls" disabled={busy}
                    onChange={e => { analyzeExcel(e.target.files[0]); e.target.value = ""; }} />
-            <span style={{fontSize: 11.5, color: "var(--muted)", marginLeft: 6}}>엑셀 일괄 업로드 (열 매핑)</span>
+            <button disabled={busy} onClick={() => setShowBrowser(true)}>서버 파일에서 선택</button>
+            <span style={{fontSize: 11.5, color: "var(--muted)"}}>엑셀 일괄 업로드 (열 매핑)</span>
           </span>
         </div>
       </div>
+
+      {showBrowser && (
+        <ServerFileBrowser
+          onClose={() => setShowBrowser(false)}
+          onPick={(path, name) => { setShowBrowser(false); analyzeExcel({ name, serverPath: path }); }}
+        />
+      )}
 
       {/* 엑셀 열 매핑 */}
       {excel && (
@@ -637,6 +668,58 @@ function Modal({ onClose, children }) {
         {children}
       </div>
     </div>
+  );
+}
+
+// admin-console 컨테이너에 마운트된 폴더(설정 탭 upload_source_dir) 안에서 파일을 고르는 모달.
+// 매뉴얼/VOC/커맨드 카탈로그 업로드가 공유해서 쓴다.
+function ServerFileBrowser({ onPick, onClose }) {
+  const [path, setPath] = useState("");
+  const [entries, setEntries] = useState([]);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async (p) => {
+    try {
+      const data = await api(`/api/files?path=${encodeURIComponent(p)}`);
+      setEntries(data.entries);
+      setPath(data.path || "");
+      setError("");
+    } catch (e) { setError(e.message); }
+  }, []);
+  useEffect(() => { load(""); }, [load]);
+
+  const up = () => load(path.split("/").slice(0, -1).join("/"));
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{fontWeight: 600, marginBottom: 8}}>서버 파일에서 선택</div>
+      <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 8, fontFamily: "var(--mono)"}}>/{path}</div>
+      {error && (
+        <div style={{fontSize: 12.5, color: "var(--danger)", marginBottom: 8}}>
+          {error} (관리자 콘솔에 폴더가 마운트됐는지, 설정 탭 upload_source_dir 값을 확인하세요)
+        </div>
+      )}
+      {path && <div className="row-actions" style={{marginBottom: 6}}><button onClick={up}>.. 상위로</button></div>}
+      <table>
+        <tbody>
+          {entries.map(e => (
+            <tr key={e.path}>
+              <td style={{fontFamily: "var(--mono)", fontSize: 12.5, cursor: "pointer"}}
+                  onClick={() => (e.is_dir ? load(e.path) : onPick(e.path, e.name))}>
+                {e.is_dir ? "📁 " : "📄 "}{e.name}
+              </td>
+              <td style={{fontSize: 11, color: "var(--muted)"}}>
+                {e.size != null ? `${(e.size / 1024).toFixed(1)}KB` : ""}
+              </td>
+            </tr>
+          ))}
+          {entries.length === 0 && !error && <tr><td colSpan="2" className="empty">파일이 없습니다.</td></tr>}
+        </tbody>
+      </table>
+      <div className="row-actions" style={{marginTop: 10}}>
+        <button onClick={onClose}>취소</button>
+      </div>
+    </Modal>
   );
 }
 

@@ -5,12 +5,13 @@ VOC(사용자/운영자 질의응답 이력) 관리 API.
 import tempfile
 
 import openpyxl
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, Form, UploadFile, File, HTTPException
 from pydantic import BaseModel
 
 from auth import require_admin
 from cleaning import clean_text
 from db import get_pool, embed_text, vector_literal
+from server_files import read_upload_or_server_file
 
 router = APIRouter(prefix="/api/voc", tags=["voc"])
 
@@ -95,12 +96,17 @@ async def delete_voc(voc_id: int, admin: str = Depends(require_admin)):
 
 
 @router.post("/import")
-async def import_voc_excel(file: UploadFile = File(...), admin: str = Depends(require_admin)):
+async def import_voc_excel(
+    file: UploadFile | None = File(None),
+    server_path: str | None = Form(None),
+    admin: str = Depends(require_admin),
+):
     """사내 VOC 엑셀 표준 포맷 전용: 4행이 헤더고 의뢰내용/조치일/처리내용/만족도 컬럼만 쓴다.
     조치일·처리내용이 둘 다 있는 행만, 만족도가 불만족/매우불만족이 아닌 행만 등록한다.
     의뢰내용/처리내용은 HTML 태그만 벗기고 본문(명령어·코드 포함)은 그대로 둔다."""
+    _, content, _ = await read_upload_or_server_file(file, server_path, {".xlsx"})
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
-        tmp.write(await file.read())
+        tmp.write(content)
         tmp_path = tmp.name
 
     wb = openpyxl.load_workbook(tmp_path, read_only=True)

@@ -314,6 +314,9 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
         ("search_max_candidates", "100", "리랭킹 후보 상한", True, False, False),
         ("upload_max_mb", "50", "업로드 최대 크기(MB)", True, False, False),
         ("upload_session_ttl_minutes", "60", "업로드 미리보기 세션 유효시간(분)", True, False, False),
+        ("upload_source_dir", "/data/uploads",
+         "매뉴얼/VOC/커맨드 카탈로그 '서버 파일에서 선택' 목록 경로(admin-console 컨테이너 내부 "
+         "경로, docker-compose에서 마운트된 폴더 하위만 가능)", True, False, False),
         ("scheduler_login_host", os.environ.get("SCHEDULER_LOGIN_HOST", "login05"), "Command MCP가 job 조회 시 ssh할 로그인 서버(/etc/hosts 등록명)", True, False, False),
 
         # 장기 메모리(사용자별)

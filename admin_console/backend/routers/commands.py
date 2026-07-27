@@ -16,9 +16,10 @@ from db import get_pool, embed_text, vector_literal
 from cleaning import clean_text, clean_options_from_dict
 from spreadsheet import read_excel_meta, load_excel_rows
 from uploads import (
-    read_upload, create_upload_session, get_upload_session,
+    create_upload_session, get_upload_session,
     delete_upload_session, load_options,
 )
+from server_files import read_upload_or_server_file
 
 router = APIRouter(prefix="/api/commands", tags=["commands"])
 
@@ -98,16 +99,17 @@ async def delete_command(command_id: int, admin: str = Depends(require_admin)):
 # ---------------------------------------------------------------- 엑셀 일괄 업로드
 @router.post("/excel/preview")
 async def preview_command_excel(
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    server_path: str | None = Form(None),
     strip_html: bool = Form(True),
     collapse_space: bool = Form(True),
     drop_urls: bool = Form(False),
     admin: str = Depends(require_admin),
 ):
     """엑셀 열 목록과 샘플 행을 반환한다. 어떤 열을 name/description/usage/category로 쓸지 선택하게 한다."""
-    ext, content = await read_upload(file, {".xlsx", ".xls"})
+    ext, content, filename = await read_upload_or_server_file(file, server_path, {".xlsx", ".xls"})
     options = {"strip_html": strip_html, "collapse_space": collapse_space, "drop_urls": drop_urls}
-    upload_id = await create_upload_session(_DSN, admin, file.filename, ext, "command_catalog", content, options)
+    upload_id = await create_upload_session(_DSN, admin, filename, ext, "command_catalog", content, options)
     session = await get_upload_session(_DSN, upload_id, admin, "command_catalog")
 
     try:
@@ -120,7 +122,7 @@ async def preview_command_excel(
         await delete_upload_session(_DSN, upload_id)
         raise HTTPException(422, "빈 엑셀 파일입니다.")
 
-    return {"upload_id": upload_id, "filename": file.filename, "sheet": sheet,
+    return {"upload_id": upload_id, "filename": filename, "sheet": sheet,
             "columns": header, "sample_rows": sample, "total_rows": total, "options": options}
 
 
