@@ -67,9 +67,42 @@ cp /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/.env.example \
 
 **앞으로는 반드시 `--exclude '.env'`를 붙인다** (아래 3번부터 반영됨).
 
-### 2) hgpu4041 — 리랭커 (완료, GPU 1에 이미 떠 있음)
-`BAAI/bge-reranker-v2-m3`를 vLLM `--task score`로 GPU 1에 띄운 게 이미 정상 동작 중(vLLM의
-Cohere 호환 `/rerank` 라우트 노출). LLM/임베딩만 0번 재시도하면 됨.
+### 2) hgpu4041 — 임베딩 + 리랭커 기동 (LLM은 확인됨, 이제 이 둘 차례)
+
+**임베딩** (GPU 0, LLM과 같은 GPU를 나눠 씀 — utilization 낮게):
+```bash
+docker run -dit --rm --gpus '"device=0"' --network host --ipc host \
+    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
+    --name serve-vllm-embed repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
+    --model /workspace/models/Qwen3-Embedding-8B \
+    --task embed --gpu-memory-utilization 0.15 \
+    --port 8010 --served-model-name qwen3-embedding-8b
+```
+
+**리랭커** — 모델이 아직 없으면 먼저 내려받아 전송(인터넷 되는 WSL/서버에서 1회, LLM/임베딩
+때와 동일한 패턴):
+```bash
+huggingface-cli download BAAI/bge-reranker-v2-m3 --local-dir ./models/bge-reranker-v2-m3
+rsync -avz --progress ./models/bge-reranker-v2-m3 yr9.choi@75.23.32.41:/home/gpu1/yr9.choi/05_halo/models/
+```
+확인: `ls /home/gpu1/yr9.choi/05_halo/models/bge-reranker-v2-m3` (hgpu4041에서, config.json 등
+있는지). 모델이 준비되면 GPU 1에 `--task score`로 기동(vLLM의 Cohere 호환 `/rerank` 라우트가
+자동 노출됨):
+```bash
+docker run -dit --rm --gpus '"device=1"' --network host --ipc host \
+    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
+    --name serve-vllm-rerank repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
+    --model /workspace/models/bge-reranker-v2-m3 \
+    --task score --gpu-memory-utilization 0.15 \
+    --port 8020 --served-model-name bge-reranker-v2-m3
+```
+GPU 1은 LLM(tensor-parallel-size 4라서 GPU 0~3 전부 0.85씩 사용) + 리랭커(0.15)로 딱 채워지는
+셈이라 여유가 없다. OOM 나면 0번의 LLM `--gpu-memory-utilization`을 0.8이나 0.75로 낮추거나
+리랭커를 0.1로 더 낮춰서 재시도. 상태 확인:
+```bash
+docker logs serve-vllm-embed --tail 50
+docker logs serve-vllm-rerank --tail 50
+```
 
 ### 3) 도달 확인
 ```bash
