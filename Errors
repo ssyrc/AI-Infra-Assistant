@@ -1,20 +1,5 @@
 # llm, embed, reranker
 llm 띄우고 나니까 embed랑 reranker 가 안 떠. CUDA busy 에러 떠. 모델 사이즈가 너무 큰가?
-llm 떠있는 상태에서 이렇게 하고
-[root@hgpu4041 ~]# sudo nvidia-smi -c 0
-Set compute mode to DEFAULT for GPU 00000000:55:00.0.
-Set compute mode to DEFAULT for GPU 00000000:68:00.0.
-Set compute mode to DEFAULT for GPU 00000000:D2:00.0.
-Set compute mode to DEFAULT for GPU 00000000:E4:00.0.
-All done.
-[root@hgpu4041 ~]#
-[root@hgpu4041 ~]#
-[root@hgpu4041 ~]# nvidia-smi --query-gpu=index,compute_mode --format=csv
-index, compute_mode
-0, Default
-1, Default
-2, Default
-
 embed, reranker 띄우니까 똑같아. CUDA busy 에러야.
 
 # embed 로그
