@@ -7,3 +7,12 @@ docker run -dit --rm --gpus all \
     --tensor-parallel-size 2 \
     --port 9001 \
     --served-model-name Llama-3.1-Nemotron-Nano-8B-v1
+
+
+
+
+# 지금 202.20.183.30:8080 접속하면 검은 화면만 보이고 F12 누르면 이렇게 떠있음
+“http://202.20.183.30:8080/vendor/react.production.min.js” 소스의 <script> 로드에 실패했습니다. 202.20.183.30:8080:1:1
+“https://unpkg.com/react@18/umd/react.production.min.js” 소스의 <script> 로드에 실패했습니다. 202.20.183.30:8080:1:1
+
+​
