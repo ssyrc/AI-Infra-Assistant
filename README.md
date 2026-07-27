@@ -47,7 +47,8 @@ shared/          # config_store·db·migrations·memory_store·ssh_exec·mcp_cal
 dev/             # 로컬 확인용 mock vLLM (dev/README.md)
 docker-compose.yml       # 프로덕션
 docker-compose.dev.yml   # 개발/데모(mock)
-docs/TESTING.md          # 서버 테스트 step-by-step
+docs/RUN-LOG.md          # 실행 커맨드 로그
+docs/NEXT-STEPS.md       # 지금 할 일
 ```
 
 ### 핵심 설계 원칙
@@ -84,7 +85,7 @@ docs/TESTING.md          # 서버 테스트 step-by-step
 docker compose -f docker-compose.dev.yml up -d --build
 # 사용자 웹 :3000 · 관리자 콘솔 :8080 (admin/admin) · Agent :8000
 ```
-mock vLLM으로 전체 흐름을 확인한다. 상세 검증 절차는 **`docs/TESTING.md`**.
+mock vLLM으로 전체 흐름을 확인한다. 실행 커맨드는 **`docs/RUN-LOG.md`**.
 
 ### 프로덕션
 
@@ -210,7 +211,7 @@ RAG 검색 툴을 노출한다. 우리 에이전트의 4개 MCP와 달리 **에�
 
 ## 테스트
 
-서버 스모크 테스트는 **`docs/TESTING.md`**. 단위 회귀 테스트:
+서버 스모크 테스트 커맨드는 **`docs/RUN-LOG.md`**. 단위 회귀 테스트:
 
 ```bash
 pip install pytest
