@@ -59,6 +59,10 @@ json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
   깨짐(asyncpg와 같은 증상). `bcrypt-4.2.1`(계정 관리 비밀번호 해시), `docker-7.1.0` +
   그 의존성 `requests-2.34.2`, `urllib3-2.7.0`, `charset_normalizer-3.4.9`("지금 재시작" 버튼
   기능용 docker-py) — 사내 미러에서 새로 요구하는 패키지라 같은 문제가 생기기 전에 미리 고정.
+  openpyxl을 고치고 나니 바로 다음 줄인 `python-pptx==1.0.2`도 같은 증상으로 못 찾아서(사내
+  미러가 requirements.txt를 한 줄씩 순서대로 실패시키는 패턴), `python_pptx-1.0.2` + 그 의존성
+  `lxml-6.1.1`, `pillow-12.2.0`, `xlsxwriter-3.2.9`(`typing_extensions`는 이미 vendor에 있어
+  버전 일치 확인 후 재사용)도 함께 고정.
 
 ## 동작 방식 — vendor의 모든 whl은 자동으로 먼저 반영된다
 
@@ -120,6 +124,12 @@ pip download --dest vendor --only-binary=:all: --no-deps \
   'bcrypt==4.2.1'
 pip download --dest vendor --only-binary=:all: --no-deps \
   'docker==7.1.0' 'requests==2.34.2' 'urllib3==2.7.0' 'charset-normalizer==3.4.9'
+
+# python-pptx(및 C 확장 의존성)를 사내 미러가 못 줄 때:
+pip download --dest vendor --only-binary=:all: --no-deps \
+  --platform manylinux_2_17_x86_64 --python-version 311 --implementation cp --abi cp311 \
+  'python-pptx==1.0.2' 'lxml==6.1.1' 'Pillow==12.2.0'
+pip download --dest vendor --only-binary=:all: --no-deps 'XlsxWriter==3.2.9'
 
 # OpenInference/Langfuse tracing stack:
 pip download --dest vendor --only-binary=:all: --no-deps \
