@@ -412,7 +412,7 @@ function VocPanel() {
     const r = await fetch("/api/voc/import", { method: "POST", body: fd });
     const data = await r.json();
     if (!r.ok) return alert("가져오기 실패: " + JSON.stringify(data));
-    alert(`${data.inserted}건 등록됨`);
+    alert(`${data.inserted}건 등록, ${data.skipped || 0}건 제외(조치일/처리내용 없음 또는 불만족류)`);
     load();
   };
 
@@ -433,7 +433,7 @@ function VocPanel() {
           {editingId && <button onClick={() => { setEditingId(null); setForm({ question: "", answer: "", department: "", resolved: true }); }}>취소</button>}
           <span style={{marginLeft: "auto"}}>
             <input type="file" accept=".xlsx" onChange={e => e.target.files[0] && importFile(e.target.files[0])} />
-            <span style={{fontSize: 11.5, color: "var(--muted)", marginLeft: 6}}>엑셀 일괄 등록 (question, answer, department, resolved)</span>
+            <span style={{fontSize: 11.5, color: "var(--muted)", marginLeft: 6}}>사내 VOC 엑셀 일괄 등록 (4행 헤더: 의뢰내용/조치일/처리내용/만족도)</span>
           </span>
         </div>
       </div>
@@ -969,6 +969,15 @@ function SettingsPanel() {
       {Object.entries(grouped).map(([group, rows]) => rows.length > 0 && (
         <div className="card" key={group}>
           <div style={{marginBottom: 10}}><strong>{group}</strong></div>
+          {group === "MCP 엔드포인트" && (
+            <div style={{fontSize: 12.5, color: "var(--warn)", marginBottom: 10,
+                         padding: "8px 10px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4}}>
+              ⚠️ 이 값들은 외부 IP가 아니라 <strong>같은 docker compose 스택 안 컨테이너 이름</strong>입니다
+              (예: <code>http://command-mcp:8002/mcp</code>). agent-server가 이 이름으로 내부망에서 MCP에
+              접속하며, 외부 서버 IP로 바꾸면 연결이 끊깁니다. 여러 물리 서버에 MCP를 나눠 배포하는
+              경우가 아니라면 건드리지 마세요.
+            </div>
+          )}
           {rows.map(s => {
             const isLong = s.key === "agent_system_instruction";
             const val = s.key in edits ? edits[s.key] : (s.is_secret ? "" : s.value);
