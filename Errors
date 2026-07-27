@@ -6,10 +6,18 @@
 
 
 
-# vllm serve 에러, embedding 도 마찬가지임
+# vllm serve 에러 - 경로가 이상했음
 docker run -dit --rm --gpus all --network host --ipc host \
     -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
     --name serve-vllm-llm repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
     --model /workspace/models/Qwen3-235B-A22B-Instruct-2507-FP8 \
     --tensor-parallel-size 4 --gpu-memory-utilization 0.85 \
     --port 8000 --served-model-name qwen3-235b-a22b
+
+
+docker run -dit --rm --gpus '"device=0"' --network host --ipc host \
+    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models:Z \
+    --name serve-vllm-embed repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
+    --model /workspace/models/Qwen3-Embedding-8B \
+    --task embed --gpu-memory-utilization 0.15 \
+    --port 8010 --served-model-name qwen3-embedding-8b
