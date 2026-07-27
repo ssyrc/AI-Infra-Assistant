@@ -128,6 +128,7 @@ function ManualsPanel() {
   const [excelPreview, setExcelPreview] = useState(null); // {upload_id, columns, sample_rows, total_rows}
   const [contentCols, setContentCols] = useState([]);
   const [titleCol, setTitleCol] = useState("");
+  const [pageCol, setPageCol] = useState("");
 
   const load = useCallback(async () => setManuals(await api("/api/manuals")), []);
   useEffect(() => { load(); }, [load]);
@@ -148,7 +149,7 @@ function ManualsPanel() {
     return "";
   };
 
-  const resetPreviews = () => { setDocPreview(null); setExcelPreview(null); setContentCols([]); setTitleCol(""); };
+  const resetPreviews = () => { setDocPreview(null); setExcelPreview(null); setContentCols([]); setTitleCol(""); setPageCol(""); };
 
   const appendFile = (fd, f) => { if (f.serverPath) fd.append("server_path", f.serverPath); else fd.append("file", f); };
 
@@ -212,6 +213,7 @@ function ManualsPanel() {
         body: JSON.stringify({
           upload_id: excelPreview.upload_id, title,
           content_columns: contentCols, title_column: titleCol || null,
+          page_no_column: pageCol || null,
         }),
       });
       resetPreviews(); setTitle(""); setFile(null);
@@ -310,14 +312,19 @@ function ManualsPanel() {
       {excelPreview && (
         <div className="card">
           <div style={{marginBottom: 8}}><strong>엑셀 열 선택</strong> · {excelPreview.filename} · 시트 {excelPreview.sheet} · {excelPreview.total_rows}행</div>
-          <div className="subtitle">DB에 저장할 열을 고르세요. 선택한 열들이 <code>열이름: 값</code> 형태로 한 행씩 하나의 검색 청크가 됩니다 (예: question / answer).</div>
+          <div className="subtitle">
+            DB에 저장할 열을 고르세요. 선택한 열들이 <code>열이름: 값</code> 형태로 한 행씩 하나의 검색 청크가 됩니다
+            (예: question / answer, 또는 PPT를 행 단위로 미리 뽑은 section / text / image_files 등).
+            "페이지/순번" 열은 숫자면(예: slide_index) 청크의 p번호로 저장됩니다(선택 안 해도 됨).
+          </div>
           <table style={{marginBottom: 12}}>
-            <thead><tr><th>내용</th><th>제목</th><th>열 이름</th><th>샘플 값</th></tr></thead>
+            <thead><tr><th>내용</th><th>제목</th><th>페이지/순번</th><th>열 이름</th><th>샘플 값</th></tr></thead>
             <tbody>
               {excelPreview.columns.map((col, i) => (
                 <tr key={col + i}>
                   <td><input type="checkbox" checked={contentCols.includes(col)} onChange={() => toggleContentCol(col)} /></td>
                   <td><input type="radio" name="tc" checked={titleCol === col} onChange={() => setTitleCol(col)} /></td>
+                  <td><input type="radio" name="pc" checked={pageCol === col} onChange={() => setPageCol(col)} /></td>
                   <td style={{fontFamily: "var(--mono)"}}>{col}</td>
                   <td style={{color: "var(--muted)", fontSize: 12}}>{excelPreview.sample_rows.map(r => r[i]).filter(v => v).slice(0, 3).join(" · ")}</td>
                 </tr>
@@ -327,6 +334,7 @@ function ManualsPanel() {
           <div className="row-actions">
             <button className="primary" disabled={busy} onClick={commitExcel}>선택한 열로 등록</button>
             {titleCol && <button onClick={() => setTitleCol("")}>제목 열 해제</button>}
+            {pageCol && <button onClick={() => setPageCol("")}>페이지 열 해제</button>}
             <button onClick={resetPreviews}>취소</button>
           </div>
         </div>

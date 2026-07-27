@@ -201,6 +201,7 @@ class ExcelCommitIn(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     content_columns: list[str] = Field(min_length=1)
     title_column: str | None = None
+    page_no_column: str | None = None
 
 
 @router.post("/excel/commit")
@@ -233,7 +234,14 @@ async def commit_excel(body: ExcelCommitIn, uploaded_by: str = Depends(require_a
             if body.title_column and body.title_column in col_idx:
                 tv = row[col_idx[body.title_column]]
                 section_title = clean_text(str(tv), opts) if tv is not None else None
-            built.append((section_title or None, None, content))
+            page_no = None
+            if body.page_no_column and body.page_no_column in col_idx:
+                pv = row[col_idx[body.page_no_column]]
+                try:
+                    page_no = int(pv) if pv is not None else None
+                except (TypeError, ValueError):
+                    page_no = None
+            built.append((section_title or None, page_no, content))
         return built
 
     try:
