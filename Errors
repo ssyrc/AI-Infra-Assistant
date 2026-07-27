@@ -1,53 +1,9 @@
-0. docker root dir는 D 드라이브
-yrc@KORCO204731:~$ docker info | grep "Docker Root Dir"
- Docker Root Dir: /mnt/d/docker-data
-
-1. docker load
-RUNTIME_TAG=main-10bc550
-
-docker save \
-  ellie0/ai-infra-assistant-db-init:$RUNTIME_TAG \
-  ellie0/ai-infra-assistant-mock-vllm:$RUNTIME_TAG \
-  ellie0/ai-infra-assistant-mcp:$RUNTIME_TAG \
-  ellie0/ai-infra-assistant-agent-server:$RUNTIME_TAG \
-  ellie0/ai-infra-assistant-admin-console:$RUNTIME_TAG \
-  ellie0/ai-infra-assistant-pgvector:$RUNTIME_TAG \
-  ellie0/ai-infra-assistant-postgres:$RUNTIME_TAG \
-  ellie0/ai-infra-assistant-open-webui:$RUNTIME_TAG \
-  | gzip > /mnt/d/ai-infra-images.tar.gz
-
-2. remote 서버로 전송
-rsync -avz --progress /mnt/d/ai-infra-images.tar.gz \
-  yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/
-
-3. remote 서버에서 확인
-202.20.183.30 서버에서 docker load < ai-infra-images.tar.gz
-
-[root@24-gp19 05_halo]# docker images | grep ai-infra-assistant
-ellie0/ai-infra-assistant-admin-console                                                   main-10bc550                   71e81c27402b   10 hours ago    432MB
-ellie0/ai-infra-assistant-agent-server                                                    main-10bc550                   63330ba2807f   10 hours ago    1.08GB
-ellie0/ai-infra-assistant-mcp                                                             main-10bc550                   7940ed494bad   10 hours ago    443MB
-ellie0/ai-infra-assistant-mock-vllm                                                       main-10bc550                   7c0f30d99eab   10 hours ago    430MB
-ellie0/ai-infra-assistant-db-init                                                         main-10bc550                   5c81d318875a   10 hours ago    430MB
-ai-infra-assistant-mcp                                                                    dev                            d4cde3f65349   12 hours ago    346MB
-ai-infra-assistant-mock-vllm                                                              latest                         e2f5951d88af   12 hours ago    333MB
-ai-infra-assistant-db-init                                                                latest                         101c8659c9b9   12 hours ago    333MB
-ellie0/ai-infra-assistant-pgvector                                                        main-10bc550                   5fa1d4c74299   2 weeks ago     438MB
-ellie0/ai-infra-assistant-postgres                                                        main-10bc550                   de3a4eab8fdf   2 weeks ago     294MB
-ellie0/ai-infra-assistant-open-webui                                                      main-10bc550                   ba71477c0bbc   15 months ago   4.59GB
-
-
-4. docker compose 실행
-[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml up -d --no-build
-[+] up 6/10
- ✔ Network ai-infra-assistant_default           Created                                                                                                                                                   0.1s
- ✔ Container ai-infra-assistant-mock-vllm-1     Created                                                                                                                                                   0.1s
- ✔ Container ai-infra-assistant-postgres-1      Created                                                                                                                                                   0.0s
- ✔ Container ai-infra-assistant-db-init-1       Created                                                                                                                                                   0.0s
- ✔ Container ai-infra-assistant-dev-config-1    Created                                                                                                                                                   0.0s
- ⠋ Container ai-infra-assistant-voc-mcp-1       Creating                                                                                                                                                  0.0s
- ⠋ Container ai-infra-assistant-manual-mcp-1    Creating                                                                                                                                                  0.0s
- ⠋ Container ai-infra-assistant-system-mcp-1    Creating                                                                                                                                                  0.0s
- ⠋ Container ai-infra-assistant-command-mcp-1   Creating                                                                                                                                                  0.0s
- ✘ Container ai-infra-assistant-admin-console-1 Error response from daemon: No such image: ai-infra-assistant-admin-console:latest                                                                        0.0s
-Error response from daemon: No such image: ai-infra-assistant-admin-console:latest
+docker run -dit --rm --gpus all \
+    --network host \
+    --ipc host \
+    -v /home/gpu1/yr9.choi/halo_workspace/models:/workspace/models \
+    --name serve-vllm-model repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
+    --model /workspace/models/Llama-3.1-Nemotron-Nano-8B-v1 \
+    --tensor-parallel-size 2 \
+    --port 9001 \
+    --served-model-name Llama-3.1-Nemotron-Nano-8B-v1
