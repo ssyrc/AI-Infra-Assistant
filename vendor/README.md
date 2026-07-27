@@ -54,6 +54,11 @@ json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
 - `deb/` — MCP 이미지에서 `openssh-client`를 apt 미러 없이 설치하기 위한 Debian bullseye
   linux/amd64 `.deb` 묶음. Dockerfile은 이 디렉터리에 `.deb`가 있으면 `apt-get update`를 하지 않고
   `dpkg --unpack /tmp/vendor/deb/*.deb` 후 `dpkg --configure -a`로 로컬 설치한다.
+- admin-console 스택: `openpyxl-3.1.5`, `et_xmlfile-2.0.0`(openpyxl 의존) — 사내 미러가
+  `openpyxl==3.1.5`를 간헐적으로 `from versions: none`으로 못 찾아 admin-console 빌드가 매번
+  깨짐(asyncpg와 같은 증상). `bcrypt-4.2.1`(계정 관리 비밀번호 해시), `docker-7.1.0` +
+  그 의존성 `requests-2.34.2`, `urllib3-2.7.0`, `charset_normalizer-3.4.9`("지금 재시작" 버튼
+  기능용 docker-py) — 사내 미러에서 새로 요구하는 패키지라 같은 문제가 생기기 전에 미리 고정.
 
 ## 동작 방식 — vendor의 모든 whl은 자동으로 먼저 반영된다
 
@@ -107,6 +112,14 @@ pip download --dest vendor --only-binary=:all: --no-deps 'google-adk==1.22.1'
 
 # Agent 런타임 본체가 사내 미러에 없을 때:
 pip download --dest vendor --only-binary=:all: --no-deps 'litellm==1.61.20' 'langfuse==2.60.9'
+
+# admin-console 스택(openpyxl/bcrypt/docker-py)을 사내 미러가 못 줄 때:
+pip download --dest vendor --only-binary=:all: --no-deps 'openpyxl==3.1.5' 'et_xmlfile==2.0.0'
+pip download --dest vendor --only-binary=:all: --no-deps \
+  --platform manylinux_2_17_x86_64 --python-version 311 --implementation cp --abi cp311 \
+  'bcrypt==4.2.1'
+pip download --dest vendor --only-binary=:all: --no-deps \
+  'docker==7.1.0' 'requests==2.34.2' 'urllib3==2.7.0' 'charset-normalizer==3.4.9'
 
 # OpenInference/Langfuse tracing stack:
 pip download --dest vendor --only-binary=:all: --no-deps \
