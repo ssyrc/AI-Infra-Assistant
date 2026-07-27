@@ -16,3 +16,52 @@ docker run -dit --rm --gpus all \
 “https://unpkg.com/react@18/umd/react.production.min.js” 소스의 <script> 로드에 실패했습니다. 202.20.183.30:8080:1:1
 
 ​
+# openwebui 접속시 에러
+Backend config: 
+Object { onboarding: true, status: true, name: "Open WebUI", version: "0.6.5", default_locale: "", oauth: {…}, features: {…} }
++layout.svelte:509:12
+XHRGET
+http://202.20.183.30:3000/api/v1/auths/
+[HTTP/1.1 401 Unauthorized 7ms]
+
+Object { detail: "401 Unauthorized" }
+index.ts:101:12
+connected lDYT_qlolEldz12MAAAB +layout.svelte:77:12
+Object { id: "d5aa2c14-c1b6-459f-9d3a-acc1e6416bf8", email: "admin@localhost", name: "User", role: "admin", profile_image_url: "/user.png", token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImQ1YWEyYzE0LWMxYjYtNDU5Zi05ZDNhLWFjYzFlNjQxNmJmOCJ9.C8XKFT2VzI58eU4tPdR4KB2Fq_PaXvbsAfszdu1gMNM", token_type: "Bearer", expires_at: null, permissions: {…} }
++page.svelte:39:12
+user-list 
+Object { user_ids: (1) […] }
++layout.svelte:96:12
+XHRGET
+http://202.20.183.30:3000/ollama/api/version
+[HTTP/1.1 500 Internal Server Error 8069ms]
+
+mounted Chat.svelte:400:11
+<empty string> RichTextInput.svelte:131:11
+size 0 15 ChatControls.svelte:208:13
+[tiptap warn]: Duplicate extension names found: ['codeBlock']. This can lead to issues. index.js:1158:21
+Object { detail: "WebUI could not connect to Ollama" }
+index.ts:194:12
+submitPrompt ㅎㅇㅎㅇ <empty string> Chat.svelte:1248:11
+saveSessionSelectedModels 
+Array [ "mock-llm" ]
+ ["mock-llm"] Chat.svelte:187:11
+destroy MessageInput.svelte:343:11
+<empty string> RichTextInput.svelte:131:11
+<div class="flex justify-start overf…0 mt-0.5 svelte-1u5gq5j">
+ResponseMessage.svelte:562:12
+[tiptap warn]: Duplicate extension names found: ['codeBlock']. This can lead to issues. index.js:1158:21
+<div class="flex justify-start overf…0 mt-0.5 svelte-1u5gq5j">
+ResponseMessage.svelte:562:12
+modelId mock-llm Chat.svelte:1422:13
+Object { chat_id: "62bda501-d8da-420e-b22a-bad03b7ff5e7", message_id: "51275181-65a7-46a4-a5d9-9850b6b22093", data: {…} }
+Chat.svelte:249:11
+Object { content: "[오류가 발생했습니다: Failed to create MCP session: Connection closed]" }
+Chat.svelte:1237:11
+Object { chat_id: "62bda501-d8da-420e-b22a-bad03b7ff5e7", message_id: "51275181-65a7-46a4-a5d9-9850b6b22093", data: {…} }
+Chat.svelte:249:11
+Object { id: "chatcmpl-8201f5d34d79", object: "chat.completion.chunk", created: 1785138479, model: "mock-llm", choices: (1) […] }
+Chat.svelte:1237:11
+Object { chat_id: "62bda501-d8da-420e-b22a-bad03b7ff5e7", message_id: "51275181-65a7-46a4-a5d9-9850b6b22093", data: {…} }
+Chat.svelte:249:11
+Object { done: true, content: "[오류가 발생했습니다: Failed to create MCP session: Connection closed]", title: "새 채팅" }
