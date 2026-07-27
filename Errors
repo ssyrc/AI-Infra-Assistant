@@ -100,3 +100,22 @@ INFO 07-27 01:45:28 [__init__.py:241] Automatically detected platform cuda.
 (APIServer pid=1)   File "/usr/local/lib/python3.12/dist-packages/transformers/configuration_utils.py", line 731, in _get_config_dict
 (APIServer pid=1)     raise OSError(
 (APIServer pid=1) OSError: Can't load the configuration of '/workspace/models/Qwen3-235B-A22B-Instruct-2507-FP8'. If you were trying to load it from 'https://huggingface.co/models', make sure you don't have a local directory with the same name. Otherwise, make sure '/workspace/models/Qwen3-235B-A22B-Instruct-2507-FP8' is the correct path to a directory containing a config.json file
+
+
+# config.json 파일은 있음!
+[root@hgpu4041 models]# ls Qwen3-235B-A22B-Instruct-2507-FP8
+LICENSE                           model-00005-of-00024.safetensors  model-00014-of-00024.safetensors  model-00023-of-00024.safetensors
+README.md                         model-00006-of-00024.safetensors  model-00015-of-00024.safetensors  model-00024-of-00024.safetensors
+config.json                       model-00007-of-00024.safetensors  model-00016-of-00024.safetensors  model.safetensors.index.json
+generation_config.json            model-00008-of-00024.safetensors  model-00017-of-00024.safetensors  tokenizer.json
+merges.txt                        model-00009-of-00024.safetensors  model-00018-of-00024.safetensors  tokenizer_config.json
+model-00001-of-00024.safetensors  model-00010-of-00024.safetensors  model-00019-of-00024.safetensors  vocab.json
+model-00002-of-00024.safetensors  model-00011-of-00024.safetensors  model-00020-of-00024.safetensors
+model-00003-of-00024.safetensors  model-00012-of-00024.safetensors  model-00021-of-00024.safetensors
+model-00004-of-00024.safetensors  model-00013-of-00024.safetensors  model-00022-of-00024.safetensors
+
+[root@hgpu4041 models]# ls Qwen3-Embedding-8B
+1_Pooling  config.json                        merges.txt                        model-00003-of-00004.safetensors  modules.json           vocab.json
+LICENSE    config_sentence_transformers.json  model-00001-of-00004.safetensors  model-00004-of-00004.safetensors  tokenizer.json
+README.md  generation_config.json             model-00002-of-00004.safetensors  model.safetensors.index.json      tokenizer_config.json
+
