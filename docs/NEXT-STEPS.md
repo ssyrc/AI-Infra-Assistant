@@ -2,12 +2,19 @@
 
 ## ⚡ 지금 당장 (순서대로)
 
-### 0) hgpu4041 — CUDA busy는 지금 GPU 다 비어있음, 그냥 재시도
-`nvidia-smi` 확인 결과 GPU 0/2/3는 프로세스 없이 완전히 비어있고(1MiB만 사용, 드라이버 상주분),
-GPU 1은 리랭커(`VLLM::EngineCore`)만 정상적으로 붙어있다. 좀비 프로세스가 GPU를 붙들고 있는
-상태가 아니므로, 아까 에러는 일시적이었을 가능성이 높다. `docker ps -a`에도 llm/embed 컨테이너가
-없으니(생성 자체가 안 됐거나 이미 지움) 이름 충돌 걱정 없이 그냥 다시 실행하면 된다:
+### 0) hgpu4041 — CUDA busy 재발: GPU 1을 리랭커가 독점 중이라 `--gpus all`과 충돌하는 걸로 추정
+235B가 커서 나는 에러가 아니다(그랬으면 "busy"가 아니라 OOM 메시지가 난다). `nvidia-smi`의
+"Compute M." 칸이 `E. Process`(Exclusive_Process)로 보인다 — 맞다면 GPU 하나에 프로세스가
+하나만 붙을 수 있는 모드라, 리랭커가 이미 GPU 1을 물고 있는 상태에서 LLM이 `--gpus all`로
+GPU 0~3(1 포함) 전부를 요구하니 충돌한다. 먼저 정확한 모드 확인:
 ```bash
+nvidia-smi --query-gpu=index,compute_mode --format=csv
+```
+`Exclusive_Process`면 맞은 것. **순서를 바꿔서**: GPU 4장이 다 비어있을 때 LLM부터 먼저 올리고,
+임베딩/리랭커는 LLM이 뜬 뒤 각 GPU의 남는 용량(0.85 사용 시 GPU당 ~15% = ~12GB)에 나중에 얹는다.
+```bash
+docker stop serve-vllm-rerank   # 잠깐 내려서 GPU 4장 다 비우기
+
 docker run -dit --rm --gpus all --network host --ipc host \
     -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
     --name serve-vllm-llm repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
@@ -15,15 +22,26 @@ docker run -dit --rm --gpus all --network host --ipc host \
     --tensor-parallel-size 4 --gpu-memory-utilization 0.85 \
     --port 8000 --served-model-name qwen3-235b-a22b
 
+# LLM이 뜬 것 확인 후(healthy 될 때까지 몇 분 걸릴 수 있음)
+curl http://localhost:8000/v1/models
+
 docker run -dit --rm --gpus '"device=0"' --network host --ipc host \
     -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
     --name serve-vllm-embed repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
     --model /workspace/models/Qwen3-Embedding-8B \
     --task embed --gpu-memory-utilization 0.15 \
     --port 8010 --served-model-name qwen3-embedding-8b
+
+docker run -dit --rm --gpus '"device=1"' --network host --ipc host \
+    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
+    --name serve-vllm-rerank repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
+    --model /workspace/models/bge-reranker-v2-m3 \
+    --task score --gpu-memory-utilization 0.1 \
+    --port 8020 --served-model-name bge-reranker-v2-m3
 ```
-(`--rm`을 다시 붙였다 — 실패해도 컨테이너가 안 남아서 다음 재시도가 깔끔함.) 또 busy 뜨면
-`docker logs serve-vllm-llm`으로 어느 GPU에서 나는 에러인지 확인해서 알려줘.
+임베딩/리랭커가 OOM 나면(LLM이 GPU당 여유를 너무 적게 남김) LLM의 `--gpu-memory-utilization`을
+0.8이나 0.75로 낮춰서 재시도. 이래도 LLM 자체가 busy면 `nvidia-smi --query-gpu=... compute_mode`
+결과와 `docker logs serve-vllm-llm`을 같이 보내줘.
 
 ### 1) 에이전트 서버(202.20.183.30) — `.env` 확인됨: 삭제됨 → 복구
 `cat .env` 결과 `No such file or directory` — 예상대로 rsync `--delete`가 지운 것. 다행히
@@ -112,10 +130,31 @@ curl http://202.20.183.30:8500/v1/models   # qwen3-235b-a22b 나오는지
 
 - System MCP 탭: "커맨드 추가" 서브탭 없애고 화이트리스트 탭 "추가" 버튼 → 모달로 통합,
   실제 커맨드 노출, 필요 역할 "전체 허용/admin 전용" 선택으로 변경.
+- System MCP 화이트리스트 7개 전부 기본 활성화(`enabled=True`)로 코드 기본값 변경, 설명도 보강.
 - 계정 관리 탭 신설(admin 계정 여러 개 관리, `.env` 기본 계정은 잠금 방지용으로 항상 유효).
 - 설정 탭 "MCP 엔드포인트" 그룹에 왜 내부망 이름을 그대로 둬야 하는지 경고 카드 추가.
+- 설정 탭: `manual/command/voc/system_mcp_url`은 호스트 이름 고정하고 **포트만** 수정 가능하게
+  변경(`service_hub_mcp_url`은 실제 외부 주소라 그대로 자유 입력).
 - VOC 이력 엑셀 업로드 재작성: 4행부터 헤더, 의뢰내용/조치일/처리내용/만족도만 사용, 조치일·
   처리내용 있는 행만, 만족도 "불만족"·"매우불만족" 제외, 본문 HTML은 태그만 제거하고 내용
-  (명령어/코드 포함)은 그대로 보존.
+  (명령어/코드 포함)은 그대로 보존. 동일 구조 샘플 데이터로 직접 만들어 필터링/정제 결과 검증함.
+
+## 설정 탭 Q&A
+
+- **vLLM 주소 저장 순서**: hgpu4041에서 LLM/임베딩이 실제로 뜬 다음, `vllm_llm_base_url`/
+  `vllm_embed_base_url`을 `http://75.23.32.41:8000(또는 8010)/v1`로 바꾸고 저장하면 된다(순서
+  그대로 맞음). 저장 즉시(5초 캐시) agent-server가 새 주소로 호출한다 — 재시작/재마운트 불필요.
+- **저장 버튼을 누르면 실제로 뭐가 바뀌는지**: `platform_config` DB의 설정 테이블 한 행만
+  업데이트된다. 스크립트도 안 돌고 컨테이너도 안 건드린다. "즉시 반영" 값은 각 서비스가 요청마다
+  DB를 다시 읽어서(캐시 5초) 자동 반영되고, "재시작 필요" 값(DB DSN, MCP URL)은 그 서비스가
+  기동 시 한 번만 읽어서 연결을 맺어두기 때문에 값이 바뀌어도 그 프로세스가 다시 시작해야 반영된다.
+- **DB/시크릿을 콘솔에서 못 바꾸게 해놓은 이유**: 콘솔에서 바꾸는 걸 막은 게 아니라, `.env`는
+  docker compose가 **컨테이너를 새로 만들 때 딱 한 번**만 읽는 파일이라서 콘솔이 파일 내용을
+  고쳐도 그 자체로는 아무것도 안 바뀐다(재현하려면 `docker compose up -d`로 재생성까지 해야 함).
+  게다가 DB 비밀번호는 `.env` 값을 바꾸는 것과 별개로 **Postgres 쪽 실제 비밀번호도 같이
+  바꿔야** 연결이 안 깨진다 — 둘 중 하나만 바꾸면 그 순간부터 전 서비스 로그인 실패. 이런 이유로
+  일부러 여기는 `.env`만 보게 남겨뒀다. 정말 콘솔에서 비밀번호 로테이션까지 하고 싶으면(DB
+  ALTER ROLE + .env 갱신 + 관련 서비스 재시작을 한 번에 처리하는 별도 기능) 얘기해주면 설계할 수
+  있음 — 지금처럼 "파일만 고쳐준다"는 실제로는 아무 효과가 없어서 그대로 두는 게 맞다고 판단함.
 
 완료/과거 내역은 `docs/RUN-LOG.md` 참고.
