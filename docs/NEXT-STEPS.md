@@ -2,6 +2,30 @@
 
 ## ⚡ 지금 당장 (순서대로)
 
+### -2) hgpu4041 — 임베딩/리랭커 "CUDA busy" 원인 확정: GPU가 Exclusive_Process 모드
+
+`nvidia-smi` 출력에서 4개 GPU 전부 `Compute M.` 열이 `E. Process`(Exclusive_Process)로 돼 있다.
+이 모드는 **GPU 하나당 CUDA 컨텍스트(프로세스)를 딱 1개만** 허용한다 — 메모리가 남아도(현재
+GPU당 약 8.6GB 여유) 상관없이 막는다. 지금 LLM의 tensor-parallel 워커 4개가 GPU 0~3을 하나씩
+이미 점유하고 있어서, 그 위에 임베딩(GPU 0)이나 리랭커(GPU 1)를 추가로 올리려 하면 두 번째
+컨텍스트를 못 만들어 "CUDA busy"가 난다. 애초 계획(GPU 하나를 LLM+임베딩, 또 하나를 LLM+리랭커가
+나눠 쓰는 구성)이 되려면 모드를 `Default`로 바꿔야 한다.
+
+```bash
+# 1) 먼저 시도 (기존 프로세스 안 죽이고 바로 적용되는 경우가 많음)
+sudo nvidia-smi -c 0   # 0 = Default. 전체 GPU에 적용됨
+nvidia-smi --query-gpu=index,compute_mode --format=csv   # 확인
+
+# 2) 위가 "GPU is busy" 등으로 실패하면, LLM을 내렸다가 모드 변경 후 전부 재기동
+docker stop serve-vllm-llm
+sudo nvidia-smi -c 0
+nvidia-smi --query-gpu=index,compute_mode --format=csv   # Default인지 확인
+# 그 다음 아래 0)번 LLM 커맨드, 2)번 임베딩/리랭커 커맨드를 순서대로 재실행
+```
+재부팅하면 이 설정이 초기값(보통 Default이지만 장비마다 다를 수 있음)으로 돌아갈 수 있으니,
+계속 `E. Process`로 나오면 `/etc/rc.local`이나 systemd 유닛에서 강제로 Exclusive_Process를
+거는 스크립트가 있는지 확인이 필요할 수 있음.
+
 ### -1) admin-console 빌드 실패 (`openpyxl`, `python-pptx` 못 찾음) — 방금 고침, 코드 갱신 후 재시도
 
 ```

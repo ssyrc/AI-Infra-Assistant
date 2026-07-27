@@ -251,6 +251,22 @@ openpyxl을 vendor로 고치고 재빌드하니 requirements.txt의 바로 다�
 일치해 재사용)를 동일한 방식으로 vendor에 추가. requirements.txt의 나머지 줄(`redis`,
 `bcrypt`, `docker`)은 이미 vendor에 있어 이어서 문제 없을 것으로 예상 — 재시도 결과 확인 필요.
 
+## 19. 임베딩/리랭커 "CUDA busy" 원인 확정 — GPU Exclusive_Process 모드 (문서화, 조치 필요)
+
+LLM(`--max-model-len 32768`)은 정상 기동 확인됨. 이어서 임베딩(GPU 0)·리랭커(GPU 1)를 올리려니
+"CUDA busy" 에러. `nvidia-smi` 확인 결과 4개 GPU 전부 `Compute M.: E. Process`
+(Exclusive_Process) — 이 모드는 GPU당 CUDA 컨텍스트를 1개로 제한한다(메모리 여유와 무관).
+LLM의 tensor-parallel 워커 4개가 이미 GPU 0~3을 하나씩 점유 중이라, 임베딩/리랭커가 같은
+GPU에 두 번째 컨텍스트를 열 수 없어서 나는 에러로 확인(예전에 LLM 자체가 안 뜰 때 의심했던
+SELinux/Exclusive_Process 이론과는 다른 건 — 그때는 실제로 경로 오타였고, 이번엔 진짜
+Exclusive_Process 모드가 원인). 해결책은 `docs/NEXT-STEPS.md` -2번: `nvidia-smi -c 0`으로
+Default 모드로 전환 후 LLM/임베딩/리랭커 순서대로 재기동.
+
+## 20. 매뉴얼 엑셀 열 선택 UI 이해 어려움 (완료)
+
+"내용/제목/페이지 체크박스가 뭔지 모르겠다"는 피드백에 번호 매긴 단계별 설명과, 현재 선택으로
+첫 번째 행이 실제로 어떻게 저장될지 실시간으로 보여주는 미리보기 박스를 추가함.
+
 ---
 
 ## 다음 항목은 이어서 여기 아래에 추가
