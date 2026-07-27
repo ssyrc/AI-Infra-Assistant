@@ -1,3 +1,4 @@
+# 폐쇄망에서 vllm 띄우기
 docker run -dit --rm --gpus all \
     --network host \
     --ipc host \
@@ -9,13 +10,36 @@ docker run -dit --rm --gpus all \
     --served-model-name Llama-3.1-Nemotron-Nano-8B-v1
 
 
-
-
 # 지금 202.20.183.30:8080 접속하면 검은 화면만 보이고 F12 누르면 이렇게 떠있음
 “http://202.20.183.30:8080/vendor/react.production.min.js” 소스의 <script> 로드에 실패했습니다. 202.20.183.30:8080:1:1
 “https://unpkg.com/react@18/umd/react.production.min.js” 소스의 <script> 로드에 실패했습니다. 202.20.183.30:8080:1:1
 
-​
+# 사내망 wsl 환경에서 curl 하려고 하니 에러남
+yrc@KORCO204731:~/AI-Infra-Assistant$ git -C /home/yrc/AI-Infra-Assistant fetch origin main && git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main^C
+yrc@KORCO204731:~/AI-Infra-Assistant$ pwd
+/home/yrc/AI-Infra-Assistant
+yrc@KORCO204731:~/AI-Infra-Assistant$ 
+yrc@KORCO204731:~/AI-Infra-Assistant$ 
+yrc@KORCO204731:~/AI-Infra-Assistant$ 
+yrc@KORCO204731:~/AI-Infra-Assistant$ cd admin_console/frontend/vendor
+yrc@KORCO204731:~/AI-Infra-Assistant/admin_console/frontend/vendor$ curl -o react.production.min.js https://unpkg.com/react@18/umd/react.production.min.js
+curl -o react-dom.production.min.js https://unpkg.com/react-dom@18/umd/react-dom.production.min.js
+curl -o babel.min.js https://unpkg.com/@babel/standalone/babel.min.js
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0curl: (77) error setting certificate file: /mnt/aii/yr9.choi/01_BMT/poc-platform/data/certs/ca-certificates.crt
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0curl: (77) error setting certificate file: /mnt/aii/yr9.choi/01_BMT/poc-platform/data/certs/ca-certificates.crt
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0curl: (77) error setting certificate file: /mnt/aii/yr9.choi/01_BMT/poc-platform/data/certs/ca-certificates.crt​
+
+
+# 이렇게 다운받은 후 폐쇄망 서버에 올려야 함
+rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/ 2>&1
+
+
 # openwebui 접속시 에러
 Backend config: 
 Object { onboarding: true, status: true, name: "Open WebUI", version: "0.6.5", default_locale: "", oauth: {…}, features: {…} }
