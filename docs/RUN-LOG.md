@@ -94,19 +94,27 @@ docker compose -f docker-compose.dev.yml ps
 ```
 → 관리자 콘솔 `:8501`, 사용자 웹 `:8502` 접속 확인됨.
 
-## 7. admin_console vendor 파일 받기 (진행 중)
+## 7. admin_console vendor 파일 받기 (WSL, 인터넷 환경)
 
 ```bash
-unset CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR
-export https_proxy=http://202.20.187.241:3128 http_proxy=http://202.20.187.241:3128
+unset CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR   # 1차: 죽은 인증서 경로 에러 해결
 cd admin_console/frontend/vendor
-curl -o react.production.min.js https://unpkg.com/react@18/umd/react.production.min.js
-curl -o react-dom.production.min.js https://unpkg.com/react-dom@18/umd/react-dom.production.min.js
-curl -o babel.min.js https://unpkg.com/@babel/standalone/babel.min.js
+curl -L -o react.production.min.js https://unpkg.com/react@18/umd/react.production.min.js
+curl -L -o react-dom.production.min.js https://unpkg.com/react-dom@18/umd/react-dom.production.min.js
+curl -L -o babel.min.js https://unpkg.com/@babel/standalone/babel.min.js
 ```
-1차 시도: 인증서 경로 에러 → `unset`으로 해결. 2차 시도: 파일은 받아졌지만 브라우저에서
-`Uncaught SyntaxError: Unexpected identifier 'to'` → 프록시 차단 페이지가 저장된 것으로 추정,
-프록시 경유 재다운로드 확인 중.
+2차 시도에서 `-L` 없이 받아서 `Uncaught SyntaxError: Unexpected identifier 'to'` 발생 —
+unpkg.com이 버전 없는 URL을 302로 리다이렉트하는데 `-L` 없이 받으면 "Redirecting to ..." 안내문
+자체가 파일로 저장됨(프록시 문제 아니었음). `-L` 추가로 해결.
+
+## 8. MCP 세션 연결 문제 (진행 중)
+
+`restart-mounted.sh` 이후에도 챗 요청 시 재발:
+```
+ConnectionError: Failed to create MCP session: Connection closed
+```
+`/health`는 MCP 연결까지 확인 안 하는 얕은 체크라, agent-server만 먼저 응답 가능해지고 MCP
+컨테이너가 아직 안 떠 있을 때 챗을 보내면 발생하는 것으로 추정. MCP 로그로 실제 기동 여부 확인 중.
 
 ---
 

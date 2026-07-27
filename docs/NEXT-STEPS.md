@@ -17,15 +17,14 @@ admin_console 화면 검은화면(`vendor/react.production.min.js` 로드 실패
 ```bash
 # curl이 "error setting certificate file: ..." 로 죽으면 죽은 인증서 경로가 env에 남아있는 것
 unset CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR
-# 사내 프록시를 안 거치면 unpkg.com이 차단 페이지를 돌려줄 수 있다(빌드에 쓰는 프록시 재사용)
-export https_proxy=http://202.20.187.241:3128 http_proxy=http://202.20.187.241:3128
 
+# -L 필수: unpkg.com은 버전 없는 URL을 302로 리다이렉트한다. -L 없으면 리다이렉트 안내문이 그대로 저장됨.
 cd admin_console/frontend/vendor
-curl -o react.production.min.js https://unpkg.com/react@18/umd/react.production.min.js
-curl -o react-dom.production.min.js https://unpkg.com/react-dom@18/umd/react-dom.production.min.js
-curl -o babel.min.js https://unpkg.com/@babel/standalone/babel.min.js
+curl -L -o react.production.min.js https://unpkg.com/react@18/umd/react.production.min.js
+curl -L -o react-dom.production.min.js https://unpkg.com/react-dom@18/umd/react-dom.production.min.js
+curl -L -o babel.min.js https://unpkg.com/@babel/standalone/babel.min.js
 
-# 받은 파일이 진짜 JS인지 확인 (사람이 읽을 수 있는 문장이 보이면 차단 페이지가 저장된 것)
+# 받은 파일이 진짜 JS인지 확인 ("Redirecting to ..." 같은 문장이 보이면 -L 없이 받은 것)
 head -c 300 react.production.min.js react-dom.production.min.js babel.min.js
 ```
 받은 3개 파일 + 최신 코드를 서버로 반영:
@@ -48,16 +47,17 @@ open-webui 채팅에서 `Failed to create MCP session: Connection closed`가 뜨
 ```bash
 bash scripts/restart-mounted.sh
 ```
-(Open WebUI가 띄우는 `WebUI could not connect to Ollama` 500 에러는 무시해도 됨 — 이 프로젝트는
-Ollama를 안 쓰고 agent-server의 OpenAI 호환 API만 쓴다.)
+재시작 도중 health curl이 `Connection reset by peer`를 여러 번 내다가 결국 `{"status":"ok",...}`로
+끝나는 건 정상(아직 뜨는 중이라 그런 것). (Open WebUI의 `WebUI could not connect to Ollama` 500도
+무시 — 이 프로젝트는 Ollama를 안 쓰고 agent-server의 OpenAI 호환 API만 쓴다.)
 
-open-webui 채팅에서 `/api/chat/completions`가 `400 Bad Request`면 — 브라우저 콘솔엔 에러 본문이
-안 보이니 agent-server를 직접 찔러서 실제 원인을 확인:
+**`restart-mounted.sh` 이후에도 재발하면**: `/health`는 MCP 연결까지 확인하지 않는 얕은 체크라
+agent-server만 먼저 응답 가능한 상태가 되고 MCP는 아직 안 떠 있을 때 챗을 보내면 이 에러가 난다.
+MCP 컨테이너가 실제로 정상 기동됐는지 확인:
 ```bash
-curl -s http://localhost:8500/v1/chat/completions -H 'Content-Type: application/json' \
-  -d '{"model":"mock-llm","messages":[{"role":"user","content":"안녕"}]}'
-docker compose -f docker-compose.dev.yml logs --tail=50 agent-server
+docker compose -f docker-compose.dev.yml logs --tail=40 manual-mcp command-mcp voc-mcp system-mcp
 ```
+`Uvicorn running on ...` 로그가 보이는지, 그 사이 크래시가 있는지 확인 후 챗을 다시 시도.
 
 ## 1. 인터넷 되는 곳에서 모델 다운로드
 
