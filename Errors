@@ -16,7 +16,7 @@ docker run -dit --rm --gpus all --network host --ipc host \
 
 
 docker run -dit --rm --gpus '"device=0"' --network host --ipc host \
-    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models:Z \
+    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
     --name serve-vllm-embed repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
     --model /workspace/models/Qwen3-Embedding-8B \
     --task embed --gpu-memory-utilization 0.15 \
