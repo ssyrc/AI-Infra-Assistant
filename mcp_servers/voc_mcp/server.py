@@ -10,7 +10,7 @@ from db import get_pool, embed_text, vector_literal, rerank, clamp_top_k, clamp_
 
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("voc-mcp", stateless_http=True)
+mcp = FastMCP("voc-mcp", stateless_http=True, host="0.0.0.0")
 
 
 @mcp.tool()

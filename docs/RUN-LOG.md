@@ -101,20 +101,34 @@ unset CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR   # 1차: 죽은 인증서 경�
 cd admin_console/frontend/vendor
 curl -L -o react.production.min.js https://unpkg.com/react@18/umd/react.production.min.js
 curl -L -o react-dom.production.min.js https://unpkg.com/react-dom@18/umd/react-dom.production.min.js
-curl -L -o babel.min.js https://unpkg.com/@babel/standalone/babel.min.js
+curl -L -o babel.min.js https://unpkg.com/@babel/standalone@7/babel.min.js
 ```
 2차 시도에서 `-L` 없이 받아서 `Uncaught SyntaxError: Unexpected identifier 'to'` 발생 —
 unpkg.com이 버전 없는 URL을 302로 리다이렉트하는데 `-L` 없이 받으면 "Redirecting to ..." 안내문
-자체가 파일로 저장됨(프록시 문제 아니었음). `-L` 추가로 해결.
+자체가 파일로 저장됨(프록시 문제 아니었음). `-L`로 해결.
 
-## 8. MCP 세션 연결 문제 (진행 중)
+3차 시도(babel만 무버전 `@babel/standalone`): 파일은 제대로 받아졌는데 브라우저에서
+`Cannot use import statement outside a module`. 원인: 버전 미고정이라 최신 메이저(8.x)가
+잡혔고, 8.x의 `transformScriptTags()`가 이 프로젝트의 UMD 전역 + non-module
+`<script type="text/babel">` 구성과 안 맞음. `@babel/standalone@7`로 고정해서 해결
+(`admin_console/frontend/vendor/README.md`에도 반영).
 
-`restart-mounted.sh` 이후에도 챗 요청 시 재발:
+## 8. MCP 세션 연결 문제 (원인 찾고 코드로 고침)
+
+챗 요청 시 재발:
 ```
 ConnectionError: Failed to create MCP session: Connection closed
 ```
-`/health`는 MCP 연결까지 확인 안 하는 얕은 체크라, agent-server만 먼저 응답 가능해지고 MCP
-컨테이너가 아직 안 떠 있을 때 챗을 보내면 발생하는 것으로 추정. MCP 로그로 실제 기동 여부 확인 중.
+MCP 컨테이너 로그에서 진짜 원인 확인:
+```
+manual-mcp-1  | INFO: 172.21.0.4:41786 - "POST /mcp HTTP/1.1" 421 Misdirected Request
+manual-mcp-1  | Invalid Host header: manual-mcp:8001
+```
+`mcp_servers/*/server.py`의 `FastMCP("manual-mcp", stateless_http=True)`가 `host`를 안 넘겨서
+mcp SDK 기본값 `127.0.0.1`로 잡히고, 그러면 SDK가 DNS-rebinding 보호를 자동으로 켜서
+Host 헤더를 `127.0.0.1`/`localhost`만 허용한다. 실제로는 `uvicorn.run(host="0.0.0.0")`로 띄우고
+도커 네트워크 이름(`manual-mcp:8001` 등)으로 붙기 때문에 전부 421로 막힌 것.
+4개 서버 전부 `FastMCP(..., host="0.0.0.0")`로 고쳐서 push함.
 
 ---
 

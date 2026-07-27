@@ -20,7 +20,7 @@ from ssh_exec import run_ssh_as_user  # noqa: E402
 
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("command-mcp", stateless_http=True)
+mcp = FastMCP("command-mcp", stateless_http=True, host="0.0.0.0")
 
 _DSN = "command_db_dsn"
 _STATE = "command_whitelist_state"

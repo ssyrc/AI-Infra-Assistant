@@ -19,10 +19,12 @@ admin_console 화면 검은화면(`vendor/react.production.min.js` 로드 실패
 unset CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR
 
 # -L 필수: unpkg.com은 버전 없는 URL을 302로 리다이렉트한다. -L 없으면 리다이렉트 안내문이 그대로 저장됨.
+# babel은 @7로 고정 필수: 버전 안 박으면 8.x가 잡히는데 8.x transformScriptTags()가
+# "Cannot use import statement outside a module"로 깨짐(이 프로젝트는 UMD+non-module 구성).
 cd admin_console/frontend/vendor
 curl -L -o react.production.min.js https://unpkg.com/react@18/umd/react.production.min.js
 curl -L -o react-dom.production.min.js https://unpkg.com/react-dom@18/umd/react-dom.production.min.js
-curl -L -o babel.min.js https://unpkg.com/@babel/standalone/babel.min.js
+curl -L -o babel.min.js https://unpkg.com/@babel/standalone@7/babel.min.js
 
 # 받은 파일이 진짜 JS인지 확인 ("Redirecting to ..." 같은 문장이 보이면 -L 없이 받은 것)
 head -c 300 react.production.min.js react-dom.production.min.js babel.min.js
@@ -51,13 +53,17 @@ bash scripts/restart-mounted.sh
 끝나는 건 정상(아직 뜨는 중이라 그런 것). (Open WebUI의 `WebUI could not connect to Ollama` 500도
 무시 — 이 프로젝트는 Ollama를 안 쓰고 agent-server의 OpenAI 호환 API만 쓴다.)
 
-**`restart-mounted.sh` 이후에도 재발하면**: `/health`는 MCP 연결까지 확인하지 않는 얕은 체크라
-agent-server만 먼저 응답 가능한 상태가 되고 MCP는 아직 안 떠 있을 때 챗을 보내면 이 에러가 난다.
-MCP 컨테이너가 실제로 정상 기동됐는지 확인:
+**`Failed to create MCP session: Connection closed` (원인 찾음, 코드로 고침)**: MCP 로그에 찍히는
+`421 Misdirected Request / Invalid Host header: manual-mcp:8001`이 진짜 원인이었다. 4개
+`mcp_servers/*/server.py`의 `FastMCP(...)` 생성자에 `host`를 안 넘겨서 기본값 `127.0.0.1`로 잡히고,
+그러면 mcp SDK가 DNS-rebinding 보호를 자동으로 켜서 Host 헤더를 `127.0.0.1`/`localhost`만 허용한다.
+실제로는 `uvicorn.run(..., host="0.0.0.0", ...)`로 띄우면서 도커 네트워크 이름(`manual-mcp:8001`
+등)으로 접속받으니 전부 421로 막혔던 것. `FastMCP(..., host="0.0.0.0")`로 고쳐서 push함 —
+아래 0단계 `git fetch`/`reset --hard`로 받으면 해결됨. 재확인:
 ```bash
-docker compose -f docker-compose.dev.yml logs --tail=40 manual-mcp command-mcp voc-mcp system-mcp
+docker compose -f docker-compose.dev.yml logs --tail=20 manual-mcp | grep -i "misdirected\|invalid host"
 ```
-`Uvicorn running on ...` 로그가 보이는지, 그 사이 크래시가 있는지 확인 후 챗을 다시 시도.
+아무것도 안 나오면 정상.
 
 ## 1. 인터넷 되는 곳에서 모델 다운로드
 

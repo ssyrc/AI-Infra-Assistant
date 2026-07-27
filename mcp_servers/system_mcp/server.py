@@ -21,7 +21,7 @@ from whitelist import WHITELIST  # noqa: E402
 
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("system-mcp", stateless_http=True)
+mcp = FastMCP("system-mcp", stateless_http=True, host="0.0.0.0")
 
 _DSN = "system_db_dsn"
 _STATE = "system_whitelist_state"
