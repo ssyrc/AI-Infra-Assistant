@@ -54,6 +54,16 @@ MIGRATIONS: list[tuple[str, int, str]] = [
             updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
         );
     """),
+    # 관리자 콘솔 계정 관리(.env의 ADMIN_USER는 잠금 방지용 기본 계정으로 항상 별도 유효,
+    # 여기 등록된 계정은 그 외 추가 관리자용). 비밀번호는 bcrypt 해시로만 저장한다.
+    ("platform_config", 2, """
+        CREATE TABLE IF NOT EXISTS admin_accounts (
+            username      TEXT PRIMARY KEY,
+            password_hash TEXT NOT NULL,
+            created_by    TEXT,
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+    """),
     ("manual_db", 1, """
         CREATE EXTENSION IF NOT EXISTS vector;
         CREATE TABLE IF NOT EXISTS manual_files (

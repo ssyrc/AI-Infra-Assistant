@@ -81,22 +81,23 @@ async def system_info(user_id: str, host: str, kind: str = "uptime") -> dict:
 _COMMON = {"enabled": False, "required_roles": [], "user_scoped": True, "scope_param": "user_id"}
 
 WHITELIST = {
-    "gpu_status": {"handler": gpu_status,
+    "gpu_status": {"handler": gpu_status, "example_command": "nvidia-smi",
                    "description": ("지정 서버(host)의 GPU 상태를 조회한다(nvidia-smi). "
                                    "'특정 서버 GPU가 이상하다/몇 장 인식되나'를 확인할 때 사용. "
                                    "host는 서버 이름(예: hgpu8002)."), **_COMMON},
-    "list_dir": {"handler": list_dir,
+    "list_dir": {"handler": list_dir, "example_command": "ls -lh [-a] <path>",
                  "description": "지정 서버(host)에서 본인 권한으로 디렉토리를 나열한다(ls).", **_COMMON},
-    "find_files": {"handler": find_files,
+    "find_files": {"handler": find_files, "example_command": "find <path> [-name pattern] [-type f|d|l] (read-only)",
                    "description": ("지정 서버(host)에서 파일을 검색한다(find, 읽기 전용). "
                                    "이름 패턴/종류로 찾는다. 수정·삭제·실행은 못 한다."), **_COMMON},
-    "disk_free": {"handler": disk_free,
+    "disk_free": {"handler": disk_free, "example_command": "df -h",
                   "description": "지정 서버(host)의 디스크 여유/사용 용량을 조회한다(df -h).", **_COMMON},
-    "disk_usage": {"handler": disk_usage,
+    "disk_usage": {"handler": disk_usage, "example_command": "du -h --max-depth=<n> <path>",
                    "description": "지정 서버(host)에서 경로의 디스크 사용량을 조회한다(du).", **_COMMON},
-    "read_file_head": {"handler": read_file_head,
+    "read_file_head": {"handler": read_file_head, "example_command": "head -n <lines> <path>",
                        "description": "지정 서버(host)에서 텍스트 파일 앞부분을 읽는다(head).", **_COMMON},
     "system_info": {"handler": system_info,
+                    "example_command": "uptime | free -h | ip addr | who | lscpu (kind로 선택)",
                     "description": ("지정 서버(host)의 시스템 정보를 조회한다: "
                                     "uptime/memory/network/who/cpu."), **_COMMON},
 }
