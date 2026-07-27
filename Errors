@@ -6,32 +6,12 @@ rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ yr9.choi@202.20.185
 
 
 # 관리자용 콘솔 에러
-# 여전히 검은 화면으로 
-babel.min.js:3 You are using the in-browser Babel transformer. Be sure to precompile your scripts for production - https://babeljs.io/docs/setup/
-(anonymous) @ babel.min.js:3
-mve @ babel.min.js:3
-window.__depsReady @ (index):877
-(anonymous) @ (index):24
-script
-loadScript @ (index):10
-(anonymous) @ (index):23
-script
-loadScript @ (index):10
-(anonymous) @ (index):22
-script
-loadScript @ (index):10
-(anonymous) @ (index):21
-VM36:1 Uncaught SyntaxError: Failed to execute 'appendChild' on 'Node': Cannot use import statement outside a module
-    at $ye (babel.min.js:3:2449708)
-    at r (babel.min.js:3:2449959)
-    at Zye (babel.min.js:3:2450759)
-    at babel.min.js:3:2453473
-    at Object.mve [as transformScriptTags] (babel.min.js:3:2453483)
-    at window.__depsReady ((index):877:36)
-    at HTMLScriptElement.<anonymous> ((index):24:38)
+# http://202.20.183.30:8501/ 확인 완료!
+# 설정 탭 - agent 서버 202.20.183.30, llm 서버 ip 75.23.32.41 적
 
 
-# open-webui 에 mock-llm 으로 두고 챗 보내면 에러, mount 다시하면 에러?
+
+# open-webui 에 mock-llm 으로 두고 챗 보내면 return 은 오는 상태
 RichTextInput.svelte:166 [tiptap warn]: Duplicate extension names found: ['codeBlock']. This can lead to issues.
 resolve @ index.js:1158
 constructor @ index.js:1144
@@ -46,24 +26,90 @@ Promise.then
 schedule_update @ scheduler.js:20
 make_dirty @ Component.js:81
 (anonymous) @ Component.js:139
-(anonymous) @ root.svelte:69
-$set @ Component.js:507
-navigate @ client.js:1576
+(anonymous) @ Chat.svelte:154
+await in (anonymous)
+(anonymous) @ Chat.svelte:173
+init @ Component.js:144
+constructor @ Chat.svelte:195
+H @ 15.DC2_OUZz.js:1
+init @ Component.js:148
+constructor @ +page.svelte:9
+(anonymous) @ dom.js:1228
+ot @ root.svelte:57
+at @ root.svelte:51
+create_slot @ utils.js:165
+K7 @ +layout.svelte:321
+p @ +layout.svelte:242
+update @ scheduler.js:119
+flush @ scheduler.js:79
+Promise.then
+schedule_update @ scheduler.js:20
+make_dirty @ Component.js:81
+(anonymous) @ Component.js:139
+(anonymous) @ +layout.svelte:223
+await in (anonymous)
+run @ utils.js:41
+(anonymous) @ Component.js:47
+flush @ scheduler.js:99
+Promise.then
+schedule_update @ scheduler.js:20
+make_dirty @ Component.js:81
+(anonymous) @ Component.js:139
+(anonymous) @ +layout.svelte:599
+await in (anonymous)
+run @ utils.js:41
+(anonymous) @ Component.js:47
+flush @ scheduler.js:99
+init @ Component.js:164
+constructor @ root.svelte:23
+initialize @ client.js:472
+navigate @ client.js:1580
 await in navigate
 _goto @ client.js:398
 goto @ client.js:1926
-(anonymous) @ Sidebar.svelte:517
-Chat.svelte:1248 submitPrompt ㅎㅇ 
-Chat.svelte:187 saveSessionSelectedModels ['mock-llm'] ["mock-llm"]
-MessageInput.svelte:343 destroy
-RichTextInput.svelte:131 
-ResponseMessage.svelte:562 <div class=​"flex justify-start overflow-x-auto buttons text-gray-600 dark:​text-gray-500 mt-0.5 svelte-1u5gq5j">​</div>​
-RichTextInput.svelte:166 [tiptap warn]: Duplicate extension names found: ['codeBlock']. This can lead to issues.
-resolve @ index.js:1158
-constructor @ index.js:1144
-createExtensionManager @ index.js:4470
-constructor @ index.js:4302
-(anonymous) @ RichTextInput.svelte:166
+start @ client.js:323
+await in start
+(anonymous) @ 60ed02b1-0b34-41bb-a4af-cabdbb07d9c2:130
+Promise.then
+(anonymous) @ 60ed02b1-0b34-41bb-a4af-cabdbb07d9c2:129
+Chat.svelte:1780 regenerateResponse
+ResponseMessage.svelte:562 <div class=​"flex justify-start overflow-x-auto buttons text-gray-600 dark:​text-gray-500 mt-0.5 svelte-1u5gq5j">​…​</div>​flex
+Chat.svelte:1422 modelId mock-llm
++layout.svelte:101 usage {models: Array(1)}
++layout.svelte:101 usage {models: Array(1)}
++layout.svelte:101 usage {models: Array(1)}
+index.ts:181  GET http://202.20.183.30:8502/ollama/api/version 500 (Internal Server Error)
+(anonymous) @ fetcher.js:76
+(anonymous) @ index.ts:181
+(anonymous) @ Selector.svelte:284
+run @ utils.js:41
+(anonymous) @ Component.js:47
+flush @ scheduler.js:99
+Promise.then
+schedule_update @ scheduler.js:20
+make_dirty @ Component.js:81
+(anonymous) @ Component.js:139
+(anonymous) @ Chat.svelte:154
+await in (anonymous)
+(anonymous) @ Chat.svelte:173
+init @ Component.js:144
+constructor @ Chat.svelte:195
+H @ 15.DC2_OUZz.js:1
+init @ Component.js:148
+constructor @ +page.svelte:9
+(anonymous) @ dom.js:1228
+ot @ root.svelte:57
+at @ root.svelte:51
+create_slot @ utils.js:165
+K7 @ +layout.svelte:321
+p @ +layout.svelte:242
+update @ scheduler.js:119
+flush @ scheduler.js:79
+Promise.then
+schedule_update @ scheduler.js:20
+make_dirty @ Component.js:81
+(anonymous) @ Component.js:139
+(anonymous) @ +layout.svelte:223
 await in (anonymous)
 run @ utils.js:41
 (anonymous) @ Component.js:47
@@ -72,168 +118,41 @@ Promise.then
 schedule_update @ scheduler.js:20
 make_dirty @ Component.js:81
 (anonymous) @ Component.js:139
-(anonymous) @ Chat.svelte:1300
-(anonymous) @ Chat.svelte:2105
+(anonymous) @ +layout.svelte:599
 await in (anonymous)
-(anonymous) @ lifecycle.js:105
-(anonymous) @ lifecycle.js:104
-(anonymous) @ Placeholder.svelte:208
-(anonymous) @ lifecycle.js:105
-(anonymous) @ lifecycle.js:104
-(anonymous) @ MessageInput.svelte:765
-(anonymous) @ lifecycle.js:105
-(anonymous) @ lifecycle.js:104
-(anonymous) @ RichTextInput.svelte:297
-(anonymous) @ index.js:3108
-someProp @ index.js:5502
-runCustomHandler @ index.js:3106
-(anonymous) @ index.js:3075
-ResponseMessage.svelte:562 <div class=​"flex justify-start overflow-x-auto buttons text-gray-600 dark:​text-gray-500 mt-0.5 svelte-1u5gq5j">​</div>​flex
-Chat.svelte:1422 modelId mock-llm
-Chat.svelte:249 {chat_id: '60ed02b1-0b34-41bb-a4af-cabdbb07d9c2', message_id: 'da961143-1fa7-45fa-9e88-1cfe8ec1946e', data: {…}}
-Chat.svelte:1237 {content: '[오류가 발생했습니다: Failed to create MCP session: Connection closed]'}
-Chat.svelte:249 {chat_id: '60ed02b1-0b34-41bb-a4af-cabdbb07d9c2', message_id: 'da961143-1fa7-45fa-9e88-1cfe8ec1946e', data: {…}}
-Chat.svelte:1237 {id: 'chatcmpl-789e477e3c78', object: 'chat.completion.chunk', created: 1785139974, model: 'mock-llm', choices: Array(1)}
-Chat.svelte:249 {chat_id: '60ed02b1-0b34-41bb-a4af-cabdbb07d9c2', message_id: 'da961143-1fa7-45fa-9e88-1cfe8ec1946e', data: {…}}
-Chat.svelte:1237 {done: true, content: '[오류가 발생했습니다: Failed to create MCP session: Connection closed]', title: '새 채팅'}
+run @ utils.js:41
+(anonymous) @ Component.js:47
+flush @ scheduler.js:99
+init @ Component.js:164
+constructor @ root.svelte:23
+initialize @ client.js:472
+navigate @ client.js:1580
+await in navigate
+_goto @ client.js:398
+goto @ client.js:1926
+start @ client.js:323
+await in start
+(anonymous) @ 60ed02b1-0b34-41bb-a4af-cabdbb07d9c2:130
+Promise.then
+(anonymous) @ 60ed02b1-0b34-41bb-a4af-cabdbb07d9c2:129
+index.ts:194 {detail: 'WebUI could not connect to Ollama'}
+Chat.svelte:249 {chat_id: '60ed02b1-0b34-41bb-a4af-cabdbb07d9c2', message_id: '14c9ced9-0835-4a12-a3c2-f4da130a65fb', data: {…}}
+Chat.svelte:1237 {content: '[mock-llm] 다음 요청을 받았습니다: ㅎㅇ'}
+Chat.svelte:249 {chat_id: '60ed02b1-0b34-41bb-a4af-cabdbb07d9c2', message_id: '14c9ced9-0835-4a12-a3c2-f4da130a65fb', data: {…}}
+Chat.svelte:1237 {id: 'chatcmpl-d52943049659', object: 'chat.completion.chunk', created: 1785140532, model: 'mock-llm', choices: Array(1)}
+Chat.svelte:249 {chat_id: '60ed02b1-0b34-41bb-a4af-cabdbb07d9c2', message_id: '14c9ced9-0835-4a12-a3c2-f4da130a65fb', data: {…}}
+Chat.svelte:1237 {done: true, content: '[mock-llm] 다음 요청을 받았습니다: ㅎㅇ', title: '새 채팅'}
+Chat.svelte:249 {chat_id: '60ed02b1-0b34-41bb-a4af-cabdbb07d9c2', message_id: '14c9ced9-0835-4a12-a3c2-f4da130a65fb', data: {…}}
+Chat.svelte:249 {chat_id: '60ed02b1-0b34-41bb-a4af-cabdbb07d9c2', message_id: '14c9ced9-0835-4a12-a3c2-f4da130a65fb', data: {…}}
++layout.svelte:101 usage {models: Array(1)}
++layout.svelte:101 usage {models: Array(1)}
++layout.svelte:101 usage {models: Array(0)}
 
 
 
 # mcp server 확인
-[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml logs --tail=40 manual-mcp command-mcp voc-mcp system-mcp
-manual-mcp-1  | [08:00:15] watchfiles v1.2.0 👀  path="/app/mcp_servers/manual_mcp", "/app/shared" target="python mcp_servers/manual_mcp/server.py" (command) filter=PythonFilter...
-manual-mcp-1  | INFO:     Started server process [7]
-manual-mcp-1  | INFO:     Waiting for application startup.
-manual-mcp-1  | StreamableHTTP session manager started
-manual-mcp-1  | INFO:     Application startup complete.
-manual-mcp-1  | INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
-system-mcp-1  | [08:00:15] watchfiles v1.2.0 👀  path="/app/mcp_servers/system_mcp", "/app/shared" target="python mcp_servers/system_mcp/server.py" (command) filter=PythonFilter...
-manual-mcp-1  | [08:06:56] received signal 15, raising KeyboardInterrupt
-manual-mcp-1  | [08:06:56] KeyboardInterrupt caught, stopping watch
-manual-mcp-1  | INFO:     Shutting down
-manual-mcp-1  | INFO:     Waiting for application shutdown.
-manual-mcp-1  | StreamableHTTP session manager shutting down
-manual-mcp-1  | INFO:     Application shutdown complete.
-manual-mcp-1  | INFO:     Finished server process [7]
-manual-mcp-1  | [08:06:57] watchfiles v1.2.0 👀  path="/app/mcp_servers/manual_mcp", "/app/shared" target="python mcp_servers/manual_mcp/server.py" (command) filter=PythonFilter...
-manual-mcp-1  | INFO:     Started server process [7]
-manual-mcp-1  | INFO:     Waiting for application startup.
-manual-mcp-1  | StreamableHTTP session manager started
-manual-mcp-1  | INFO:     Application startup complete.
-manual-mcp-1  | INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
-manual-mcp-1  | INFO:     172.21.0.4:41786 - "POST /mcp HTTP/1.1" 421 Misdirected Request
+[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml logs --tail=20 manual-mcp | grep -i "misdirected\|invalid host"
 manual-mcp-1  | Invalid Host header: manual-mcp:8001
-manual-mcp-1  | Terminating session: None
+manual-mcp-1  | INFO:     172.21.0.5:42798 - "POST /mcp HTTP/1.1" 421 Misdirected Request
 manual-mcp-1  | Invalid Host header: manual-mcp:8001
-manual-mcp-1  | INFO:     172.21.0.4:41792 - "POST /mcp HTTP/1.1" 421 Misdirected Request
-manual-mcp-1  | Terminating session: None
-manual-mcp-1  | [08:11:38] received signal 15, raising KeyboardInterrupt
-manual-mcp-1  | [08:11:38] KeyboardInterrupt caught, stopping watch
-manual-mcp-1  | INFO:     Shutting down
-manual-mcp-1  | INFO:     Waiting for application shutdown.
-manual-mcp-1  | StreamableHTTP session manager shutting down
-manual-mcp-1  | INFO:     Application shutdown complete.
-manual-mcp-1  | INFO:     Finished server process [7]
-manual-mcp-1  | [08:11:40] watchfiles v1.2.0 👀  path="/app/mcp_servers/manual_mcp", "/app/shared" target="python mcp_servers/manual_mcp/server.py" (command) filter=PythonFilter...
-manual-mcp-1  | INFO:     Started server process [7]
-manual-mcp-1  | INFO:     Waiting for application startup.
-manual-mcp-1  | StreamableHTTP session manager started
-manual-mcp-1  | INFO:     Application startup complete.
-manual-mcp-1  | INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
-system-mcp-1  | INFO:     Started server process [7]
-system-mcp-1  | INFO:     Waiting for application startup.
-system-mcp-1  | StreamableHTTP session manager started
-system-mcp-1  | INFO:     Application startup complete.
-system-mcp-1  | INFO:     Uvicorn running on http://0.0.0.0:8004 (Press CTRL+C to quit)
-system-mcp-1  | [08:06:56] received signal 15, raising KeyboardInterrupt
-system-mcp-1  | [08:06:56] KeyboardInterrupt caught, stopping watch
-system-mcp-1  | INFO:     Shutting down
-system-mcp-1  | INFO:     Waiting for application shutdown.
-system-mcp-1  | StreamableHTTP session manager shutting down
-system-mcp-1  | INFO:     Application shutdown complete.
-system-mcp-1  | INFO:     Finished server process [7]
-system-mcp-1  | [08:06:57] watchfiles v1.2.0 👀  path="/app/mcp_servers/system_mcp", "/app/shared" target="python mcp_servers/system_mcp/server.py" (command) filter=PythonFilter...
-system-mcp-1  | INFO:     Started server process [7]
-system-mcp-1  | INFO:     Waiting for application startup.
-system-mcp-1  | StreamableHTTP session manager started
-system-mcp-1  | INFO:     Application startup complete.
-system-mcp-1  | INFO:     Uvicorn running on http://0.0.0.0:8004 (Press CTRL+C to quit)
-system-mcp-1   | [08:11:38] received signal 15, raising KeyboardInterrupt
-system-mcp-1   | [08:11:38] KeyboardInterrupt caught, stopping watch
-command-mcp-1  | [08:00:15] watchfiles v1.2.0 👀  path="/app/mcp_servers/command_mcp", "/app/shared" target="python mcp_servers/command_mcp/server.py" (command) filter=PythonFilter...
-command-mcp-1  | INFO:     Started server process [7]
-command-mcp-1  | INFO:     Waiting for application startup.
-command-mcp-1  | StreamableHTTP session manager started
-command-mcp-1  | INFO:     Application startup complete.
-command-mcp-1  | INFO:     Uvicorn running on http://0.0.0.0:8002 (Press CTRL+C to quit)
-command-mcp-1  | [08:06:56] received signal 15, raising KeyboardInterrupt
-command-mcp-1  | [08:06:56] KeyboardInterrupt caught, stopping watch
-system-mcp-1   | INFO:     Shutting down
-system-mcp-1   | INFO:     Waiting for application shutdown.
-system-mcp-1   | StreamableHTTP session manager shutting down
-system-mcp-1   | INFO:     Application shutdown complete.
-system-mcp-1   | INFO:     Finished server process [7]
-system-mcp-1   | [08:11:40] watchfiles v1.2.0 👀  path="/app/mcp_servers/system_mcp", "/app/shared" target="python mcp_servers/system_mcp/server.py" (command) filter=PythonFilter...
-system-mcp-1   | INFO:     Started server process [7]
-system-mcp-1   | INFO:     Waiting for application startup.
-system-mcp-1   | StreamableHTTP session manager started
-system-mcp-1   | INFO:     Application startup complete.
-system-mcp-1   | INFO:     Uvicorn running on http://0.0.0.0:8004 (Press CTRL+C to quit)
-command-mcp-1  | INFO:     Shutting down
-command-mcp-1  | INFO:     Waiting for application shutdown.
-command-mcp-1  | StreamableHTTP session manager shutting down
-command-mcp-1  | INFO:     Application shutdown complete.
-command-mcp-1  | INFO:     Finished server process [7]
-command-mcp-1  | [08:06:57] watchfiles v1.2.0 👀  path="/app/mcp_servers/command_mcp", "/app/shared" target="python mcp_servers/command_mcp/server.py" (command) filter=PythonFilter...
-command-mcp-1  | INFO:     Started server process [7]
-command-mcp-1  | INFO:     Waiting for application startup.
-command-mcp-1  | StreamableHTTP session manager started
-voc-mcp-1      | [08:00:15] watchfiles v1.2.0 👀  path="/app/mcp_servers/voc_mcp", "/app/shared" target="python mcp_servers/voc_mcp/server.py" (command) filter=PythonFilter...
-voc-mcp-1      | INFO:     Started server process [7]
-voc-mcp-1      | INFO:     Waiting for application startup.
-voc-mcp-1      | StreamableHTTP session manager started
-voc-mcp-1      | INFO:     Application startup complete.
-voc-mcp-1      | INFO:     Uvicorn running on http://0.0.0.0:8003 (Press CTRL+C to quit)
-voc-mcp-1      | [08:06:56] received signal 15, raising KeyboardInterrupt
-voc-mcp-1      | [08:06:56] KeyboardInterrupt caught, stopping watch
-voc-mcp-1      | INFO:     Shutting down
-voc-mcp-1      | INFO:     Waiting for application shutdown.
-voc-mcp-1      | StreamableHTTP session manager shutting down
-command-mcp-1  | INFO:     Application startup complete.
-command-mcp-1  | INFO:     Uvicorn running on http://0.0.0.0:8002 (Press CTRL+C to quit)
-command-mcp-1  | [08:11:38] received signal 15, raising KeyboardInterrupt
-command-mcp-1  | [08:11:38] KeyboardInterrupt caught, stopping watch
-command-mcp-1  | INFO:     Shutting down
-command-mcp-1  | INFO:     Waiting for application shutdown.
-command-mcp-1  | StreamableHTTP session manager shutting down
-command-mcp-1  | INFO:     Application shutdown complete.
-command-mcp-1  | INFO:     Finished server process [7]
-command-mcp-1  | [08:11:39] watchfiles v1.2.0 👀  path="/app/mcp_servers/command_mcp", "/app/shared" target="python mcp_servers/command_mcp/server.py" (command) filter=PythonFilter...
-command-mcp-1  | INFO:     Started server process [7]
-voc-mcp-1      | INFO:     Application shutdown complete.
-voc-mcp-1      | INFO:     Finished server process [7]
-voc-mcp-1      | [08:06:57] watchfiles v1.2.0 👀  path="/app/mcp_servers/voc_mcp", "/app/shared" target="python mcp_servers/voc_mcp/server.py" (command) filter=PythonFilter...
-voc-mcp-1      | INFO:     Started server process [7]
-voc-mcp-1      | INFO:     Waiting for application startup.
-voc-mcp-1      | StreamableHTTP session manager started
-voc-mcp-1      | INFO:     Application startup complete.
-voc-mcp-1      | INFO:     Uvicorn running on http://0.0.0.0:8003 (Press CTRL+C to quit)
-voc-mcp-1      | [08:11:38] received signal 15, raising KeyboardInterrupt
-voc-mcp-1      | [08:11:38] KeyboardInterrupt caught, stopping watch
-voc-mcp-1      | INFO:     Shutting down
-voc-mcp-1      | INFO:     Waiting for application shutdown.
-voc-mcp-1      | StreamableHTTP session manager shutting down
-voc-mcp-1      | INFO:     Application shutdown complete.
-voc-mcp-1      | INFO:     Finished server process [7]
-voc-mcp-1      | [08:11:39] watchfiles v1.2.0 👀  path="/app/mcp_servers/voc_mcp", "/app/shared" target="python mcp_servers/voc_mcp/server.py" (command) filter=PythonFilter...
-voc-mcp-1      | INFO:     Started server process [7]
-voc-mcp-1      | INFO:     Waiting for application startup.
-voc-mcp-1      | StreamableHTTP session manager started
-voc-mcp-1      | INFO:     Application startup complete.
-voc-mcp-1      | INFO:     Uvicorn running on http://0.0.0.0:8003 (Press CTRL+C to quit)
-command-mcp-1  | INFO:     Waiting for application startup.
-command-mcp-1  | StreamableHTTP session manager started
-command-mcp-1  | INFO:     Application startup complete.
-command-mcp-1  | INFO:     Uvicorn running on http://0.0.0.0:8002 (Press CTRL+C to quit)
-
-
+manual-mcp-1  | INFO:     172.21.0.5:42812 - "POST /mcp HTTP/1.1" 421 Misdirected Request
