@@ -181,4 +181,53 @@ docker run -dit --rm --gpus '"device=0"' --network host --ipc host \
 
 ---
 
+## 13. vLLM LLM KV 캐시 부족 원인 확정 및 수정 (완료, 문서화)
+
+```
+ValueError: To serve at least one request with the models's max seq len (262144),
+(11.75 GiB KV cache is needed, which is larger than the available KV cache memory (8.03 GiB).
+```
+Qwen3-235B-A22B의 기본 최대 컨텍스트(262144 토큰) 때문에 `--gpu-memory-utilization 0.85`로
+남는 KV 캐시 용량이 부족해서 실패. 이 에이전트는 256K 컨텍스트가 필요 없으므로
+`--max-model-len 32768`을 LLM `docker run`에 추가하는 것으로 해결(`docs/NEXT-STEPS.md` 0번).
+
+## 14. 설정 탭 / System MCP 탭에 "지금 재시작" 버튼 추가 (완료)
+
+`platform_settings`에서 `hot_reload=false`인 값(MCP URL, 시스템 프롬프트 등)을 저장하거나
+System MCP 화이트리스트/커스텀 커맨드를 바꾸면, 해당 서비스를 바로 재시작할 수 있는 버튼이
+나타나도록 구현:
+- 백엔드: `admin_console/backend/routers/ops.py` 신설 —
+  `POST /api/ops/restart/{service}`가 `docker` Python SDK(docker-py)로
+  허용 목록(`agent-server`/`manual-mcp`/`command-mcp`/`voc-mcp`/`system-mcp`)의 컨테이너만
+  `restart()` 호출. 호스트 `/var/run/docker.sock`을 admin-console 컨테이너에 바인드 마운트해야
+  동작(`docker-compose.dev.yml`/`docker-compose.yml` 양쪽에 추가, 코멘트로 보안 트레이드오프
+  명시).
+- 프론트: `RESTART_SERVICE_FOR_KEY` 매핑 + `restartService()` 헬퍼(확인창 → API 호출 → 결과
+  알림)를 설정 탭과 System MCP 탭이 공유. 설정 탭은 "재시작 필요" 배지가 붙은 항목 옆에 버튼을
+  바로 노출, System MCP 탭은 화이트리스트 토글/저장/커스텀 커맨드 추가·수정·삭제 중 하나라도
+  하면 "⚠ System MCP 재시작" 버튼이 나타남.
+- 의존성: `admin_console/backend/requirements.txt`에 `docker==7.1.0` 추가 → admin-console
+  이미지 재빌드 필요(재시작만으로는 pip 패키지가 안 깔림), 소켓 마운트도 컨테이너 재생성
+  (`docker compose up -d`)이 있어야 실제로 붙음.
+- 보안 트레이드오프: 이 기능으로 admin-console 컨테이너가 호스트 Docker 데몬에 직접 접근하게
+  됨(사실상 호스트 권한). 재시작 가능한 서비스는 코드에서 허용 목록으로 제한했지만,
+  admin-console 자체가 공격당하면 호스트 전체가 위험해지므로 신뢰된 관리자망에서만 노출해야
+  한다는 점을 사용자에게 명시적으로 전달함.
+
+## 15. Manuals 탭 "제목과 파일을 먼저 선택하세요" 버그 수정 (완료)
+
+파일 선택 자체는 정상 동작하고 있었고, 실제 원인은 title이 비어 있는 상태에서 같은 에러
+메시지로 뭉뚱그려 보여준 것으로 추정됨(코드 확인상 file 바인딩 자체엔 문제 없음). 방어적으로
+서버 파일/로컬 파일 선택 시 title이 비어 있으면 파일명(확장자 제외)으로 자동 채우도록 하고,
+title/file 중 뭐가 빠졌는지 에러 메시지를 분리함.
+
+## 16. VOC 엑셀 업로드 형식 자동 인식 (완료)
+
+기존엔 4행 헤더(사내 표준 원본 포맷)만 지원해서 1행 헤더의 Question/Answer 단순 포맷 업로드가
+`"지원하지 않는 형식입니다"`로 거부됨. 1행 헤더가 Question/Answer(대소문자 무관)면 이미 정제된
+데이터로 보고 그대로 등록하고, 아니면 4행 헤더 포맷으로 시도, 둘 다 아니면 두 형식을 모두
+안내하는 에러로 변경.
+
+---
+
 ## 다음 항목은 이어서 여기 아래에 추가

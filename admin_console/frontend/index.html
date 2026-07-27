@@ -738,6 +738,7 @@ function SystemPanel() {
   const [tab, setTab] = useState("whitelist");
   const [edits, setEdits] = useState({}); // tool_name -> {description, roles}
   const [showAddModal, setShowAddModal] = useState(false);
+  const [needsRestart, setNeedsRestart] = useState(false);
 
   const loadWhitelist = useCallback(async () => setWhitelist(await api("/api/system/whitelist")), []);
   const loadLogs = useCallback(async () => setLogs(await api("/api/system/logs")), []);
@@ -747,6 +748,7 @@ function SystemPanel() {
   const patch = async (name, body) => {
     await api(`/api/system/whitelist/${encodeURIComponent(name)}`, { method: "PATCH", body: JSON.stringify(body) });
     await loadWhitelist();
+    setNeedsRestart(true);
   };
   const toggle = (name, enabled) => patch(name, { enabled });
 
@@ -815,7 +817,8 @@ function SystemPanel() {
       }
       closeAddModal();
       await loadCustomCommands();
-      alert("저장했습니다. System MCP를 재시작해야 반영됩니다:\ndocker compose -f docker-compose.dev.yml restart system-mcp");
+      setNeedsRestart(true);
+      alert("저장했습니다. 아래 'System MCP 재시작' 버튼을 눌러 바로 반영할 수 있습니다.");
     } catch (e) { alert(e.message); }
   };
 
@@ -823,6 +826,7 @@ function SystemPanel() {
     if (!confirm(`'${name}' 커맨드를 삭제할까요?`)) return;
     await api(`/api/system/custom-commands/${encodeURIComponent(name)}`, { method: "DELETE" });
     await loadCustomCommands();
+    setNeedsRestart(true);
   };
 
   const toggleCustom = async (c, enabled) => {
@@ -834,6 +838,7 @@ function SystemPanel() {
       }),
     });
     await loadCustomCommands();
+    setNeedsRestart(true);
   };
 
   const RoleSelect = ({ value, onChange }) => (
@@ -862,6 +867,12 @@ function SystemPanel() {
 
           <div className="toolbar" style={{marginBottom: 4}}>
             <button className="primary" onClick={() => { resetCustomForm(); setShowAddModal(true); }}>+ 커맨드 추가</button>
+            {needsRestart && (
+              <button style={{fontWeight: 600}}
+                onClick={async () => { await restartService("system-mcp"); setNeedsRestart(false); }}>
+                ⚠ System MCP 재시작 (변경사항 반영)
+              </button>
+            )}
           </div>
 
           {whitelist.map(w => {
@@ -1017,6 +1028,25 @@ function SystemPanel() {
 const INTERNAL_MCP_URL_RE = /^(https?:\/\/[^:/]+:)(\d+)(\/.*)?$/;
 const isInternalMcpUrl = (key) => key.endsWith("_mcp_url") && key !== "service_hub_mcp_url";
 
+// "재시작 필요" 값을 저장한 뒤 바로 눌러서 반영할 수 있는 서비스 매핑(System MCP 탭도 재사용).
+const RESTART_SERVICE_FOR_KEY = {
+  manual_mcp_url: "manual-mcp",
+  command_mcp_url: "command-mcp",
+  voc_mcp_url: "voc-mcp",
+  system_mcp_url: "system-mcp",
+  agent_system_instruction: "agent-server",
+};
+
+async function restartService(service) {
+  if (!confirm(`'${service}' 컨테이너를 지금 재시작할까요? (짧게 서비스가 끊깁니다)`)) return;
+  try {
+    const data = await api(`/api/ops/restart/${encodeURIComponent(service)}`, { method: "POST" });
+    alert(`재시작했습니다: ${data.restarted.join(", ")}`);
+  } catch (e) {
+    alert("재시작 실패: " + e.message);
+  }
+}
+
 function SettingsPanel() {
   const [settings, setSettings] = useState([]);
   const [edits, setEdits] = useState({}); // key -> new value
@@ -1084,6 +1114,12 @@ function SettingsPanel() {
                   <span className={`badge ${s.hot_reload ? "enabled" : "disabled"}`} style={{marginLeft: 8}}>
                     {s.hot_reload ? "즉시 반영" : "재시작 필요"}
                   </span>
+                  {!s.hot_reload && RESTART_SERVICE_FOR_KEY[s.key] && (
+                    <button style={{marginLeft: 8, fontSize: 11.5, padding: "1px 6px"}}
+                      onClick={() => restartService(RESTART_SERVICE_FOR_KEY[s.key])}>
+                      {RESTART_SERVICE_FOR_KEY[s.key]} 재시작
+                    </button>
+                  )}
                   {s.description && <span style={{color: "var(--muted)", marginLeft: 8}}>{s.description}</span>}
                 </div>
                 {isInternalMcpUrl(s.key) && INTERNAL_MCP_URL_RE.test(val) ? (

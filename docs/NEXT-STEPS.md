@@ -62,15 +62,22 @@ git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
 rsync -avz --delete --exclude '.env' --progress /home/yrc/AI-Infra-Assistant/ \
   yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
 ```
-계정 관리 기능에 `bcrypt`가 새 의존성으로 추가돼서 admin-console은 **재시작만으론 안 되고
-이미지를 다시 빌드**해야 함(mounted 코드 재시작으론 pip 패키지가 안 깔림). 0번에서 `.env`를
-복구했는지 먼저 확인한 다음:
+계정 관리 기능에 `bcrypt`, "지금 재시작" 버튼 기능에 `docker`(docker-py) 패키지가 새 의존성으로
+추가돼서 admin-console은 **재시작만으론 안 되고 이미지를 다시 빌드**해야 함(mounted 코드
+재시작으론 pip 패키지가 안 깔림). 또한 `docker-compose.dev.yml`의 admin-console에
+`/var/run/docker.sock` 마운트가 새로 추가돼서 **컨테이너 재생성**(`up -d`)까지 해야 소켓이 실제로
+붙는다(이미 아래 커맨드에 포함됨). 0번에서 `.env`를 복구했는지 먼저 확인한 다음:
 ```bash
 docker compose -f docker-compose.dev.yml build admin-console
 docker compose -f docker-compose.dev.yml up -d
 docker compose -f docker-compose.dev.yml ps
 curl http://localhost:8500/health
 ```
+⚠️ **보안 트레이드오프**: 이 소켓 마운트로 admin-console 컨테이너는 호스트의 Docker 데몬에
+직접 접근한다(사실상 호스트 권한과 다름없음 — 임의 컨테이너 실행/삭제 가능). 재시작 버튼은
+허용된 서비스 이름(`agent-server`/`manual-mcp`/`command-mcp`/`voc-mcp`/`system-mcp`)만
+재시작하도록 백엔드에서 제한해뒀지만, admin-console 자체가 뚫리면 호스트 전체가 위험해지는
+구조이므로 신뢰된 관리자망에서만 이 콘솔을 노출해야 한다.
 
 ### 5) admin_console 설정 탭
 
@@ -135,6 +142,14 @@ curl http://202.20.183.30:8500/v1/models   # qwen3-235b-a22b 나오는지
 - VOC 엑셀 업로드가 형식을 자동 인식하도록 재작성: 1행 헤더가 Question/Answer(대소문자 무관)면
   이미 정제된 데이터로 보고 그대로 등록(2행부터), 아니면 기존 사내 표준 포맷(4행 헤더)으로 시도.
   둘 다 아니면 두 형식을 모두 안내하는 에러를 띄움.
+- vLLM LLM `ValueError`(KV 캐시 부족) 원인 확정 및 해결책 문서화: 위 0번 참고
+  (`--max-model-len 32768` 추가).
+- 설정 탭 "재시작 필요" 값을 저장한 직후 바로 눌러서 반영할 수 있는 "재시작" 버튼 추가
+  (`manual/command/voc/system_mcp_url`, `agent_system_instruction`). System MCP 탭
+  화이트리스트에도 활성/비활성 토글·설명 저장·커스텀 커맨드 추가/수정/삭제 중 하나라도 하면
+  "⚠ System MCP 재시작" 버튼이 나타나 바로 누를 수 있다. 내부적으로 admin-console 컨테이너에
+  마운트한 도커 소켓으로 대상 컨테이너를 `docker restart` 한다 — 위 4번의 보안 트레이드오프
+  설명 참고.
 
 ## 커맨드 카탈로그 — 고정 양식 없음
 

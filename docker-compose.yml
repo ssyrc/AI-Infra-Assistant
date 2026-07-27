@@ -167,6 +167,9 @@ services:
     volumes:
       # "서버 파일에서 선택" 업로드용. 호스트 경로는 .env의 UPLOAD_SOURCE_HOST_DIR로 바꿀 수 있다.
       - ${UPLOAD_SOURCE_HOST_DIR:-/home/gpu1/yr9.choi/05_halo/datasets}:/data/uploads:ro
+      # 설정/화이트리스트 저장 후 "지금 재시작" 버튼용. admin-console에 사실상 호스트 권한을
+      # 주는 마운트이니(임의 컨테이너 실행 가능), 신뢰된 관리자망에서만 쓴다는 전제.
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "127.0.0.1:${ADMIN_PORT:-8501}:8080"   # reverse proxy를 통해서만 공개
     depends_on:
