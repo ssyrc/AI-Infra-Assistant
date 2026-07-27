@@ -15,11 +15,16 @@ admin_console 화면 검은화면(`vendor/react.production.min.js` 로드 실패
 ```bash
 # curl이 "error setting certificate file: ..." 로 죽으면 죽은 인증서 경로가 env에 남아있는 것
 unset CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR
+# 사내 프록시를 안 거치면 unpkg.com이 차단 페이지를 돌려줄 수 있다(빌드에 쓰는 프록시 재사용)
+export https_proxy=http://202.20.187.241:3128 http_proxy=http://202.20.187.241:3128
 
 cd admin_console/frontend/vendor
 curl -o react.production.min.js https://unpkg.com/react@18/umd/react.production.min.js
 curl -o react-dom.production.min.js https://unpkg.com/react-dom@18/umd/react-dom.production.min.js
 curl -o babel.min.js https://unpkg.com/@babel/standalone/babel.min.js
+
+# 받은 파일이 진짜 JS인지 확인 (사람이 읽을 수 있는 문장이 보이면 차단 페이지가 저장된 것)
+head -c 300 react.production.min.js react-dom.production.min.js babel.min.js
 ```
 받은 3개 파일 + 최신 코드를 서버로 반영:
 ```bash
@@ -43,6 +48,14 @@ bash scripts/restart-mounted.sh
 ```
 (Open WebUI가 띄우는 `WebUI could not connect to Ollama` 500 에러는 무시해도 됨 — 이 프로젝트는
 Ollama를 안 쓰고 agent-server의 OpenAI 호환 API만 쓴다.)
+
+open-webui 채팅에서 `/api/chat/completions`가 `400 Bad Request`면 — 브라우저 콘솔엔 에러 본문이
+안 보이니 agent-server를 직접 찔러서 실제 원인을 확인:
+```bash
+curl -s http://localhost:8500/v1/chat/completions -H 'Content-Type: application/json' \
+  -d '{"model":"mock-llm","messages":[{"role":"user","content":"안녕"}]}'
+docker compose -f docker-compose.dev.yml logs --tail=50 agent-server
+```
 
 ## 1. 인터넷 되는 곳에서 모델 다운로드
 
