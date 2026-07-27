@@ -2,34 +2,8 @@
 llm 띄우고 나니까 embed랑 reranker 가 안 떠. CUDA busy 에러 떠. 모델 사이즈가 너무 큰가?
 embed, reranker 띄우니까 똑같아. CUDA busy 에러야.
 
-# embed 로그
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700] EngineCore failed to start.
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700] Traceback (most recent call last):
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py", line 691, in run_engine_core
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]     engine_core = EngineCoreProc(*args, **kwargs)
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py", line 492, in __init__
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]     super().__init__(vllm_config, executor_class, log_stats,
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py", line 80, in __init__
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]     self.model_executor = executor_class(vllm_config)
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]   File "/usr/local/lib/python3.12/dist-packages/vllm/executor/executor_base.py", line 54, in __init__
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]     self._init_executor()
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]   File "/usr/local/lib/python3.12/dist-packages/vllm/executor/uniproc_executor.py", line 48, in _init_executor
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]     self.collective_rpc("init_device")
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]   File "/usr/local/lib/python3.12/dist-packages/vllm/executor/uniproc_executor.py", line 58, in collective_rpc
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]     answer = run_method(self.driver_worker, method, args, kwargs)
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]   File "/usr/local/lib/python3.12/dist-packages/vllm/utils/__init__.py", line 3007, in run_method
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]     return func(*args, **kwargs)
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]            ^^^^^^^^^^^^^^^^^^^^^
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]   File "/usr/local/lib/python3.12/dist-packages/vllm/worker/worker_base.py", line 603, in init_device
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]     self.worker.init_device()  # type: ignore
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]     ^^^^^^^^^^^^^^^^^^^^^^^^^
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/worker/gpu_worker.py", line 179, in init_device
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700]     raise ValueError(
-(EngineCore_0 pid=180) ERROR 07-27 05:45:50 [core.py:700] ValueError: Free memory on device (7.38/79.21 GiB) on startup is less than desired GPU memory utilization (0.15, 11.88 GiB). Decrease GPU memory utilization or reduce GPU memory used by other processes.
-
+# embed gpu util 0.08 로 했는데도 에러
+(EngineCore_0 pid=180) torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 48.00 MiB. GPU 0 has a total capacity of 79.21 GiB of which 33.44 MiB is free. Including non-PyTorch memory, this process has 0 bytes memory in use. Of the allocated memory 7.35 GiB is allocated by PyTorch, and 1.41 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
 
 
 # 관리자 콘솔 변경 필요 사항들
