@@ -1,18 +1,24 @@
-# vllm serve 에러 해결 - 경로가 이상했음
-docker run -dit --rm --gpus all --network host --ipc host \
+# vllm serve 띄우는 중, 아직 제대로 띄워졌는지는 확인 못함
+docker run -dit --gpus all --network host --ipc host \
     -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
     --name serve-vllm-llm repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
     --model /workspace/models/Qwen3-235B-A22B-Instruct-2507-FP8 \
     --tensor-parallel-size 4 --gpu-memory-utilization 0.85 \
     --port 8000 --served-model-name qwen3-235b-a22b
 
-docker run -dit --rm --gpus '"device=0"' --network host --ipc host \
+docker run -dit --gpus '"device=0"' --network host --ipc host \
     -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
     --name serve-vllm-embed repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
     --model /workspace/models/Qwen3-Embedding-8B \
     --task embed --gpu-memory-utilization 0.15 \
     --port 8010 --served-model-name qwen3-embedding-8b
 
+docker run -dit --gpus '"device=1"' --network host --ipc host \
+    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
+    --name serve-vllm-rerank repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
+    --model /workspace/models/bge-reranker-v2-m3 \
+    --task score --gpu-memory-utilization 0.1 \
+    --port 8020 --served-model-name bge-reranker-v2-m3
 
 
 # 관리자 콘솔 아직도 이상함
@@ -27,3 +33,82 @@ docker run -dit --rm --gpus '"device=0"' --network host --ipc host \
   - 필요 역할은 admin, admin + user 둘 중 하나만 선택하게 해줘. admin 이면 admin id인 사용자만 실행 가능해야해. 
 3. 계정 관리 탭
   - 새로 만들어주고, admin id 를 관리하게 해줘. 
+4. VoC 이력 탭 
+  - VoC 엑셀 구조 : 4행 부터 테이블 행 이름 나옴
+    의뢰번호	의뢰명	클러스터	의뢰유형	의뢰자	의뢰일	의뢰내용	접수담당자	접수일	관리자	조치일	처리내용	담당자	만족도	사업부 
+  - 여기서 의뢰내용, 조치일, 처리 내용, 만족도만 사용할 것
+  - 전체 데이터 중 조치일과 처리 내용이 있는 행만 사용할 것.
+  - VoC mcp 는 가급적 '만족도'가 '보통' 이상이거나 값이 없는 데이터를 사용할 것. 전체 만족도: 매우만족, 만족, 보통, 불만족, 매우불만족, Null
+  - '의뢰내용'과 '처리내용'은 html 코드가 그대로 있으므로, 내용만 정제해야 함. 내용에는 linux command, python 코드 등이 그대로 있으므로 삭제하거나 변경하지 말것.
+    (ex) <p>안녕하세요, 공정혁신팀 김현철입니다.</p> 
+<p>시뮬레이션용 서버의 스펙으로 사용가능한 자원을 알아보고있습니다.</p> 
+<p>아래는 최소 사양 기준입니다. (GPU는 사용하지않는다네요)</p> 
+<table border="1" cellpadding="1" cellspacing="1" style="width: 500px;"> 
+ <tbody> 
+  <tr> 
+   <td> <p>CPU cores 350개, 2.7 GHz</p> <p>메모리 1.2TB</p> <p>SSD 512GB</p> <p>InfiniBand 100Gbps</p> </td> 
+  </tr> 
+ </tbody> 
+</table> 
+<p>&nbsp;</p> 
+<p>슈퍼컴 인프라 소개자료를 확인했을 때, CPU 서버 목록의 스펙은 아래처럼 확인됩니다.</p> 
+<p>알아본 스펙에서 코어 수가 중요하다하는데, 여러 서버들을 묶어서 최소 스펙을 맞추는 것이 가능할까요?</p> 
+<table data-end="1155" data-start="701" style="border-collapse:collapse; width:467px" width="466"> 
+ <colgroup> 
+  <col style="width:128pt" width="170"> 
+  <col style="width:90pt" width="120"> 
+  <col style="width:73pt" width="97"> 
+  <col style="width:59pt" width="79"> 
+ </colgroup> 
+ <tbody> 
+  <tr> 
+   <td class="xl65" style="border-bottom:none; height:22px; width:170px; text-align:center; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="font-weight:700"><span style="color:black"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">CPU 모델</span></span></span></span></span></span></td> 
+   <td class="xl65" style="border-bottom:none; width:120px; text-align:center; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="font-weight:700"><span style="color:black"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">물리 코어/CPU</span></span></span></span></span></span></td> 
+   <td class="xl65" style="border-bottom:none; width:97px; text-align:center; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="font-weight:700"><span style="color:black"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">스레드/CPU</span></span></span></span></span></span></td> 
+   <td class="xl65" style="border-bottom:none; width:79px; text-align:center; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="font-weight:700"><span style="color:black"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">기본 클럭</span></span></span></span></span></span></td> 
+  </tr> 
+  <tr> 
+   <td class="xl66" data-col-size="sm" data-end="800" data-start="784" style="border-bottom:none; height:22px; width:170px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">AMD EPYC 74F3</span></span></span></span></span></span></td> 
+   <td align="right" class="xl66" data-col-size="sm" data-end="809" data-start="804" style="border-bottom:none; width:120px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">24</span></span></span></span></span></span></td> 
+   <td align="right" class="xl66" data-col-size="sm" data-end="814" data-start="809" style="border-bottom:none; width:97px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">48</span></span></span></span></span></span></td> 
+   <td class="xl66" data-col-size="sm" data-end="823" data-start="814" style="border-bottom:none; width:79px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">3.2GHz</span></span></span></span></span></span></td> 
+  </tr> 
+  <tr> 
+   <td class="xl66" data-col-size="sm" data-end="856" data-start="833" style="border-bottom:none; height:22px; width:170px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">Intel Xeon Gold 6142</span></span></span></span></span></span></td> 
+   <td align="right" class="xl66" data-col-size="sm" data-end="865" data-start="860" style="border-bottom:none; width:120px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">16</span></span></span></span></span></span></td> 
+   <td align="right" class="xl66" data-col-size="sm" data-end="870" data-start="865" style="border-bottom:none; width:97px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">32</span></span></span></span></span></span></td> 
+   <td class="xl66" data-col-size="sm" data-end="879" data-start="870" style="border-bottom:none; width:79px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">2.6GHz</span></span></span></span></span></span></td> 
+  </tr> 
+  <tr> 
+   <td class="xl66" data-col-size="sm" data-end="912" data-start="889" style="border-bottom:none; height:22px; width:170px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">Intel Xeon Gold 6150</span></span></span></span></span></span></td> 
+   <td align="right" class="xl66" data-col-size="sm" data-end="921" data-start="916" style="border-bottom:none; width:120px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">18</span></span></span></span></span></span></td> 
+   <td align="right" class="xl66" data-col-size="sm" data-end="926" data-start="921" style="border-bottom:none; width:97px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">36</span></span></span></span></span></span></td> 
+   <td class="xl66" data-col-size="sm" data-end="935" data-start="926" style="border-bottom:none; width:79px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">2.7GHz</span></span></span></span></span></span></td> 
+  </tr> 
+  <tr> 
+   <td class="xl66" data-col-size="sm" data-end="969" data-start="945" style="border-bottom:none; height:22px; width:170px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">Intel Xeon E5-2680 v4</span></span></span></span></span></span></td> 
+   <td align="right" class="xl66" data-col-size="sm" data-end="978" data-start="973" style="border-bottom:none; width:120px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">14</span></span></span></span></span></span></td> 
+   <td align="right" class="xl66" data-col-size="sm" data-end="983" data-start="978" style="border-bottom:none; width:97px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">28</span></span></span></span></span></span></td> 
+   <td class="xl66" data-col-size="sm" data-end="992" data-start="983" style="border-bottom:none; width:79px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">2.4GHz</span></span></span></span></span></span></td> 
+  </tr> 
+  <tr> 
+   <td class="xl66" data-col-size="sm" data-end="1018" data-start="1002" style="border-bottom:none; height:22px; width:170px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">AMD EPYC 7543</span></span></span></span></span></span></td> 
+   <td align="right" class="xl66" data-col-size="sm" data-end="1027" data-start="1022" style="border-bottom:none; width:120px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">32</span></span></span></span></span></span></td> 
+   <td align="right" class="xl66" data-col-size="sm" data-end="1032" data-start="1027" style="border-bottom:none; width:97px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">64</span></span></span></span></span></span></td> 
+   <td class="xl66" data-col-size="sm" data-end="1041" data-start="1032" style="border-bottom:none; width:79px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">2.8GHz</span></span></span></span></span></span></td> 
+  </tr> 
+  <tr> 
+   <td class="xl66" data-col-size="sm" data-end="1067" data-start="1051" style="border-bottom:none; height:22px; width:170px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">AMD EPYC 9554</span></span></span></span></span></span></td> 
+   <td align="right" class="xl66" data-col-size="sm" data-end="1076" data-start="1071" style="border-bottom:none; width:120px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">64</span></span></span></span></span></span></td> 
+   <td align="right" class="xl66" data-col-size="sm" data-end="1082" data-start="1076" style="border-bottom:none; width:97px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">128</span></span></span></span></span></span></td> 
+   <td class="xl66" data-col-size="sm" data-end="1091" data-start="1082" style="border-bottom:none; width:79px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">3.1GHz</span></span></span></span></span></span></td> 
+  </tr> 
+  <tr> 
+   <td class="xl66" data-col-size="sm" data-end="1124" data-start="1101" style="border-bottom:none; height:22px; width:170px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">Intel Xeon Gold 6144</span></span></span></span></span></span></td> 
+   <td align="right" class="xl66" data-col-size="sm" data-end="1132" data-start="1128" style="border-bottom:none; width:120px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">8</span></span></span></span></span></span></td> 
+   <td align="right" class="xl66" data-col-size="sm" data-end="1137" data-start="1132" style="border-bottom:none; width:97px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">16</span></span></span></span></span></span></td> 
+   <td class="xl66" data-col-size="sm" data-end="1146" data-start="1137" style="border-bottom:none; width:79px; white-space:normal; padding-top:1px; padding-right:1px; padding-left:1px; vertical-align:middle; border-top:none; border-right:none; border-left:none"><span style="font-size:15px"><span style="color:black"><span style="font-weight:400"><span style="font-style:normal"><span style="text-decoration:none"><span style="font-family:&quot;맑은 고딕&quot;,monospace">3.5GHz</span></span></span></span></span></span></td> 
+  </tr> 
+ </tbody> 
+</table> 
+<p>&nbsp;</p>
