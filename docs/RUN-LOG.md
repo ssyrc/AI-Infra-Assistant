@@ -137,8 +137,30 @@ MCP 로그에 남아있는 421은 컨테이너를 재생성이 아니라 재시�
 ## 9. 관리자 콘솔 설정 탭에서 vLLM 주소 입력 (완료, 실제 vLLM은 아직 미기동)
 
 `http://202.20.183.30:8501` 설정 탭에서 agent 서버(202.20.183.30), LLM 서버(75.23.32.41) 주소 입력.
-챗 응답이 아직 `[mock-llm] ...` 포맷인 걸 보면 hgpu4041에 실제 vLLM은 아직 안 띄운 상태 —
-`docs/NEXT-STEPS.md` 1~6단계(모델 다운로드/전송/`docker run`) 진행 필요.
+챗 응답이 아직 `[mock-llm] ...` 포맷인 걸 보면 hgpu4041에 실제 vLLM은 아직 안 띄운 상태.
+
+## 10. hgpu4041 — 모델 다운로드/전송/이미지 pull (완료)
+
+```bash
+pip install -U huggingface_hub
+huggingface-cli download Qwen/Qwen3-235B-A22B-Instruct-2507-FP8 --local-dir ./models/Qwen3-235B-A22B-Instruct-2507-FP8
+huggingface-cli download Qwen/Qwen3-Embedding-8B --local-dir ./models/Qwen3-Embedding-8B
+rsync -avz --progress ./models/Qwen3-235B-A22B-Instruct-2507-FP8 yr9.choi@75.23.32.41:/home/gpu1/yr9.choi/halo_workspace/models/
+rsync -avz --progress ./models/Qwen3-Embedding-8B yr9.choi@75.23.32.41:/home/gpu1/yr9.choi/halo_workspace/models/
+docker pull repo.samsungds.net/docker.io/vllm/vllm-openai:latest
+```
+hgpu4041에서 `ls`로 두 모델 디렉토리 안 파일(config.json, safetensors 등) 확인됨.
+
+## 11. vLLM 기동 에러 — 컨테이너 안에서 마운트가 안 보임 (진행 중)
+
+```
+huggingface_hub.errors.HFValidationError: Repo id must be in the form 'repo_name' or 'namespace/repo_name'
+OSError: Can't load the configuration of '/workspace/models/Qwen3-235B-A22B-Instruct-2507-FP8'
+```
+호스트에서는 파일이 다 보이는데 컨테이너 안에서는 `os.path.isdir()`가 False로 나온 것(transformers가
+로컬 디렉토리 판별에 실패하면 HF Hub repo id로 오해해서 이 에러가 남). RHEL/CentOS 계열에서
+SELinux가 바인드 마운트를 막는 흔한 케이스로 추정 — `-v ...:/workspace/models:Z`로 재시도 중.
+자세한 진단/재시도 커맨드는 `docs/NEXT-STEPS.md` 참고.
 
 ---
 
