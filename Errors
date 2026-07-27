@@ -1,42 +1,21 @@
 # llm, embed, reranker
 llm 띄우고 나니까 embed랑 reranker 가 안 떠. CUDA busy 에러 떠. 모델 사이즈가 너무 큰가?
-[root@hgpu4041 ~]# nvidia-smi
-Mon Jul 27 21:31:50 2026
-+-----------------------------------------------------------------------------------------+
-| NVIDIA-SMI 560.35.05              Driver Version: 560.35.05      CUDA Version: 12.6     |
-|-----------------------------------------+------------------------+----------------------+
-| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
-| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
-|                                         |                        |               MIG M. |
-|=========================================+========================+======================|
-|   0  NVIDIA H100 80GB HBM3          On  |   00000000:55:00.0 Off |                    0 |
-| N/A   39C    P0            120W /  700W |   72935MiB /  81559MiB |      0%   E. Process |
-|                                         |                        |             Disabled |
-+-----------------------------------------+------------------------+----------------------+
-|   1  NVIDIA H100 80GB HBM3          On  |   00000000:68:00.0 Off |                    0 |
-| N/A   36C    P0            116W /  700W |   72955MiB /  81559MiB |      0%   E. Process |
-|                                         |                        |             Disabled |
-+-----------------------------------------+------------------------+----------------------+
-|   2  NVIDIA H100 80GB HBM3          On  |   00000000:D2:00.0 Off |                    0 |
-| N/A   37C    P0            118W /  700W |   72935MiB /  81559MiB |      0%   E. Process |
-|                                         |                        |             Disabled |
-+-----------------------------------------+------------------------+----------------------+
-|   3  NVIDIA H100 80GB HBM3          On  |   00000000:E4:00.0 Off |                    0 |
-| N/A   38C    P0            119W /  700W |   72955MiB /  81559MiB |      0%   E. Process |
-|                                         |                        |             Disabled |
-+-----------------------------------------+------------------------+----------------------+
+llm 떠있는 상태에서 이렇게 하고
+[root@hgpu4041 ~]# sudo nvidia-smi -c 0
+Set compute mode to DEFAULT for GPU 00000000:55:00.0.
+Set compute mode to DEFAULT for GPU 00000000:68:00.0.
+Set compute mode to DEFAULT for GPU 00000000:D2:00.0.
+Set compute mode to DEFAULT for GPU 00000000:E4:00.0.
+All done.
+[root@hgpu4041 ~]#
+[root@hgpu4041 ~]#
+[root@hgpu4041 ~]# nvidia-smi --query-gpu=index,compute_mode --format=csv
+index, compute_mode
+0, Default
+1, Default
+2, Default
 
-+-----------------------------------------------------------------------------------------+
-| Processes:                                                                              |
-|  GPU   GI   CI        PID   Type   Process name                              GPU Memory |
-|        ID   ID                                                               Usage      |
-|=========================================================================================|
-|    0   N/A  N/A   2234686      C   ...ndle=44) --multiprocessing-fork_TP0      72924MiB |
-|    1   N/A  N/A   2234687      C   ...ndle=48) --multiprocessing-fork_TP1      72944MiB |
-|    2   N/A  N/A   2234688      C   ...ndle=52) --multiprocessing-fork_TP2      72924MiB |
-|    3   N/A  N/A   2234689      C   ...ndle=56) --multiprocessing-fork_TP3      72944MiB |
-+-----------------------------------------------------------------------------------------+
-
+embed, reranker 띄우니까 똑같아. CUDA busy 에러야.
 
 
 # 관리자 콘솔 변경 필요 사항들
