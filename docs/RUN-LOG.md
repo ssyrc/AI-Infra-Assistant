@@ -151,16 +151,33 @@ docker pull repo.samsungds.net/docker.io/vllm/vllm-openai:latest
 ```
 hgpu4041에서 `ls`로 두 모델 디렉토리 안 파일(config.json, safetensors 등) 확인됨.
 
-## 11. vLLM 기동 에러 — 컨테이너 안에서 마운트가 안 보임 (진행 중)
+## 11. vLLM 기동 에러 — 진짜 원인은 경로 오타 (해결)
 
 ```
 huggingface_hub.errors.HFValidationError: Repo id must be in the form 'repo_name' or 'namespace/repo_name'
 OSError: Can't load the configuration of '/workspace/models/Qwen3-235B-A22B-Instruct-2507-FP8'
 ```
-호스트에서는 파일이 다 보이는데 컨테이너 안에서는 `os.path.isdir()`가 False로 나온 것(transformers가
-로컬 디렉토리 판별에 실패하면 HF Hub repo id로 오해해서 이 에러가 남). RHEL/CentOS 계열에서
-SELinux가 바인드 마운트를 막는 흔한 케이스로 추정 — `-v ...:/workspace/models:Z`로 재시도 중.
-자세한 진단/재시도 커맨드는 `docs/NEXT-STEPS.md` 참고.
+SELinux일 거라 추정했었는데, 실제 원인은 모델을 옮긴 실제 경로가
+`/home/gpu1/yr9.choi/halo_workspace/models`가 아니라 `/home/gpu1/yr9.choi/05_halo/models`였던 것
+(rsync 타깃 경로가 실제 위치와 달랐음). `-v` 경로를 고치니 해결.
+
+## 12. vLLM LLM/임베딩 기동 (완료)
+
+```bash
+docker run -dit --rm --gpus all --network host --ipc host \
+    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
+    --name serve-vllm-llm repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
+    --model /workspace/models/Qwen3-235B-A22B-Instruct-2507-FP8 \
+    --tensor-parallel-size 4 --gpu-memory-utilization 0.85 \
+    --port 8000 --served-model-name qwen3-235b-a22b
+
+docker run -dit --rm --gpus '"device=0"' --network host --ipc host \
+    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
+    --name serve-vllm-embed repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
+    --model /workspace/models/Qwen3-Embedding-8B \
+    --task embed --gpu-memory-utilization 0.15 \
+    --port 8010 --served-model-name qwen3-embedding-8b
+```
 
 ---
 

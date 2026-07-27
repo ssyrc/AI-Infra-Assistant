@@ -2,56 +2,29 @@
 
 ## ⚡ 지금 당장 (순서대로)
 
-### 1) hgpu4041 — vLLM 마운트 확인 (현재 에러 원인)
-`--model /workspace/models/...`을 huggingface_hub가 로컬 경로가 아니라 Hub repo id로 오해해서
-`HFValidationError`/`Can't load the configuration`가 났다. transformers는 그 경로에
-`os.path.isdir()`가 **False**일 때만 이렇게 된다 — 즉 컨테이너 안에서 마운트가 안 보이는 것이다.
-호스트에서는 `ls`로 파일이 다 보였으니(→ 호스트 경로는 맞음), 컨테이너 쪽 마운트 문제다.
-
-먼저 컨테이너 안에서 실제로 보이는지 확인:
-```bash
-docker run --rm --gpus all --network host --ipc host \
-  -v /home/gpu1/yr9.choi/halo_workspace/models:/workspace/models \
-  --entrypoint ls repo.samsungds.net/docker.io/vllm/vllm-openai:latest -la /workspace/models
-```
-비어 있거나 에러면 SELinux가 바인드 마운트를 막고 있을 가능성이 높다(RHEL/CentOS 계열에서 아주
-흔함). `-v` 뒤에 `:Z`를 붙여서 재시도(아래 LLM/임베딩 기동 커맨드에 이미 반영):
-```bash
-docker run --rm --gpus all --network host --ipc host \
-  -v /home/gpu1/yr9.choi/halo_workspace/models:/workspace/models:Z \
-  --entrypoint ls repo.samsungds.net/docker.io/vllm/vllm-openai:latest -la /workspace/models
-```
-이래도 안 보이면 `getenforce`로 SELinux 상태 확인하고, dockerd가 그 경로(NFS 홈일 수도 있음)에
-실제로 접근 가능한지 확인 필요 — 결과 알려주면 다음 단계 짚어줄게.
-
-### 2) hgpu4041 — LLM 기동 (`:Z` 추가됨)
-```bash
-docker run -dit --rm --gpus all --network host --ipc host \
-    -v /home/gpu1/yr9.choi/halo_workspace/models:/workspace/models:Z \
-    --name serve-vllm-llm repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
-    --model /workspace/models/Qwen3-235B-A22B-Instruct-2507-FP8 \
-    --tensor-parallel-size 4 --gpu-memory-utilization 0.85 \
-    --port 8000 --served-model-name qwen3-235b-a22b
-```
-
-### 3) hgpu4041 — 임베딩 기동 (`:Z` 추가됨)
+### 1) hgpu4041 — 리랭커도 기동 (모델 다운로드 중이라고 하셨음)
+LLM/임베딩은 이미 떴다(경로가 `halo_workspace/models`가 아니라 `05_halo/models`였던 게 원인).
+리랭커는 `BAAI/bge-reranker-v2-m3`를 vLLM `--task score`로 띄우면 된다(vLLM의 Cohere 호환
+`/rerank` 라우트 노출). GPU 1장에 여유 있는 만큼만 필요:
 ```bash
 docker run -dit --rm --gpus '"device=0"' --network host --ipc host \
-    -v /home/gpu1/yr9.choi/halo_workspace/models:/workspace/models:Z \
-    --name serve-vllm-embed repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
-    --model /workspace/models/Qwen3-Embedding-8B \
-    --task embed --gpu-memory-utilization 0.15 \
-    --port 8010 --served-model-name qwen3-embedding-8b
+    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
+    --name serve-vllm-rerank repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
+    --model /workspace/models/bge-reranker-v2-m3 \
+    --task score --gpu-memory-utilization 0.1 \
+    --port 8020 --served-model-name bge-reranker-v2-m3
 ```
-OOM 나면 `--gpu-memory-utilization` 값을 LLM/임베딩 양쪽에서 조절.
+> vLLM 버전(0.10.1.1)에 따라 `--task score` 플래그명이 다를 수 있다. 기동 로그에
+> `/rerank` 또는 `/v1/score` 라우트가 뜨는지로 확인.
 
-### 4) 도달 확인
+### 2) 도달 확인
 ```bash
 curl http://75.23.32.41:8000/v1/models
 curl http://75.23.32.41:8010/v1/models
+curl http://75.23.32.41:8020/v1/models
 ```
 
-### 5) 에이전트 서버(202.20.183.30) — 최신 코드 반영 (System MCP 커맨드 추가 기능 포함)
+### 3) 에이전트 서버(202.20.183.30) — 최신 코드 반영
 WSL에서:
 ```bash
 git -C /home/yrc/AI-Infra-Assistant fetch origin main
@@ -69,13 +42,7 @@ docker compose -f docker-compose.dev.yml ps
 curl http://localhost:8500/health
 ```
 
-### 6) admin_console 설정 탭 — vLLM 주소만 실제 GPU 서버로
-
-> **설정 탭 값 정리**: `vllm_llm_base_url`/`vllm_embed_base_url`만 `75.23.32.41`(GPU 서버)로
-> 바꾸면 된다. `manual_mcp_url`/`command_mcp_url`/`voc_mcp_url`/`system_mcp_url`은 **바꾸지 마세요**
-> — 이건 agent-server가 도커 내부망으로 MCP 컨테이너에 붙는 주소(`http://command-mcp:8002/mcp`
-> 같은 형태)라서 외부 IP(202.20.183.30/75.23.32.41)로 바꾸면 오히려 연결이 끊깁니다. 전부 같은
-> `docker-compose.dev.yml` 스택 안에 있어서 내부 이름으로만 통신합니다.
+### 4) admin_console 설정 탭
 
 `http://202.20.183.30:8501` → 설정 탭 (저장 즉시 반영, 재시작 불필요):
 
@@ -85,22 +52,38 @@ curl http://localhost:8500/health
 | `vllm_llm_model` | `qwen3-235b-a22b` |
 | `vllm_embed_base_url` | `http://75.23.32.41:8010/v1` |
 | `vllm_embed_model` | `qwen3-embedding-8b` |
+| `rerank_provider` | `vllm` |
+| `rerank_base_url` | `http://75.23.32.41:8020` |
+| `rerank_model` | `bge-reranker-v2-m3` |
 
-⚠️ `docker compose -f docker-compose.dev.yml down` 후 다시 `up` 하면 `dev-config`가 이 값을
+`manual_mcp_url`/`command_mcp_url`/`voc_mcp_url`/`system_mcp_url`은 **바꾸지 않습니다** — 이미
+`docker-compose.dev.yml`에서 agent-server와 같은 컨테이너 네트워크에 있는 MCP들 이름
+(`http://command-mcp:8002/mcp`)이고, 실제로 챗이 정상 응답한 것 자체가 이 연결이 이미 되고 있다는
+증거다. 콘솔 설정 탭에 왜 이게 맞는 값인지 설명을 추가해뒀다(재확인 원하면 아래 검증 커맨드).
+
+검증(agent-server 컨테이너 안에서 MCP가 실제로 붙는지 직접 확인):
+```bash
+docker compose -f docker-compose.dev.yml exec agent-server \
+  curl -s -o /dev/null -w '%{http_code}\n' http://command-mcp:8002/mcp
+```
+(MCP 프로토콜상 GET에는 4xx가 정상 — 여기서 보고 싶은 건 "연결 자체가 되는지"이지 200 여부가 아님)
+
+⚠️ `docker compose -f docker-compose.dev.yml down` 후 다시 `up` 하면 `dev-config`가 vLLM 값을
 mock으로 재덮어씀. 컨테이너를 살려둔 채로만 설정 변경.
 
-### 7) 확인 & 기능 테스트
+### 5) 확인 & 기능 테스트
 ```bash
 curl http://202.20.183.30:8500/v1/models   # qwen3-235b-a22b 나오는지
 ```
 - open-webui (`:8502`) 채팅 → 실제 응답 확인 (mock 에코가 아닌지)
-- admin_console 메모리/RAG 기능 → 임베딩 연결 확인
+- admin_console 메모리/RAG 기능 → 임베딩/리랭커 연결 확인
 
 ---
 
-## 다음에 손볼 것 (System MCP 콘솔 UI, 아직 미착수)
+## 다음에 손볼 것 (진행 중)
 
-- 화이트리스트 탭에서 `gpu_status`처럼 이름만 보이는데 **실제 실행되는 커맨드도 같이 보이게**.
-- "커맨드 추가"를 별도 탭으로 두지 말고, 화이트리스트 탭의 "추가" 버튼 → 모달(팝업)에서 등록하도록 재구성.
+- System MCP 탭: "커맨드 추가" 서브탭을 없애고 화이트리스트 탭의 "추가" 버튼 → 모달로 통합,
+  실제 커맨드 노출, 필요 역할을 "전체 허용/admin 전용" 선택으로 변경.
+- 계정 관리 탭 신설(admin 계정 여러 개 관리).
 
 완료/과거 내역은 `docs/RUN-LOG.md` 참고.
