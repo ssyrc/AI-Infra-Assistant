@@ -1,4 +1,4 @@
-# vllm serve 띄우는 중, 아직 제대로 띄워졌는지는 확인 못함
+# vllm serve 띄워보고 있는데 둘다 RuntimeError: CUDA error: CUDA-capable device(s) is/are busy or unavailable 뜸
 docker run -dit --gpus all --network host --ipc host \
     -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
     --name serve-vllm-llm repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
@@ -13,6 +13,7 @@ docker run -dit --gpus '"device=0"' --network host --ipc host \
     --task embed --gpu-memory-utilization 0.15 \
     --port 8010 --served-model-name qwen3-embedding-8b
 
+# 이건 제대로 띄워짐
 docker run -dit --gpus '"device=1"' --network host --ipc host \
     -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
     --name serve-vllm-rerank repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
