@@ -24,7 +24,7 @@ curl http://75.23.32.41:8010/v1/models
 curl http://75.23.32.41:8020/v1/models
 ```
 
-### 3) 에이전트 서버(202.20.183.30) — 최신 코드 반영
+### 3) 에이전트 서버(202.20.183.30) — 최신 코드 반영 (⚠️ 이번엔 재빌드 필요)
 WSL에서:
 ```bash
 git -C /home/yrc/AI-Infra-Assistant fetch origin main
@@ -35,8 +35,10 @@ git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
 rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
   yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
 ```
-반영 후 재기동:
+계정 관리 기능에 `bcrypt`가 새 의존성으로 추가돼서 admin-console은 **재시작만으론 안 되고
+이미지를 다시 빌드**해야 함(mounted 코드 재시작으론 pip 패키지가 안 깔림):
 ```bash
+docker compose -f docker-compose.dev.yml build admin-console
 docker compose -f docker-compose.dev.yml up -d
 docker compose -f docker-compose.dev.yml ps
 curl http://localhost:8500/health
@@ -80,10 +82,10 @@ curl http://202.20.183.30:8500/v1/models   # qwen3-235b-a22b 나오는지
 
 ---
 
-## 다음에 손볼 것 (진행 중)
+## 완료 (이번 배포에 포함됨, 반영만 하면 됨)
 
-- System MCP 탭: "커맨드 추가" 서브탭을 없애고 화이트리스트 탭의 "추가" 버튼 → 모달로 통합,
-  실제 커맨드 노출, 필요 역할을 "전체 허용/admin 전용" 선택으로 변경.
-- 계정 관리 탭 신설(admin 계정 여러 개 관리).
+- System MCP 탭: "커맨드 추가" 서브탭 없애고 화이트리스트 탭 "추가" 버튼 → 모달로 통합,
+  실제 커맨드 노출, 필요 역할 "전체 허용/admin 전용" 선택으로 변경.
+- 계정 관리 탭 신설(admin 계정 여러 개 관리, `.env` 기본 계정은 잠금 방지용으로 항상 유효).
 
 완료/과거 내역은 `docs/RUN-LOG.md` 참고.
