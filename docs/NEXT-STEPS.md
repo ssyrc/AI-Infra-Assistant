@@ -2,6 +2,33 @@
 
 LLM: `Qwen3-235B-A22B-Instruct-2507` (FP8) · 임베딩: `Qwen3-Embedding-8B`
 
+## 0. 코드 반영 + 포트 재기동 + admin_console 화면 깨짐 고치기 (먼저)
+
+```bash
+git pull origin main
+```
+`.env`에 옛 포트 값(`ADMIN_PORT=8080`, `OPENWEBUI_PORT=3000`, `PG_PORT=5432`, `MANUAL_MCP_PORT=8501` 등)이
+박혀 있으면 지우거나 새 기본값(8501~8507)으로 바꾈 것. 없으면 그대로 둬도 새 기본값 적용됨.
+
+admin_console 화면 검은화면(`vendor/react.production.min.js` 로드 실패) 원인은 vendor 파일 누락.
+인터넷 되는 곳에서 받아서 서버로 옮기기:
+```bash
+cd admin_console/frontend/vendor
+curl -o react.production.min.js https://unpkg.com/react@18/umd/react.production.min.js
+curl -o react-dom.production.min.js https://unpkg.com/react-dom@18/umd/react-dom.production.min.js
+curl -o babel.min.js https://unpkg.com/@babel/standalone/babel.min.js
+```
+받은 3개 파일을 서버의 `admin_console/frontend/vendor/`에 rsync.
+
+컨테이너 재기동 (포트 매핑 반영):
+```bash
+docker compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.dev.yml ps
+curl http://localhost:8500/health
+```
+- 관리자 콘솔: http://<서버IP>:8501 (화면 정상 뜨는지, admin/admin)
+- 사용자 웹: http://<서버IP>:8502
+
 ## 1. 인터넷 되는 곳에서 모델 다운로드
 
 ```bash
