@@ -313,12 +313,14 @@ function ManualsPanel() {
         <div className="card">
           <div style={{marginBottom: 8}}><strong>엑셀 열 선택</strong> · {excelPreview.filename} · 시트 {excelPreview.sheet} · {excelPreview.total_rows}행</div>
           <div className="subtitle">
-            DB에 저장할 열을 고르세요. 선택한 열들이 <code>열이름: 값</code> 형태로 한 행씩 하나의 검색 청크가 됩니다
-            (예: question / answer, 또는 PPT를 행 단위로 미리 뽑은 section / text / image_files 등).
-            "페이지/순번" 열은 숫자면(예: slide_index) 청크의 p번호로 저장됩니다(선택 안 해도 됨).
+            엑셀 행 하나가 검색 청크(chunk) 하나가 됩니다. 아래 표에서 열마다 3가지를 고르세요(전부 선택 사항, 필요한 것만 체크):<br/>
+            ① <strong>내용</strong>(체크박스, 여러 개 가능) — 청크 본문에 넣을 열. 체크한 열들이 전부 <code>열이름: 값</code> 줄로 이어붙습니다.<br/>
+            ② <strong>제목</strong>(라디오, 최대 1개) — 청크의 소제목으로 쓸 열(예: section, ppt_title).<br/>
+            ③ <strong>페이지/순번</strong>(라디오, 최대 1개) — 숫자인 열(예: slide_index)이면 청크의 p번호로 저장.<br/>
+            뭘 체크해야 할지 모르겠으면 일단 텍스트/설명이 들어있는 열만 "내용"에 체크해도 충분합니다 — 아래 미리보기로 결과를 바로 확인할 수 있습니다.
           </div>
           <table style={{marginBottom: 12}}>
-            <thead><tr><th>내용</th><th>제목</th><th>페이지/순번</th><th>열 이름</th><th>샘플 값</th></tr></thead>
+            <thead><tr><th>① 내용</th><th>② 제목</th><th>③ 페이지/순번</th><th>열 이름</th><th>샘플 값</th></tr></thead>
             <tbody>
               {excelPreview.columns.map((col, i) => (
                 <tr key={col + i}>
@@ -331,8 +333,23 @@ function ManualsPanel() {
               ))}
             </tbody>
           </table>
+          {contentCols.length > 0 && excelPreview.sample_rows[0] && (
+            <div style={{marginBottom: 12, padding: 10, border: "1px dashed var(--muted)", borderRadius: 6}}>
+              <div style={{fontSize: 12.5, color: "var(--muted)", marginBottom: 6}}>
+                미리보기 — 첫 번째 행이 이렇게 저장됩니다:
+              </div>
+              <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 4}}>
+                제목: {titleCol ? (excelPreview.sample_rows[0][excelPreview.columns.indexOf(titleCol)] || "(비어있음)") : "(없음)"}
+                {" · "}
+                페이지: {pageCol ? (excelPreview.sample_rows[0][excelPreview.columns.indexOf(pageCol)] || "(비어있음)") : "(없음)"}
+              </div>
+              <pre style={{whiteSpace: "pre-wrap", fontSize: 12.5, margin: 0}}>
+                {contentCols.map(c => `${c}: ${excelPreview.sample_rows[0][excelPreview.columns.indexOf(c)] || ""}`).join("\n")}
+              </pre>
+            </div>
+          )}
           <div className="row-actions">
-            <button className="primary" disabled={busy} onClick={commitExcel}>선택한 열로 등록</button>
+            <button className="primary" disabled={busy || contentCols.length === 0} onClick={commitExcel}>선택한 열로 등록</button>
             {titleCol && <button onClick={() => setTitleCol("")}>제목 열 해제</button>}
             {pageCol && <button onClick={() => setPageCol("")}>페이지 열 해제</button>}
             <button onClick={resetPreviews}>취소</button>
