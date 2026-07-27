@@ -6,103 +6,234 @@ rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ yr9.choi@202.20.185
 
 
 # 관리자용 콘솔 에러
-# 이것도 wsl 환경에서 하는거야. 폐쇄망 프록시 https_proxy=http://202.20.187.241:3128 를 타는게 아니야. 
-yrc@KORCO204731:~/AI-Infra-Assistant/admin_console/frontend/vendor$ head -c 300 react.production.min.js react-dom.production.min.js babel.min.js
-==> react.production.min.js <==
-Redirecting to /react@18.3.1/umd/react.production.min.js
-==> react-dom.production.min.js <==
-Redirecting to /react-dom@18.3.1/umd/react-dom.production.min.js
-==> babel.min.js <==
-Redirecting to /@babel/standalone@8.0.4/babel.min.js
+# 여전히 검은 화면으로 
+babel.min.js:3 You are using the in-browser Babel transformer. Be sure to precompile your scripts for production - https://babeljs.io/docs/setup/
+(anonymous) @ babel.min.js:3
+mve @ babel.min.js:3
+window.__depsReady @ (index):877
+(anonymous) @ (index):24
+script
+loadScript @ (index):10
+(anonymous) @ (index):23
+script
+loadScript @ (index):10
+(anonymous) @ (index):22
+script
+loadScript @ (index):10
+(anonymous) @ (index):21
+VM36:1 Uncaught SyntaxError: Failed to execute 'appendChild' on 'Node': Cannot use import statement outside a module
+    at $ye (babel.min.js:3:2449708)
+    at r (babel.min.js:3:2449959)
+    at Zye (babel.min.js:3:2450759)
+    at babel.min.js:3:2453473
+    at Object.mve [as transformScriptTags] (babel.min.js:3:2453483)
+    at window.__depsReady ((index):877:36)
+    at HTMLScriptElement.<anonymous> ((index):24:38)
 
 
 # open-webui 에 mock-llm 으로 두고 챗 보내면 에러, mount 다시하면 에러?
-[root@24-gp19 AI-Infra-Assistant]# bash scripts/restart-mounted.sh
-== restart mounted-code services ==
-[+] restart 0/7
- ⠸ Container ai-infra-assistant-agent-server-1  Restarting                                                                                          1.4s
- ⠸ Container ai-infra-assistant-mock-vllm-1     Restarting                                                                                          1.4s
- ⠸ Container ai-infra-assistant-admin-console-1 Restarting                                                                                          1.4s
- ⠸ Container ai-infra-assistant-manual-mcp-1    Restarting                                                                                          1.4s
- ⠸ Container ai-infra-assistant-command-mcp-1   Restarting                                                                                          1.4s
- ⠸ Container ai-infra-assistant-system-mcp-1    Restarting                                                                                          1.4s
- ⠸ Container ai-infra-assistant-voc-mcp-1       Restarting                                                                                          1.4s
-NAME                                 IMAGE                                     COMMAND                  SERVICE         CREATED          STATUS                   PORTS
-ai-infra-assistant-admin-console-1   ai-infra-assistant-admin-console:latest   "uvicorn main:app --…"   admin-console   6 minutes ago    Up Less than a second    0.0.0.0:8501->8080/tcp, [::]:8501->8080/tcp
-ai-infra-assistant-agent-server-1    ai-infra-assistant-agent-server:latest    "uvicorn main:app --…"   agent-server    49 minutes ago   Up Less than a second    0.0.0.0:8500->8000/tcp, [::]:8500->8000/tcp
-ai-infra-assistant-command-mcp-1     ai-infra-assistant-mcp:dev                "watchfiles --filter…"   command-mcp     6 minutes ago    Up Less than a second    8001/tcp, 0.0.0.0:8504->8002/tcp, [::]:8504->8002/tcp
-ai-infra-assistant-manual-mcp-1      ai-infra-assistant-mcp:dev                "watchfiles --filter…"   manual-mcp      6 minutes ago    Up Less than a second    0.0.0.0:8503->8001/tcp, [::]:8503->8001/tcp
-ai-infra-assistant-mock-vllm-1       ai-infra-assistant-mock-vllm:latest       "uvicorn mock_vllm:a…"   mock-vllm       49 minutes ago   Up Less than a second    8000/tcp
-ai-infra-assistant-open-webui-1      ghcr.io/open-webui/open-webui:v0.6.5      "bash start.sh"          open-webui      6 minutes ago    Up 6 minutes (healthy)   0.0.0.0:8502->8080/tcp, [::]:8502->8080/tcp
-ai-infra-assistant-postgres-1        docker.io/pgvector/pgvector:pg16          "docker-entrypoint.s…"   postgres        6 minutes ago    Up 6 minutes (healthy)   0.0.0.0:8507->5432/tcp, [::]:8507->5432/tcp
-ai-infra-assistant-system-mcp-1      ai-infra-assistant-mcp:dev                "watchfiles --filter…"   system-mcp      6 minutes ago    Up Less than a second    8001/tcp, 0.0.0.0:8506->8004/tcp, [::]:8506->8004/tcp
-ai-infra-assistant-voc-mcp-1         ai-infra-assistant-mcp:dev                "watchfiles --filter…"   voc-mcp         6 minutes ago    Up Less than a second    8001/tcp, 0.0.0.0:8505->8003/tcp, [::]:8505->8003/tcp
-== health ==
-curl: (56) Recv failure: Connection reset by peer
-curl: (56) Recv failure: Connection reset by peer
-curl: (56) Recv failure: Connection reset by peer
-curl: (56) Recv failure: Connection reset by peer
-curl: (56) Recv failure: Connection reset by peer
-curl: (56) Recv failure: Connection reset by peer
-curl: (56) Recv failure: Connection reset by peer
-curl: (56) Recv failure: Connection reset by peer
-curl: (56) Recv failure: Connection reset by peer
-curl: (56) Recv failure: Connection reset by peer
-curl: (56) Recv failure: Connection reset by peer
-{"status":"ok","model":"mock-llm"}
+RichTextInput.svelte:166 [tiptap warn]: Duplicate extension names found: ['codeBlock']. This can lead to issues.
+resolve @ index.js:1158
+constructor @ index.js:1144
+createExtensionManager @ index.js:4470
+constructor @ index.js:4302
+(anonymous) @ RichTextInput.svelte:166
+await in (anonymous)
+run @ utils.js:41
+(anonymous) @ Component.js:47
+flush @ scheduler.js:99
+Promise.then
+schedule_update @ scheduler.js:20
+make_dirty @ Component.js:81
+(anonymous) @ Component.js:139
+(anonymous) @ root.svelte:69
+$set @ Component.js:507
+navigate @ client.js:1576
+await in navigate
+_goto @ client.js:398
+goto @ client.js:1926
+(anonymous) @ Sidebar.svelte:517
+Chat.svelte:1248 submitPrompt ㅎㅇ 
+Chat.svelte:187 saveSessionSelectedModels ['mock-llm'] ["mock-llm"]
+MessageInput.svelte:343 destroy
+RichTextInput.svelte:131 
+ResponseMessage.svelte:562 <div class=​"flex justify-start overflow-x-auto buttons text-gray-600 dark:​text-gray-500 mt-0.5 svelte-1u5gq5j">​</div>​
+RichTextInput.svelte:166 [tiptap warn]: Duplicate extension names found: ['codeBlock']. This can lead to issues.
+resolve @ index.js:1158
+constructor @ index.js:1144
+createExtensionManager @ index.js:4470
+constructor @ index.js:4302
+(anonymous) @ RichTextInput.svelte:166
+await in (anonymous)
+run @ utils.js:41
+(anonymous) @ Component.js:47
+flush @ scheduler.js:99
+Promise.then
+schedule_update @ scheduler.js:20
+make_dirty @ Component.js:81
+(anonymous) @ Component.js:139
+(anonymous) @ Chat.svelte:1300
+(anonymous) @ Chat.svelte:2105
+await in (anonymous)
+(anonymous) @ lifecycle.js:105
+(anonymous) @ lifecycle.js:104
+(anonymous) @ Placeholder.svelte:208
+(anonymous) @ lifecycle.js:105
+(anonymous) @ lifecycle.js:104
+(anonymous) @ MessageInput.svelte:765
+(anonymous) @ lifecycle.js:105
+(anonymous) @ lifecycle.js:104
+(anonymous) @ RichTextInput.svelte:297
+(anonymous) @ index.js:3108
+someProp @ index.js:5502
+runCustomHandler @ index.js:3106
+(anonymous) @ index.js:3075
+ResponseMessage.svelte:562 <div class=​"flex justify-start overflow-x-auto buttons text-gray-600 dark:​text-gray-500 mt-0.5 svelte-1u5gq5j">​</div>​flex
+Chat.svelte:1422 modelId mock-llm
+Chat.svelte:249 {chat_id: '60ed02b1-0b34-41bb-a4af-cabdbb07d9c2', message_id: 'da961143-1fa7-45fa-9e88-1cfe8ec1946e', data: {…}}
+Chat.svelte:1237 {content: '[오류가 발생했습니다: Failed to create MCP session: Connection closed]'}
+Chat.svelte:249 {chat_id: '60ed02b1-0b34-41bb-a4af-cabdbb07d9c2', message_id: 'da961143-1fa7-45fa-9e88-1cfe8ec1946e', data: {…}}
+Chat.svelte:1237 {id: 'chatcmpl-789e477e3c78', object: 'chat.completion.chunk', created: 1785139974, model: 'mock-llm', choices: Array(1)}
+Chat.svelte:249 {chat_id: '60ed02b1-0b34-41bb-a4af-cabdbb07d9c2', message_id: 'da961143-1fa7-45fa-9e88-1cfe8ec1946e', data: {…}}
+Chat.svelte:1237 {done: true, content: '[오류가 발생했습니다: Failed to create MCP session: Connection closed]', title: '새 채팅'}
 
-[root@24-gp19 AI-Infra-Assistant]# curl -s http://localhost:8500/v1/chat/completions -H 'Content-Type: application/json' \
->   -d '{"model":"mock-llm","messages":[{"role":"user","content":"안녕"}]}'
-Internal Server Error[root@24-gp19 AI-Infra-Assistant]#
-[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml logs --tail=50 agent-server
-agent-server-1  |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
-agent-server-1  |     raise exc
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
-agent-server-1  |     await app(scope, receive, sender)
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 105, in app
-agent-server-1  |     response = await f(request)
-agent-server-1  |                ^^^^^^^^^^^^^^^^
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 385, in app
-agent-server-1  |     raw_response = await run_endpoint_function(
-agent-server-1  |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 284, in run_endpoint_function
-agent-server-1  |     return await dependant.call(**values)
-agent-server-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-agent-server-1  |   File "/app/agent_server/main.py", line 271, in chat_completions
-agent-server-1  |     async for event in runner.run_async(user_id=user_id, session_id=session_id,
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/runners.py", line 519, in run_async
-agent-server-1  |     async for event in agen:
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/runners.py", line 507, in _run_with_trace
-agent-server-1  |     async for event in agen:
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/runners.py", line 739, in _exec_with_plugin
-agent-server-1  |     async for event in agen:
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/runners.py", line 496, in execute
-agent-server-1  |     async for event in agen:
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/agents/base_agent.py", line 294, in run_async
-agent-server-1  |     async for event in agen:
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/agents/llm_agent.py", line 468, in _run_async_impl
-agent-server-1  |     async for event in agen:
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 362, in run_async
-agent-server-1  |     async for event in agen:
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 381, in _run_one_step_async
-agent-server-1  |     async for event in agen:
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 496, in _preprocess_async
-agent-server-1  |     tools = await _convert_tool_union_to_tools(
-agent-server-1  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/agents/llm_agent.py", line 180, in _convert_tool_union_to_tools
-agent-server-1  |     return await tool_union.get_tools_with_prefix(ctx)
-agent-server-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/tools/base_toolset.py", line 114, in get_tools_with_prefix
-agent-server-1  |     tools = await self.get_tools(readonly_context)
-agent-server-1  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/tools/mcp_tool/mcp_session_manager.py", line 173, in wrapper
-agent-server-1  |     return await func(self, *args, **kwargs)
-agent-server-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/tools/mcp_tool/mcp_toolset.py", line 163, in get_tools
-agent-server-1  |     session = await self._mcp_session_manager.create_session(headers=headers)
-agent-server-1  |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/tools/mcp_tool/mcp_session_manager.py", line 426, in create_session
-agent-server-1  |     raise ConnectionError(f'Failed to create MCP session: {e}') from e
-agent-server-1  | ConnectionError: Failed to create MCP session: Connection closed
+
+
+# mcp server 확인
+[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml logs --tail=40 manual-mcp command-mcp voc-mcp system-mcp
+manual-mcp-1  | [08:00:15] watchfiles v1.2.0 👀  path="/app/mcp_servers/manual_mcp", "/app/shared" target="python mcp_servers/manual_mcp/server.py" (command) filter=PythonFilter...
+manual-mcp-1  | INFO:     Started server process [7]
+manual-mcp-1  | INFO:     Waiting for application startup.
+manual-mcp-1  | StreamableHTTP session manager started
+manual-mcp-1  | INFO:     Application startup complete.
+manual-mcp-1  | INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+system-mcp-1  | [08:00:15] watchfiles v1.2.0 👀  path="/app/mcp_servers/system_mcp", "/app/shared" target="python mcp_servers/system_mcp/server.py" (command) filter=PythonFilter...
+manual-mcp-1  | [08:06:56] received signal 15, raising KeyboardInterrupt
+manual-mcp-1  | [08:06:56] KeyboardInterrupt caught, stopping watch
+manual-mcp-1  | INFO:     Shutting down
+manual-mcp-1  | INFO:     Waiting for application shutdown.
+manual-mcp-1  | StreamableHTTP session manager shutting down
+manual-mcp-1  | INFO:     Application shutdown complete.
+manual-mcp-1  | INFO:     Finished server process [7]
+manual-mcp-1  | [08:06:57] watchfiles v1.2.0 👀  path="/app/mcp_servers/manual_mcp", "/app/shared" target="python mcp_servers/manual_mcp/server.py" (command) filter=PythonFilter...
+manual-mcp-1  | INFO:     Started server process [7]
+manual-mcp-1  | INFO:     Waiting for application startup.
+manual-mcp-1  | StreamableHTTP session manager started
+manual-mcp-1  | INFO:     Application startup complete.
+manual-mcp-1  | INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+manual-mcp-1  | INFO:     172.21.0.4:41786 - "POST /mcp HTTP/1.1" 421 Misdirected Request
+manual-mcp-1  | Invalid Host header: manual-mcp:8001
+manual-mcp-1  | Terminating session: None
+manual-mcp-1  | Invalid Host header: manual-mcp:8001
+manual-mcp-1  | INFO:     172.21.0.4:41792 - "POST /mcp HTTP/1.1" 421 Misdirected Request
+manual-mcp-1  | Terminating session: None
+manual-mcp-1  | [08:11:38] received signal 15, raising KeyboardInterrupt
+manual-mcp-1  | [08:11:38] KeyboardInterrupt caught, stopping watch
+manual-mcp-1  | INFO:     Shutting down
+manual-mcp-1  | INFO:     Waiting for application shutdown.
+manual-mcp-1  | StreamableHTTP session manager shutting down
+manual-mcp-1  | INFO:     Application shutdown complete.
+manual-mcp-1  | INFO:     Finished server process [7]
+manual-mcp-1  | [08:11:40] watchfiles v1.2.0 👀  path="/app/mcp_servers/manual_mcp", "/app/shared" target="python mcp_servers/manual_mcp/server.py" (command) filter=PythonFilter...
+manual-mcp-1  | INFO:     Started server process [7]
+manual-mcp-1  | INFO:     Waiting for application startup.
+manual-mcp-1  | StreamableHTTP session manager started
+manual-mcp-1  | INFO:     Application startup complete.
+manual-mcp-1  | INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+system-mcp-1  | INFO:     Started server process [7]
+system-mcp-1  | INFO:     Waiting for application startup.
+system-mcp-1  | StreamableHTTP session manager started
+system-mcp-1  | INFO:     Application startup complete.
+system-mcp-1  | INFO:     Uvicorn running on http://0.0.0.0:8004 (Press CTRL+C to quit)
+system-mcp-1  | [08:06:56] received signal 15, raising KeyboardInterrupt
+system-mcp-1  | [08:06:56] KeyboardInterrupt caught, stopping watch
+system-mcp-1  | INFO:     Shutting down
+system-mcp-1  | INFO:     Waiting for application shutdown.
+system-mcp-1  | StreamableHTTP session manager shutting down
+system-mcp-1  | INFO:     Application shutdown complete.
+system-mcp-1  | INFO:     Finished server process [7]
+system-mcp-1  | [08:06:57] watchfiles v1.2.0 👀  path="/app/mcp_servers/system_mcp", "/app/shared" target="python mcp_servers/system_mcp/server.py" (command) filter=PythonFilter...
+system-mcp-1  | INFO:     Started server process [7]
+system-mcp-1  | INFO:     Waiting for application startup.
+system-mcp-1  | StreamableHTTP session manager started
+system-mcp-1  | INFO:     Application startup complete.
+system-mcp-1  | INFO:     Uvicorn running on http://0.0.0.0:8004 (Press CTRL+C to quit)
+system-mcp-1   | [08:11:38] received signal 15, raising KeyboardInterrupt
+system-mcp-1   | [08:11:38] KeyboardInterrupt caught, stopping watch
+command-mcp-1  | [08:00:15] watchfiles v1.2.0 👀  path="/app/mcp_servers/command_mcp", "/app/shared" target="python mcp_servers/command_mcp/server.py" (command) filter=PythonFilter...
+command-mcp-1  | INFO:     Started server process [7]
+command-mcp-1  | INFO:     Waiting for application startup.
+command-mcp-1  | StreamableHTTP session manager started
+command-mcp-1  | INFO:     Application startup complete.
+command-mcp-1  | INFO:     Uvicorn running on http://0.0.0.0:8002 (Press CTRL+C to quit)
+command-mcp-1  | [08:06:56] received signal 15, raising KeyboardInterrupt
+command-mcp-1  | [08:06:56] KeyboardInterrupt caught, stopping watch
+system-mcp-1   | INFO:     Shutting down
+system-mcp-1   | INFO:     Waiting for application shutdown.
+system-mcp-1   | StreamableHTTP session manager shutting down
+system-mcp-1   | INFO:     Application shutdown complete.
+system-mcp-1   | INFO:     Finished server process [7]
+system-mcp-1   | [08:11:40] watchfiles v1.2.0 👀  path="/app/mcp_servers/system_mcp", "/app/shared" target="python mcp_servers/system_mcp/server.py" (command) filter=PythonFilter...
+system-mcp-1   | INFO:     Started server process [7]
+system-mcp-1   | INFO:     Waiting for application startup.
+system-mcp-1   | StreamableHTTP session manager started
+system-mcp-1   | INFO:     Application startup complete.
+system-mcp-1   | INFO:     Uvicorn running on http://0.0.0.0:8004 (Press CTRL+C to quit)
+command-mcp-1  | INFO:     Shutting down
+command-mcp-1  | INFO:     Waiting for application shutdown.
+command-mcp-1  | StreamableHTTP session manager shutting down
+command-mcp-1  | INFO:     Application shutdown complete.
+command-mcp-1  | INFO:     Finished server process [7]
+command-mcp-1  | [08:06:57] watchfiles v1.2.0 👀  path="/app/mcp_servers/command_mcp", "/app/shared" target="python mcp_servers/command_mcp/server.py" (command) filter=PythonFilter...
+command-mcp-1  | INFO:     Started server process [7]
+command-mcp-1  | INFO:     Waiting for application startup.
+command-mcp-1  | StreamableHTTP session manager started
+voc-mcp-1      | [08:00:15] watchfiles v1.2.0 👀  path="/app/mcp_servers/voc_mcp", "/app/shared" target="python mcp_servers/voc_mcp/server.py" (command) filter=PythonFilter...
+voc-mcp-1      | INFO:     Started server process [7]
+voc-mcp-1      | INFO:     Waiting for application startup.
+voc-mcp-1      | StreamableHTTP session manager started
+voc-mcp-1      | INFO:     Application startup complete.
+voc-mcp-1      | INFO:     Uvicorn running on http://0.0.0.0:8003 (Press CTRL+C to quit)
+voc-mcp-1      | [08:06:56] received signal 15, raising KeyboardInterrupt
+voc-mcp-1      | [08:06:56] KeyboardInterrupt caught, stopping watch
+voc-mcp-1      | INFO:     Shutting down
+voc-mcp-1      | INFO:     Waiting for application shutdown.
+voc-mcp-1      | StreamableHTTP session manager shutting down
+command-mcp-1  | INFO:     Application startup complete.
+command-mcp-1  | INFO:     Uvicorn running on http://0.0.0.0:8002 (Press CTRL+C to quit)
+command-mcp-1  | [08:11:38] received signal 15, raising KeyboardInterrupt
+command-mcp-1  | [08:11:38] KeyboardInterrupt caught, stopping watch
+command-mcp-1  | INFO:     Shutting down
+command-mcp-1  | INFO:     Waiting for application shutdown.
+command-mcp-1  | StreamableHTTP session manager shutting down
+command-mcp-1  | INFO:     Application shutdown complete.
+command-mcp-1  | INFO:     Finished server process [7]
+command-mcp-1  | [08:11:39] watchfiles v1.2.0 👀  path="/app/mcp_servers/command_mcp", "/app/shared" target="python mcp_servers/command_mcp/server.py" (command) filter=PythonFilter...
+command-mcp-1  | INFO:     Started server process [7]
+voc-mcp-1      | INFO:     Application shutdown complete.
+voc-mcp-1      | INFO:     Finished server process [7]
+voc-mcp-1      | [08:06:57] watchfiles v1.2.0 👀  path="/app/mcp_servers/voc_mcp", "/app/shared" target="python mcp_servers/voc_mcp/server.py" (command) filter=PythonFilter...
+voc-mcp-1      | INFO:     Started server process [7]
+voc-mcp-1      | INFO:     Waiting for application startup.
+voc-mcp-1      | StreamableHTTP session manager started
+voc-mcp-1      | INFO:     Application startup complete.
+voc-mcp-1      | INFO:     Uvicorn running on http://0.0.0.0:8003 (Press CTRL+C to quit)
+voc-mcp-1      | [08:11:38] received signal 15, raising KeyboardInterrupt
+voc-mcp-1      | [08:11:38] KeyboardInterrupt caught, stopping watch
+voc-mcp-1      | INFO:     Shutting down
+voc-mcp-1      | INFO:     Waiting for application shutdown.
+voc-mcp-1      | StreamableHTTP session manager shutting down
+voc-mcp-1      | INFO:     Application shutdown complete.
+voc-mcp-1      | INFO:     Finished server process [7]
+voc-mcp-1      | [08:11:39] watchfiles v1.2.0 👀  path="/app/mcp_servers/voc_mcp", "/app/shared" target="python mcp_servers/voc_mcp/server.py" (command) filter=PythonFilter...
+voc-mcp-1      | INFO:     Started server process [7]
+voc-mcp-1      | INFO:     Waiting for application startup.
+voc-mcp-1      | StreamableHTTP session manager started
+voc-mcp-1      | INFO:     Application startup complete.
+voc-mcp-1      | INFO:     Uvicorn running on http://0.0.0.0:8003 (Press CTRL+C to quit)
+command-mcp-1  | INFO:     Waiting for application startup.
+command-mcp-1  | StreamableHTTP session manager started
+command-mcp-1  | INFO:     Application startup complete.
+command-mcp-1  | INFO:     Uvicorn running on http://0.0.0.0:8002 (Press CTRL+C to quit)
+
 
