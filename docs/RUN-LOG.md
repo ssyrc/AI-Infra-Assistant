@@ -69,6 +69,45 @@ git pull origin main
 bash scripts/restart-mounted.sh
 ```
 
+## 5. 코드 반영 (WSL → rsync → 폐쇄망 서버)
+
+로컬 수정 없이 원격 main을 그대로 받아서 서버로 올리는 방식.
+
+```bash
+git -C /home/yrc/AI-Infra-Assistant fetch origin main
+git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
+```
+
+```bash
+rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
+  yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
+```
+
+## 6. 호스트 포트 8500번대로 재배치 (확인됨)
+
+8080/8100/8200/3000/3001/5432 대신 8500부터 순서대로 배정
+(`docker-compose.dev.yml`/`docker-compose.yml`/`.env.example`).
+
+```bash
+docker compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.dev.yml ps
+```
+→ 관리자 콘솔 `:8501`, 사용자 웹 `:8502` 접속 확인됨.
+
+## 7. admin_console vendor 파일 받기 (진행 중)
+
+```bash
+unset CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR
+export https_proxy=http://202.20.187.241:3128 http_proxy=http://202.20.187.241:3128
+cd admin_console/frontend/vendor
+curl -o react.production.min.js https://unpkg.com/react@18/umd/react.production.min.js
+curl -o react-dom.production.min.js https://unpkg.com/react-dom@18/umd/react-dom.production.min.js
+curl -o babel.min.js https://unpkg.com/@babel/standalone/babel.min.js
+```
+1차 시도: 인증서 경로 에러 → `unset`으로 해결. 2차 시도: 파일은 받아졌지만 브라우저에서
+`Uncaught SyntaxError: Unexpected identifier 'to'` → 프록시 차단 페이지가 저장된 것으로 추정,
+프록시 경유 재다운로드 확인 중.
+
 ---
 
 ## 다음 항목은 이어서 여기 아래에 추가

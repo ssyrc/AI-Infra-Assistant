@@ -4,8 +4,10 @@ LLM: `Qwen3-235B-A22B-Instruct-2507` (FP8) · 임베딩: `Qwen3-Embedding-8B`
 
 ## 0. 코드 반영 + 포트 재기동 + admin_console 화면 깨짐 고치기 (먼저)
 
+WSL에서:
 ```bash
-git pull origin main
+git -C /home/yrc/AI-Infra-Assistant fetch origin main
+git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
 ```
 `.env`에 옛 포트 값(`ADMIN_PORT=8080`, `OPENWEBUI_PORT=3000`, `PG_PORT=5432`, `MANUAL_MCP_PORT=8501` 등)이
 박혀 있으면 지우거나 새 기본값(8501~8507)으로 바꾈 것. 없으면 그대로 둬도 새 기본값 적용됨.
