@@ -95,38 +95,34 @@ async def delete_voc(voc_id: int, admin: str = Depends(require_admin)):
     return {"ok": True}
 
 
-@router.post("/import")
-async def import_voc_excel(
-    file: UploadFile | None = File(None),
-    server_path: str | None = Form(None),
-    admin: str = Depends(require_admin),
-):
-    """사내 VOC 엑셀 표준 포맷 전용: 4행이 헤더고 의뢰내용/조치일/처리내용/만족도 컬럼만 쓴다.
-    조치일·처리내용이 둘 다 있는 행만, 만족도가 불만족/매우불만족이 아닌 행만 등록한다.
-    의뢰내용/처리내용은 HTML 태그만 벗기고 본문(명령어·코드 포함)은 그대로 둔다."""
-    _, content, _ = await read_upload_or_server_file(file, server_path, {".xlsx"})
-    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
-        tmp.write(content)
-        tmp_path = tmp.name
+def _header_row(ws, row_num: int) -> list[str]:
+    row = next(ws.iter_rows(min_row=row_num, max_row=row_num))
+    return [str(c.value).strip() if c.value else "" for c in row]
 
-    wb = openpyxl.load_workbook(tmp_path, read_only=True)
-    ws = wb.active
-    header_row = next(ws.iter_rows(min_row=_VOC_HEADER_ROW, max_row=_VOC_HEADER_ROW))
-    header = [str(c.value).strip() if c.value else "" for c in header_row]
-    required = {_COL_REQUEST, _COL_ACTION_DATE, _COL_RESOLUTION, _COL_SATISFACTION}
-    if not required.issubset(set(header)):
-        raise HTTPException(
-            422, f"엑셀 {_VOC_HEADER_ROW}행에 {', '.join(sorted(required))} 컬럼이 모두 있어야 합니다.")
 
+async def _insert_voc(pool, question: str, answer: str, department: str | None, resolved: bool) -> bool:
+    if not question or not answer:
+        return False
+    vec = await embed_text(f"{question}\n{answer}")
+    await pool.execute(
+        """
+        INSERT INTO voc_records (question, answer, department, resolved, embedding)
+        VALUES ($1, $2, $3, $4, $5::vector)
+        """,
+        question, answer, department, resolved, vector_literal(vec),
+    )
+    return True
+
+
+async def _import_raw_format(ws, header: list[str], pool) -> tuple[int, int]:
+    """사내 VOC 표준 엑셀: 4행 헤더, 의뢰내용/조치일/처리내용/만족도만 사용."""
     col_idx = {name: i for i, name in enumerate(header)}
 
     def cell(row, name):
         i = col_idx[name]
         return row[i] if i < len(row) else None
 
-    pool = await get_pool("voc_db_dsn")
-    inserted = 0
-    skipped = 0
+    inserted = skipped = 0
     for row in ws.iter_rows(min_row=_VOC_HEADER_ROW + 1, values_only=True):
         request_content = cell(row, _COL_REQUEST)
         action_date = cell(row, _COL_ACTION_DATE)
@@ -142,22 +138,79 @@ async def import_voc_excel(
 
         question = clean_text(str(request_content))
         answer = clean_text(str(resolution))
-        if not question or not answer:
+        if await _insert_voc(pool, question, answer, None, True):
+            inserted += 1
+        else:
+            skipped += 1
+    return inserted, skipped
+
+
+async def _import_simple_format(ws, header: list[str], pool) -> tuple[int, int]:
+    """1행 헤더 Question/Answer(대소문자 무관) + department/resolved(선택), 2행부터 데이터.
+    이미 정제된 텍스트로 취급하되 혹시 남은 HTML은 안전하게 걷어낸다."""
+    lower_idx = {h.lower(): i for i, h in enumerate(header)}
+    q_idx, a_idx = lower_idx["question"], lower_idx["answer"]
+    dept_idx = lower_idx.get("department")
+    resolved_idx = lower_idx.get("resolved")
+
+    def cell(row, idx):
+        return row[idx] if idx is not None and idx < len(row) else None
+
+    inserted = skipped = 0
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        question_raw, answer_raw = cell(row, q_idx), cell(row, a_idx)
+        if not question_raw or not answer_raw:
             skipped += 1
             continue
-
-        vec = await embed_text(f"{question}\n{answer}")
-        await pool.execute(
-            """
-            INSERT INTO voc_records (question, answer, department, resolved, embedding)
-            VALUES ($1, $2, $3, $4, $5::vector)
-            """,
-            question,
-            answer,
-            None,
-            True,
-            vector_literal(vec),
+        department = str(cell(row, dept_idx)) if cell(row, dept_idx) else None
+        resolved_val = cell(row, resolved_idx)
+        resolved = (
+            str(resolved_val).strip().upper() not in ("FALSE", "0", "N", "NO")
+            if resolved_val is not None else True
         )
-        inserted += 1
+
+        question = clean_text(str(question_raw))
+        answer = clean_text(str(answer_raw))
+        if await _insert_voc(pool, question, answer, department, resolved):
+            inserted += 1
+        else:
+            skipped += 1
+    return inserted, skipped
+
+
+@router.post("/import")
+async def import_voc_excel(
+    file: UploadFile | None = File(None),
+    server_path: str | None = Form(None),
+    admin: str = Depends(require_admin),
+):
+    """엑셀 형식을 자동으로 인식해서 등록한다. 지원하는 두 형식:
+    (1) 1행 헤더 Question/Answer(대소문자 무관, department/resolved 선택) — 이미 정제된 데이터용.
+    (2) 사내 VOC 표준 포맷 — 4행 헤더(의뢰내용/조치일/처리내용/만족도), 조치일·처리내용 있는 행만,
+        만족도 불만족/매우불만족 제외, 본문은 HTML 태그만 벗기고 그대로 보존."""
+    _, content, _ = await read_upload_or_server_file(file, server_path, {".xlsx"})
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    wb = openpyxl.load_workbook(tmp_path, read_only=True)
+    ws = wb.active
+    pool = await get_pool("voc_db_dsn")
+
+    row1 = _header_row(ws, 1)
+    if {"question", "answer"}.issubset({h.lower() for h in row1}):
+        inserted, skipped = await _import_simple_format(ws, row1, pool)
+    elif ws.max_row >= _VOC_HEADER_ROW and {
+        _COL_REQUEST, _COL_ACTION_DATE, _COL_RESOLUTION, _COL_SATISFACTION
+    }.issubset(set(_header_row(ws, _VOC_HEADER_ROW))):
+        inserted, skipped = await _import_raw_format(ws, _header_row(ws, _VOC_HEADER_ROW), pool)
+    else:
+        raise HTTPException(
+            422,
+            "엑셀 형식을 인식하지 못했습니다. 지원 형식: "
+            "(1) 1행 헤더 Question/Answer, 2행부터 데이터, 또는 "
+            f"(2) {_VOC_HEADER_ROW}행 헤더에 {_COL_REQUEST}/{_COL_ACTION_DATE}/"
+            f"{_COL_RESOLUTION}/{_COL_SATISFACTION} 컬럼이 모두 있는 사내 표준 포맷.",
+        )
 
     return {"inserted": inserted, "skipped": skipped}

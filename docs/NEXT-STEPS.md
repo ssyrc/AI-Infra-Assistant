@@ -2,42 +2,26 @@
 
 ## ⚡ 지금 당장 (순서대로)
 
-### 0) hgpu4041 — CUDA busy 재발: GPU 1을 리랭커가 독점 중이라 `--gpus all`과 충돌하는 걸로 추정
-235B가 커서 나는 에러가 아니다(그랬으면 "busy"가 아니라 OOM 메시지가 난다). `nvidia-smi`의
-"Compute M." 칸이 `E. Process`(Exclusive_Process)로 보인다 — 맞다면 GPU 하나에 프로세스가
-하나만 붙을 수 있는 모드라, 리랭커가 이미 GPU 1을 물고 있는 상태에서 LLM이 `--gpus all`로
-GPU 0~3(1 포함) 전부를 요구하니 충돌한다. 먼저 정확한 모드 확인:
-```bash
-nvidia-smi --query-gpu=index,compute_mode --format=csv
+### 0) hgpu4041 — 실제 원인 확정: KV 캐시 부족 (busy 에러 아니었음)
 ```
-`Exclusive_Process`면 맞은 것. **순서를 바꿔서**: GPU 4장이 다 비어있을 때 LLM부터 먼저 올리고,
-임베딩/리랭커는 LLM이 뜬 뒤 각 GPU의 남는 용량(0.85 사용 시 GPU당 ~15% = ~12GB)에 나중에 얹는다.
+ValueError: To serve at least one request with the models's max seq len (262144),
+(11.75 GiB KV cache is needed, which is larger than the available KV cache memory (8.03 GiB).
+```
+Qwen3-235B-A22B의 기본 최대 컨텍스트가 262144(256K) 토큰이라, vLLM이 그 길이 하나 처리할
+KV 캐시까지 예약하려다 `--gpu-memory-utilization 0.85`로 남는 8GB로는 부족해서 실패한 것
+(235B라서, GPU 경합이라서 나는 에러가 아니었음). 이 에이전트는 RAG+툴콜 챗이라 256K 컨텍스트가
+필요 없으므로 `--max-model-len`으로 낮추면 KV 캐시 요구량이 그만큼 줄어든다:
 ```bash
-docker stop serve-vllm-rerank   # 잠깐 내려서 GPU 4장 다 비우기
-
 docker run -dit --rm --gpus all --network host --ipc host \
     -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
     --name serve-vllm-llm repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
     --model /workspace/models/Qwen3-235B-A22B-Instruct-2507-FP8 \
     --tensor-parallel-size 4 --gpu-memory-utilization 0.85 \
+    --max-model-len 32768 \
     --port 8000 --served-model-name qwen3-235b-a22b
-
-# LLM이 뜬 것 확인 후(healthy 될 때까지 몇 분 걸릴 수 있음)
-curl http://localhost:8000/v1/models
-
-docker run -dit --rm --gpus '"device=0"' --network host --ipc host \
-    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
-    --name serve-vllm-embed repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
-    --model /workspace/models/Qwen3-Embedding-8B \
-    --task embed --gpu-memory-utilization 0.15 \
-    --port 8010 --served-model-name qwen3-embedding-8b
-
-docker run -dit --rm --gpus '"device=1"' --network host --ipc host \
-    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
-    --name serve-vllm-rerank repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
-    --model /workspace/models/bge-reranker-v2-m3 \
-    --task score --gpu-memory-utilization 0.1 \
-    --port 8020 --served-model-name bge-reranker-v2-m3
+```
+대화가 길어서 32768(32K)로도 잘리면 65536으로 올려도 되고, 동시 요청을 늘리고 싶으면
+`--gpu-memory-utilization`을 0.9 정도로 올려도 된다(단, 임베딩/리랭커가 쓸 여유가 줄어듦).
 ```
 임베딩/리랭커가 OOM 나면(LLM이 GPU당 여유를 너무 적게 남김) LLM의 `--gpu-memory-utilization`을
 0.8이나 0.75로 낮춰서 재시도. 이래도 LLM 자체가 busy면 `nvidia-smi --query-gpu=... compute_mode`
@@ -143,6 +127,20 @@ curl http://202.20.183.30:8500/v1/models   # qwen3-235b-a22b 나오는지
   올릴 수 있다. 설정 탭 `upload_source_dir`로 그 마운트 하위 폴더를 재시작 없이 바꿀 수 있다
   (마운트 자체를 다른 호스트 경로로 바꾸려면 `.env`의 `UPLOAD_SOURCE_HOST_DIR` + 컨테이너
   재생성 필요 — admin-console 재빌드하면 이 폴더도 같이 마운트됨).
+- 설정 탭에서 DB/시크릿(.env로만 관리되는 값) 섹션 자체를 화면에서 제거함(콘솔에서 바꿔도
+  효과가 없어서 표시할 이유가 없었음).
+- 매뉴얼 탭 버그 수정: 서버 파일(또는 로컬 파일) 선택 시 제목이 비어 있으면 파일명(확장자 제외)
+  으로 자동 채워지도록 함 — "제목과 파일을 먼저 선택하세요" 에러가 사실 제목 누락 때문이었을
+  가능성이 커서 애초에 안 나게 만듦. 에러 메시지도 제목/파일 중 뭐가 빠졌는지 구분해서 보여줌.
+- VOC 엑셀 업로드가 형식을 자동 인식하도록 재작성: 1행 헤더가 Question/Answer(대소문자 무관)면
+  이미 정제된 데이터로 보고 그대로 등록(2행부터), 아니면 기존 사내 표준 포맷(4행 헤더)으로 시도.
+  둘 다 아니면 두 형식을 모두 안내하는 에러를 띄움.
+
+## 커맨드 카탈로그 — 고정 양식 없음
+
+엑셀 업로드 시 열 이름이 뭐든 상관없다. 업로드하면 실제 파일의 컬럼 목록을 보여주고, 그중 어떤
+열을 이름/설명/사용법/카테고리로 쓸지 화면에서 직접 골라 매핑한다(자동 추정도 하지만 그냥 참고용).
+고정된 헤더 이름이나 행 위치가 없다.
 
 ## 설정 탭 Q&A
 

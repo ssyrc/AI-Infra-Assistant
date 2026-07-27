@@ -152,8 +152,16 @@ function ManualsPanel() {
 
   const appendFile = (fd, f) => { if (f.serverPath) fd.append("server_path", f.serverPath); else fd.append("file", f); };
 
+  // 파일을 고르면(로컬/서버 공통) 제목이 비어있을 때만 파일명(확장자 제외)으로 자동 채운다.
+  const pickFile = (f) => {
+    setFile(f);
+    if (f && !title) setTitle(f.name.replace(/\.[^.]+$/, ""));
+    resetPreviews();
+  };
+
   const analyze = async () => {
-    if (!file || !title) return alert("제목과 파일을 먼저 선택하세요.");
+    if (!file) return alert("파일을 먼저 선택하세요.");
+    if (!title) return alert("제목을 입력하세요.");
     setBusy(true);
     resetPreviews();
     try {
@@ -258,7 +266,7 @@ function ManualsPanel() {
         <div className="toolbar">
           <input placeholder="문서 제목 (버전 그룹핑 키)" value={title} onChange={e => setTitle(e.target.value)} style={{width: 260}} />
           <input type="file" accept=".xlsx,.xls,.docx,.pptx,.pdf,.txt,.md"
-                 onChange={e => { setFile(e.target.files[0]); resetPreviews(); }} />
+                 onChange={e => pickFile(e.target.files[0])} />
           <button onClick={() => setShowBrowser(true)}>서버 파일에서 선택</button>
           {file && <span className="badge" style={{borderColor: "var(--muted)", color: "var(--muted)"}}>
             {file.serverPath ? `서버: ${file.name}` : fileKind(file)}
@@ -271,7 +279,7 @@ function ManualsPanel() {
       {showBrowser && (
         <ServerFileBrowser
           onClose={() => setShowBrowser(false)}
-          onPick={(path, name) => { setFile({ name, serverPath: path }); resetPreviews(); setShowBrowser(false); }}
+          onPick={(path, name) => { pickFile({ name, serverPath: path }); setShowBrowser(false); }}
         />
       )}
 
