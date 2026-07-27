@@ -1,14 +1,11 @@
-# 사내망 wsl 환경에서 git fetch 후
-yrc@KORCO204731:~/AI-Infra-Assistant$ git -C /home/yrc/AI-Infra-Assistant fetch origin main && git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main^C
-
-# 폐쇄망 서버에 올리기
-rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/ 2>&1
-
-
 # 관리자용 콘솔 에러
 # http://202.20.183.30:8501/ 확인 완료!
-# 설정 탭 - agent 서버 202.20.183.30, llm 서버 ip 75.23.32.41 적
-
+# 설정 탭 - agent 서버 202.20.183.30, llm 서버 ip 75.23.32.41 적용
+1. 커맨드 카탈로그 - 카테고리 (선택) 구역 삭제
+2. System MCP 탭 
+  (1) 화이트리스트 에 command 도 변경할 수 있고, 새로운 것 추가할 수 있도록. 
+  (2) 화이트리스트는 gpu_status, 설명, 필요 역할, 이렇게만 관리하지 말고, 실제 command, 설명, 필요 역할 이렇게 관리하게 해줘. 필요 역할이 필요하다면.
+  (3) 필요 역할은 뭐야? 어떻게 지정해야 하는거야?
 
 
 # open-webui 에 mock-llm 으로 두고 챗 보내면 return 은 오는 상태
