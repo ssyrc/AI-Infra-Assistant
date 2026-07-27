@@ -558,7 +558,6 @@ function CommandsPanel() {
       <div className="card">
         <div className="toolbar">
           <input placeholder="커맨드 이름" value={form.name} onChange={e => setForm({...form, name: e.target.value})} style={{width: 200}} />
-          <input placeholder="카테고리(선택)" value={form.category || ""} onChange={e => setForm({...form, category: e.target.value})} style={{width: 160}} />
         </div>
         <textarea placeholder="설명" value={form.description} onChange={e => setForm({...form, description: e.target.value})} rows={2} style={{width: "100%", marginTop: 8}} />
         <textarea placeholder="사용법(예시)" value={form.usage || ""} onChange={e => setForm({...form, usage: e.target.value})} rows={2} style={{width: "100%", marginTop: 8}} />
@@ -630,12 +629,14 @@ function CommandsPanel() {
 function SystemPanel() {
   const [whitelist, setWhitelist] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [customCommands, setCustomCommands] = useState([]);
   const [tab, setTab] = useState("whitelist");
   const [edits, setEdits] = useState({}); // tool_name -> {description, roles}
 
   const loadWhitelist = useCallback(async () => setWhitelist(await api("/api/system/whitelist")), []);
   const loadLogs = useCallback(async () => setLogs(await api("/api/system/logs")), []);
-  useEffect(() => { loadWhitelist(); loadLogs(); }, [loadWhitelist, loadLogs]);
+  const loadCustomCommands = useCallback(async () => setCustomCommands(await api("/api/system/custom-commands")), []);
+  useEffect(() => { loadWhitelist(); loadLogs(); loadCustomCommands(); }, [loadWhitelist, loadLogs, loadCustomCommands]);
 
   const patch = async (name, body) => {
     await api(`/api/system/whitelist/${encodeURIComponent(name)}`, { method: "PATCH", body: JSON.stringify(body) });
@@ -663,13 +664,78 @@ function SystemPanel() {
     alert("저장했습니다. (설명 변경은 System MCP 재시작 후 에이전트에 반영됩니다)");
   };
 
+  // ---- 콘솔에서 등록하는 커스텀 커맨드 ----
+  const blankCustomForm = { tool_name: "", description: "", command: "", params: [], roles: "", enabled: false };
+  const [customForm, setCustomForm] = useState(blankCustomForm);
+  const [editingCustomName, setEditingCustomName] = useState(null);
+
+  const resetCustomForm = () => { setCustomForm(blankCustomForm); setEditingCustomName(null); };
+
+  const editCustom = (c) => {
+    setCustomForm({
+      tool_name: c.tool_name,
+      description: c.description,
+      command: c.argv_template.join(" "),
+      params: c.params.map(p => ({ ...p })),
+      roles: (c.required_roles || []).join(", "),
+      enabled: c.enabled,
+    });
+    setEditingCustomName(c.tool_name);
+  };
+
+  const addParamRow = () => setCustomForm(f => ({ ...f, params: [...f.params, { name: "", type: "str" }] }));
+  const updateParamRow = (i, patchObj) =>
+    setCustomForm(f => ({ ...f, params: f.params.map((p, idx) => (idx === i ? { ...p, ...patchObj } : p)) }));
+  const removeParamRow = (i) => setCustomForm(f => ({ ...f, params: f.params.filter((_, idx) => idx !== i) }));
+
+  const submitCustom = async () => {
+    if (!customForm.tool_name || !customForm.description || !customForm.command.trim()) {
+      return alert("이름/설명/커맨드를 입력하세요.");
+    }
+    const argv_template = customForm.command.trim().split(/\s+/);
+    const params = customForm.params.filter(p => p.name.trim());
+    const roles = customForm.roles.split(",").map(s => s.trim()).filter(Boolean);
+    const body = {
+      tool_name: customForm.tool_name, description: customForm.description,
+      argv_template, params, required_roles: roles, enabled: customForm.enabled,
+    };
+    try {
+      if (editingCustomName) {
+        await api(`/api/system/custom-commands/${encodeURIComponent(editingCustomName)}`, { method: "PATCH", body: JSON.stringify(body) });
+      } else {
+        await api("/api/system/custom-commands", { method: "POST", body: JSON.stringify(body) });
+      }
+      resetCustomForm();
+      await loadCustomCommands();
+      alert("저장했습니다. System MCP를 재시작해야 반영됩니다:\ndocker compose -f docker-compose.dev.yml restart system-mcp");
+    } catch (e) { alert(e.message); }
+  };
+
+  const removeCustom = async (name) => {
+    if (!confirm(`'${name}' 커맨드를 삭제할까요?`)) return;
+    await api(`/api/system/custom-commands/${encodeURIComponent(name)}`, { method: "DELETE" });
+    await loadCustomCommands();
+  };
+
+  const toggleCustom = async (c, enabled) => {
+    await api(`/api/system/custom-commands/${encodeURIComponent(c.tool_name)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        tool_name: c.tool_name, description: c.description, argv_template: c.argv_template,
+        params: c.params, required_roles: c.required_roles, enabled,
+      }),
+    });
+    await loadCustomCommands();
+  };
+
   return (
     <div>
       <h2>System MCP</h2>
-      <div className="subtitle">화이트리스트 함수의 활성/비활성·설명·필요 역할을 편집하고 실행 감사로그를 봅니다. 새 함수 자체 추가는 System MCP 코드 배포가 필요합니다.</div>
+      <div className="subtitle">화이트리스트 함수의 활성/비활성·설명·필요 역할을 편집하고 실행 감사로그를 봅니다. "커맨드 추가" 탭에서 코드 배포 없이 새 커맨드를 등록할 수 있습니다(등록 후 System MCP 재시작 필요).</div>
 
       <div className="toolbar">
         <button className={tab === "whitelist" ? "primary" : ""} onClick={() => setTab("whitelist")}>화이트리스트</button>
+        <button className={tab === "custom" ? "primary" : ""} onClick={() => setTab("custom")}>커맨드 추가</button>
         <button className={tab === "logs" ? "primary" : ""} onClick={() => setTab("logs")}>실행 로그</button>
       </div>
 
@@ -677,7 +743,7 @@ function SystemPanel() {
         <div>
           <div className="card" style={{fontSize: 12.5, color: "var(--muted)"}}>
             <div>· <strong style={{color: "var(--accent)"}}>사용자 범위</strong> 툴은 <code>user_id</code>를 LLM에 노출하지 않고 호출자 본인 id로 고정합니다(남의 자원 조회 불가).</div>
-            <div style={{marginTop: 4}}>· <strong style={{color: "var(--warn)"}}>필요 역할</strong>을 지정하면 해당 역할 보유자만 실행할 수 있습니다. 단, 현재 역할 공급원이 없으므로(사용자 id만 전달됨) 역할을 지정하면 그 툴은 전원 실행 거부됩니다. 역할 연동 전에는 비워 두세요.</div>
+            <div style={{marginTop: 4}}>· <strong style={{color: "var(--warn)"}}>필요 역할</strong>을 지정하면 해당 역할 보유자만 실행할 수 있습니다. 역할은 호출 경로에 따라 다르게 온다: Open WebUI 챗은 로그인한 계정의 Open WebUI 역할(admin/user)이 그대로 전달되고(dev 구성은 로그인이 없어 항상 빈 값 - 역할 지정 시 전원 거부됨), 외부 <code>/v1/agent/query</code> API는 호출하는 상위 시스템이 넘겨준 값을 쓴다. 역할 문자열은 임의로 정할 수 있지만 실제로 그 값을 부여하는 쪽과 이름이 맞아야 의미가 있다. 확실치 않으면 비워 두세요(제한 없음).</div>
           </div>
           {whitelist.map(w => {
             const e = editOf(w);
@@ -718,6 +784,82 @@ function SystemPanel() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {tab === "custom" && (
+        <div>
+          <div className="card" style={{fontSize: 12.5, color: "var(--muted)"}}>
+            <div>· 여기서 등록한 커맨드도 <strong style={{color: "var(--accent)"}}>항상 호출자 본인 권한</strong>으로만 실행됩니다(user_id 자동 주입, LLM에 노출 안 됨). host는 항상 필요한 파라미터입니다(대상 서버).</div>
+            <div style={{marginTop: 4}}>· 셸을 거치지 않고 토큰 그대로 실행됩니다(파이프 <code>|</code>, <code>;</code> 같은 셸 문법은 동작하지 않음). <code>{"{파라미터명}"}</code> 형태 토큰만 아래 파라미터 값으로 치환됩니다.</div>
+            <div style={{marginTop: 4}}>· <strong style={{color: "var(--warn)"}}>추가/수정/삭제는 System MCP 재시작 후 반영됩니다.</strong> rm/dd/systemctl 등 명백히 위험한 기본 명령은 등록이 거부되지만, 그 외에는 등록한 그대로 실행되니 read-only 명령만 등록하세요.</div>
+          </div>
+
+          <div className="card">
+            <div style={{fontWeight: 600, marginBottom: 8}}>{editingCustomName ? `수정: ${editingCustomName}` : "새 커맨드 추가"}</div>
+            <div className="toolbar">
+              <input placeholder="이름(예: disk_iostat)" value={customForm.tool_name} disabled={!!editingCustomName}
+                onChange={e => setCustomForm({...customForm, tool_name: e.target.value})} style={{width: 200}} />
+            </div>
+            <textarea placeholder="설명 (에이전트가 보는 툴 설명)" rows={2} style={{width: "100%", marginTop: 8}}
+              value={customForm.description} onChange={e => setCustomForm({...customForm, description: e.target.value})} />
+            <input placeholder="커맨드 (예: iostat -x 1 {count})" style={{width: "100%", marginTop: 8}}
+              value={customForm.command} onChange={e => setCustomForm({...customForm, command: e.target.value})} />
+
+            <div style={{marginTop: 10, fontSize: 12.5, color: "var(--muted)"}}>파라미터 (커맨드의 {"{이름}"} 토큰과 이름이 같아야 함)</div>
+            {customForm.params.map((p, i) => (
+              <div key={i} className="toolbar" style={{marginTop: 6}}>
+                <input placeholder="파라미터명(예: count)" value={p.name}
+                  onChange={e => updateParamRow(i, { name: e.target.value })} style={{width: 180}} />
+                <select value={p.type} onChange={e => updateParamRow(i, { type: e.target.value })}>
+                  <option value="str">문자열</option>
+                  <option value="int">정수</option>
+                </select>
+                <button className="danger" onClick={() => removeParamRow(i)}>삭제</button>
+              </div>
+            ))}
+            <div style={{marginTop: 6}}><button onClick={addParamRow}>+ 파라미터 추가</button></div>
+
+            <div style={{display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap"}}>
+              <label style={{fontSize: 12.5, color: "var(--muted)", flex: 1}}>
+                <div>필요 역할 (쉼표로 구분, 비우면 제한 없음)</div>
+                <input style={{width: "100%", marginTop: 4}} placeholder="예: ops-admin, sre"
+                  value={customForm.roles} onChange={e => setCustomForm({...customForm, roles: e.target.value})} />
+              </label>
+              <label style={{fontSize: 12.5, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6}}>
+                <input type="checkbox" checked={customForm.enabled}
+                  onChange={e => setCustomForm({...customForm, enabled: e.target.checked})} /> 활성화
+              </label>
+            </div>
+            <div className="row-actions" style={{marginTop: 10}}>
+              <button className="primary" onClick={submitCustom}>{editingCustomName ? "수정 저장" : "등록"}</button>
+              {editingCustomName && <button onClick={resetCustomForm}>취소</button>}
+            </div>
+          </div>
+
+          <table>
+            <thead><tr><th>이름</th><th>커맨드</th><th>필요 역할</th><th>활성</th><th></th></tr></thead>
+            <tbody>
+              {customCommands.map(c => (
+                <tr key={c.tool_name}>
+                  <td style={{fontFamily: "var(--mono)"}}>{c.tool_name}</td>
+                  <td style={{fontFamily: "var(--mono)", fontSize: 12}}>{c.argv_template.join(" ")}</td>
+                  <td>{(c.required_roles || []).join(", ") || "-"}</td>
+                  <td>
+                    <label className="switch">
+                      <input type="checkbox" checked={c.enabled} onChange={ev => toggleCustom(c, ev.target.checked)} />
+                      <span className="track"></span><span className="thumb"></span>
+                    </label>
+                  </td>
+                  <td className="row-actions">
+                    <button onClick={() => editCustom(c)}>편집</button>
+                    <button className="danger" onClick={() => removeCustom(c.tool_name)}>삭제</button>
+                  </td>
+                </tr>
+              ))}
+              {customCommands.length === 0 && <tr><td colSpan="5" className="empty">등록된 커맨드가 없습니다.</td></tr>}
+            </tbody>
+          </table>
         </div>
       )}
 

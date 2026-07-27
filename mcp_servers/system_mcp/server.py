@@ -17,7 +17,8 @@ from db import get_pool  # noqa: E402
 from mcp_caller import (  # noqa: E402
     get_caller, CallerContextMiddleware, load_overrides_sync, tool_description, build_wrapped,
 )
-from whitelist import WHITELIST  # noqa: E402
+from whitelist import WHITELIST as _CODE_WHITELIST  # noqa: E402
+from custom_whitelist import load_custom_whitelist_sync  # noqa: E402
 
 from mcp.server.fastmcp import FastMCP
 
@@ -26,6 +27,10 @@ mcp = FastMCP("system-mcp", stateless_http=True, host="0.0.0.0")
 _DSN = "system_db_dsn"
 _STATE = "system_whitelist_state"
 _OVERRIDES = load_overrides_sync(_DSN, _STATE)
+
+# 코드 내장 화이트리스트 + 관리자 콘솔에서 등록한 커맨드(system_custom_commands)를 병합한다.
+# 콘솔 등록 커맨드도 기동 시 1회만 반영된다(추가/수정 후 System MCP 재시작 필요).
+WHITELIST = {**_CODE_WHITELIST, **load_custom_whitelist_sync(_DSN)}
 
 
 async def _log_execution(tool_name: str, params: dict, status: str, result):

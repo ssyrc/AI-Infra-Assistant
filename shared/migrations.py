@@ -261,6 +261,23 @@ MIGRATIONS: list[tuple[str, int, str]] = [
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
     """),
+    # 관리자 콘솔에서 코드 배포 없이 새 System MCP 화이트리스트 커맨드를 등록할 수 있게 한다.
+    # argv_template의 "{param}" 토큰이 params에 정의된 파라미터로 치환된다(셸 미사용, argv 그대로 실행).
+    # 항상 user_id로 scope(호출자 권한 강제)되고 host가 필수라 기존 화이트리스트 항목과 안전모델이 같다.
+    ("system_db", 5, """
+        CREATE TABLE IF NOT EXISTS system_custom_commands (
+            tool_name      TEXT PRIMARY KEY,
+            description    TEXT NOT NULL,
+            argv_template  JSONB NOT NULL,
+            params         JSONB NOT NULL DEFAULT '[]',
+            required_roles TEXT[] NOT NULL DEFAULT '{}',
+            enabled        BOOLEAN NOT NULL DEFAULT false,
+            created_by     TEXT,
+            created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_by     TEXT,
+            updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+    """),
 ]
 
 

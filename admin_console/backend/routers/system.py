@@ -1,8 +1,10 @@
 """
 System MCP 화이트리스트 on/off 토글 + job_logs(실행 감사로그) 조회 API.
-새 화이트리스트 함수 자체의 '구현'은 이 콘솔에서 만들 수 없다 (System MCP 코드 배포 필요).
-여기서는 이미 배포된 항목의 활성/비활성만 제어한다.
+코드 내장 화이트리스트 함수 자체의 '구현'은 이 콘솔에서 만들 수 없다 (System MCP 코드 배포 필요).
+대신 /custom-commands로 콘솔에서 직접 새 커맨드(argv 기반)를 등록할 수 있다 - 그것도 System MCP
+기동 시 1회만 반영되므로 추가/수정 후에는 System MCP 재시작이 필요하다.
 """
+import json
 import sys
 import os
 
@@ -14,6 +16,9 @@ from db import get_pool
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../../mcp_servers/system_mcp"))
 from whitelist import WHITELIST  # noqa: E402  (핸들러 함수 자체가 아니라 name/description 메타데이터만 사용)
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../../shared"))
+from custom_commands import validate_definition  # noqa: E402
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -116,3 +121,95 @@ async def list_logs(limit: int = 100, admin: str = Depends(require_admin)):
         limit,
     )
     return [dict(r) for r in rows]
+
+
+class CommandParamIn(BaseModel):
+    name: str
+    type: str = "str"
+
+
+class CustomCommandIn(BaseModel):
+    """argv_template: 커맨드 토큰 리스트(예: ["iostat", "-x", "1", "{count}"]).
+    "{param}" 형태 토큰만 params에 정의된 값으로 치환되고, 나머지는 그대로 실행된다(셸 미사용).
+    host/user_id는 예약되어 있다 - 항상 자동으로 붙는다(호출자 본인 권한으로만 실행)."""
+    tool_name: str
+    description: str
+    argv_template: list[str]
+    params: list[CommandParamIn] = []
+    required_roles: list[str] = []
+    enabled: bool = False
+
+
+def _row_to_dict(r) -> dict:
+    d = dict(r)
+    d["argv_template"] = json.loads(d["argv_template"])
+    d["params"] = json.loads(d["params"])
+    return d
+
+
+@router.get("/custom-commands")
+async def list_custom_commands(admin: str = Depends(require_admin)):
+    pool = await get_pool("system_db_dsn")
+    rows = await pool.fetch(
+        "SELECT tool_name, description, argv_template, params, required_roles, enabled, "
+        "created_by, created_at, updated_by, updated_at FROM system_custom_commands "
+        "ORDER BY created_at DESC"
+    )
+    return [_row_to_dict(r) for r in rows]
+
+
+@router.post("/custom-commands")
+async def create_custom_command(body: CustomCommandIn, admin: str = Depends(require_admin)):
+    pool = await get_pool("system_db_dsn")
+    existing = await pool.fetch("SELECT tool_name FROM system_custom_commands")
+    existing_names = {r["tool_name"] for r in existing} | set(WHITELIST.keys())
+    params = [p.model_dump() for p in body.params]
+    try:
+        validate_definition(body.tool_name, body.argv_template, params, existing_names)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    await pool.execute(
+        """
+        INSERT INTO system_custom_commands
+            (tool_name, description, argv_template, params, required_roles, enabled, created_by, updated_by)
+        VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7, $7)
+        """,
+        body.tool_name, body.description, json.dumps(body.argv_template), json.dumps(params),
+        [r.strip() for r in body.required_roles if r and r.strip()], body.enabled, admin,
+    )
+    return {"ok": True, "restart_required": True}
+
+
+@router.patch("/custom-commands/{tool_name}")
+async def update_custom_command(tool_name: str, body: CustomCommandIn, admin: str = Depends(require_admin)):
+    pool = await get_pool("system_db_dsn")
+    row = await pool.fetchrow("SELECT tool_name FROM system_custom_commands WHERE tool_name = $1", tool_name)
+    if not row:
+        raise HTTPException(404, "등록되지 않은 커맨드입니다.")
+    if body.tool_name != tool_name:
+        raise HTTPException(400, "이름은 바꿀 수 없습니다(삭제 후 새로 등록하세요).")
+    params = [p.model_dump() for p in body.params]
+    try:
+        validate_definition(tool_name, body.argv_template, params, set(WHITELIST.keys()))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    await pool.execute(
+        """
+        UPDATE system_custom_commands
+        SET description = $2, argv_template = $3::jsonb, params = $4::jsonb,
+            required_roles = $5, enabled = $6, updated_by = $7, updated_at = now()
+        WHERE tool_name = $1
+        """,
+        tool_name, body.description, json.dumps(body.argv_template), json.dumps(params),
+        [r.strip() for r in body.required_roles if r and r.strip()], body.enabled, admin,
+    )
+    return {"ok": True, "restart_required": True}
+
+
+@router.delete("/custom-commands/{tool_name}")
+async def delete_custom_command(tool_name: str, admin: str = Depends(require_admin)):
+    pool = await get_pool("system_db_dsn")
+    await pool.execute("DELETE FROM system_custom_commands WHERE tool_name = $1", tool_name)
+    return {"ok": True, "restart_required": True}
