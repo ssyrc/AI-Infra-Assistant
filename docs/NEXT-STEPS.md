@@ -2,29 +2,25 @@
 
 ## ⚡ 지금 당장 (순서대로)
 
-### -2) hgpu4041 — 임베딩/리랭커 "CUDA busy" 원인 확정: GPU가 Exclusive_Process 모드
+### -2) hgpu4041 — 임베딩/리랭커 "CUDA busy" — Exclusive_Process 이론은 틀렸음, 로그 필요
 
-`nvidia-smi` 출력에서 4개 GPU 전부 `Compute M.` 열이 `E. Process`(Exclusive_Process)로 돼 있다.
-이 모드는 **GPU 하나당 CUDA 컨텍스트(프로세스)를 딱 1개만** 허용한다 — 메모리가 남아도(현재
-GPU당 약 8.6GB 여유) 상관없이 막는다. 지금 LLM의 tensor-parallel 워커 4개가 GPU 0~3을 하나씩
-이미 점유하고 있어서, 그 위에 임베딩(GPU 0)이나 리랭커(GPU 1)를 추가로 올리려 하면 두 번째
-컨텍스트를 못 만들어 "CUDA busy"가 난다. 애초 계획(GPU 하나를 LLM+임베딩, 또 하나를 LLM+리랭커가
-나눠 쓰는 구성)이 되려면 모드를 `Default`로 바꿔야 한다.
+`nvidia-smi -c 0`으로 4개 GPU 전부 `Default` 모드로 바꾼 뒤 다시 시도했는데도 임베딩/리랭커가
+똑같이 "CUDA busy"로 실패함 → **Exclusive_Process 모드가 원인이 아니었다.** 지금은 다음 둘 중
+하나로 추정됨:
+- GPU당 실사용 메모리가 이미 72.9~73GiB/81.5GiB(LLM만으로 89%)라 실제로는 **메모리 부족**인데
+  vLLM/torch가 에러 메시지를 "busy"로 뭉뚱그려 보여줬을 가능성.
+- `docker run`의 `--gpus` 지정 방식이나 컨테이너 안에서 실제로 잡히는 GPU 인덱스가 의도한 것과
+  다를 가능성(`--gpus '"device=0"'`이 호스트 인덱스와 컨테이너 안 인덱스가 다르게 매핑되는 경우가
+  있음).
 
+**정확한 원인을 알려면 실제 에러 로그가 필요함** — 다음을 Errors에 붙여서 보내줘:
 ```bash
-# 1) 먼저 시도 (기존 프로세스 안 죽이고 바로 적용되는 경우가 많음)
-sudo nvidia-smi -c 0   # 0 = Default. 전체 GPU에 적용됨
-nvidia-smi --query-gpu=index,compute_mode --format=csv   # 확인
-
-# 2) 위가 "GPU is busy" 등으로 실패하면, LLM을 내렸다가 모드 변경 후 전부 재기동
-docker stop serve-vllm-llm
-sudo nvidia-smi -c 0
-nvidia-smi --query-gpu=index,compute_mode --format=csv   # Default인지 확인
-# 그 다음 아래 0)번 LLM 커맨드, 2)번 임베딩/리랭커 커맨드를 순서대로 재실행
+docker logs serve-vllm-embed --tail 80
+docker logs serve-vllm-rerank --tail 80
+nvidia-smi   # 임베딩/리랭커 기동 시도 직후 상태(GPU별 메모리 사용량 포함)
 ```
-재부팅하면 이 설정이 초기값(보통 Default이지만 장비마다 다를 수 있음)으로 돌아갈 수 있으니,
-계속 `E. Process`로 나오면 `/etc/rc.local`이나 systemd 유닛에서 강제로 Exclusive_Process를
-거는 스크립트가 있는지 확인이 필요할 수 있음.
+메모리 부족이 맞다면 LLM의 `--gpu-memory-utilization`을 0.85 → 0.7 정도로 낮추고 재기동해서
+GPU당 여유를 더 확보한 뒤 재시도.
 
 ### -1) admin-console 빌드 실패 (`openpyxl`, `python-pptx` 못 찾음) — 방금 고침, 코드 갱신 후 재시도
 
@@ -243,6 +239,16 @@ section, text, image_files` 같은 PPT 전처리 결과도 그대로 업로드�
 골라 내용에 포함시키면 된다(예: section+text+image_files 체크). "제목" 라디오로 섹션 제목 열을,
 "페이지/순번" 라디오로 `slide_index`처럼 숫자인 열을 골라 청크에 p번호로 저장할 수 있다(둘 다
 선택 사항). 고정된 컬럼 이름을 요구하지 않는다.
+
+## VOC 탭 — "지원하지 않는 형식입니다. 지원: .xlsx" 에러는 헤더 형식과 무관, 확장자 문제
+
+재빌드 후에도 VOC 엑셀 업로드에서 이 에러가 그대로 난다면, 원인은 1행/4행 헤더 자동 인식 로직과
+**전혀 관계없다.** 이 메시지는 헤더를 보기도 전에 파일 확장자만 검사하는 코드
+(`admin_console/backend/uploads.py`/`server_files.py`)에서 나온다 — 즉 업로드한 파일이 실제로는
+`.xlsx`가 아니라는 뜻(예: 옛날 바이너리 `.xls` 형식으로 저장된 파일, 또는 확장자 없이 저장된
+파일). Windows 탐색기에서 파일 속성이나 실제 확장자를 확인해보고, 진짜 확장자가 뭔지 알려주면
+그에 맞게 지원을 추가한다(`.xls`는 openpyxl이 아예 못 읽는 옛날 포맷이라 별도 라이브러리가
+필요해서, 실제로 그 포맷이 맞는지 먼저 확인 후 작업하는 게 맞음).
 
 ## 커맨드 카탈로그 — 고정 양식 없음
 

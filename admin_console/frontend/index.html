@@ -481,7 +481,7 @@ function VocPanel() {
           <span style={{marginLeft: "auto", display: "flex", alignItems: "center", gap: 6}}>
             <input type="file" accept=".xlsx" onChange={e => e.target.files[0] && importFile(e.target.files[0])} />
             <button onClick={() => setShowBrowser(true)}>서버 파일에서 선택</button>
-            <span style={{fontSize: 11.5, color: "var(--muted)"}}>사내 VOC 엑셀 일괄 등록 (4행 헤더: 의뢰내용/조치일/처리내용/만족도)</span>
+            <span style={{fontSize: 11.5, color: "var(--muted)"}}>엑셀 일괄 등록(.xlsx만 지원) — 1행 헤더 Question/Answer 또는 사내 표준 4행 헤더(의뢰내용/조치일/처리내용/만족도) 형식을 자동 인식</span>
           </span>
         </div>
       </div>
