@@ -251,16 +251,21 @@ openpyxl을 vendor로 고치고 재빌드하니 requirements.txt의 바로 다�
 일치해 재사용)를 동일한 방식으로 vendor에 추가. requirements.txt의 나머지 줄(`redis`,
 `bcrypt`, `docker`)은 이미 vendor에 있어 이어서 문제 없을 것으로 예상 — 재시도 결과 확인 필요.
 
-## 19. 임베딩/리랭커 "CUDA busy" 원인 확정 — GPU Exclusive_Process 모드 (문서화, 조치 필요)
+## 19. 임베딩/리랭커 "CUDA busy" — 1차 진단(Exclusive_Process)은 틀렸음, 진짜 원인은 메모리 부족
 
 LLM(`--max-model-len 32768`)은 정상 기동 확인됨. 이어서 임베딩(GPU 0)·리랭커(GPU 1)를 올리려니
-"CUDA busy" 에러. `nvidia-smi` 확인 결과 4개 GPU 전부 `Compute M.: E. Process`
-(Exclusive_Process) — 이 모드는 GPU당 CUDA 컨텍스트를 1개로 제한한다(메모리 여유와 무관).
-LLM의 tensor-parallel 워커 4개가 이미 GPU 0~3을 하나씩 점유 중이라, 임베딩/리랭커가 같은
-GPU에 두 번째 컨텍스트를 열 수 없어서 나는 에러로 확인(예전에 LLM 자체가 안 뜰 때 의심했던
-SELinux/Exclusive_Process 이론과는 다른 건 — 그때는 실제로 경로 오타였고, 이번엔 진짜
-Exclusive_Process 모드가 원인). 해결책은 `docs/NEXT-STEPS.md` -2번: `nvidia-smi -c 0`으로
-Default 모드로 전환 후 LLM/임베딩/리랭커 순서대로 재기동.
+"CUDA busy" 에러. 처음엔 `nvidia-smi`의 `Compute M.: E. Process`(Exclusive_Process)를 원인으로
+의심해 `nvidia-smi -c 0`으로 Default 전환했으나, 재시도해도 똑같이 실패 — **Exclusive_Process는
+원인이 아니었음.** 실제 로그로 확정:
+```
+ValueError: Free memory on device (7.38/79.21 GiB) on startup is less than desired GPU memory
+utilization (0.15, 11.88 GiB). Decrease GPU memory utilization or reduce GPU memory used by other processes.
+```
+LLM의 실사용 메모리(약 73GiB)가 `--gpu-memory-utilization 0.85`의 이론치(약 67.3GiB)보다 커서
+(CUDA 컨텍스트/드라이버 오버헤드 등) GPU당 실제 여유는 7.38GiB뿐인데, 임베딩이 요청한 0.15
+(11.88GiB)가 이를 초과해서 난 순수 메모리 부족 에러였음("CUDA busy"는 사용자가 요약한 표현).
+해결: 임베딩/리랭커의 `--gpu-memory-utilization`을 0.15 → 0.08로 낮춤(`docs/NEXT-STEPS.md`
+-2번에 새 커맨드 반영, 재시도 결과 확인 필요).
 
 ## 20. 매뉴얼 엑셀 열 선택 UI 이해 어려움 (완료)
 

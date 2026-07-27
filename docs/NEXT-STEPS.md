@@ -2,25 +2,38 @@
 
 ## ⚡ 지금 당장 (순서대로)
 
-### -2) hgpu4041 — 임베딩/리랭커 "CUDA busy" — Exclusive_Process 이론은 틀렸음, 로그 필요
+### -2) hgpu4041 — 임베딩/리랭커 실패 원인 확정: 진짜 메모리 부족 (Exclusive_Process 아니었음)
 
-`nvidia-smi -c 0`으로 4개 GPU 전부 `Default` 모드로 바꾼 뒤 다시 시도했는데도 임베딩/리랭커가
-똑같이 "CUDA busy"로 실패함 → **Exclusive_Process 모드가 원인이 아니었다.** 지금은 다음 둘 중
-하나로 추정됨:
-- GPU당 실사용 메모리가 이미 72.9~73GiB/81.5GiB(LLM만으로 89%)라 실제로는 **메모리 부족**인데
-  vLLM/torch가 에러 메시지를 "busy"로 뭉뚱그려 보여줬을 가능성.
-- `docker run`의 `--gpus` 지정 방식이나 컨테이너 안에서 실제로 잡히는 GPU 인덱스가 의도한 것과
-  다를 가능성(`--gpus '"device=0"'`이 호스트 인덱스와 컨테이너 안 인덱스가 다르게 매핑되는 경우가
-  있음).
-
-**정확한 원인을 알려면 실제 에러 로그가 필요함** — 다음을 Errors에 붙여서 보내줘:
-```bash
-docker logs serve-vllm-embed --tail 80
-docker logs serve-vllm-rerank --tail 80
-nvidia-smi   # 임베딩/리랭커 기동 시도 직후 상태(GPU별 메모리 사용량 포함)
+로그로 확정됨:
 ```
-메모리 부족이 맞다면 LLM의 `--gpu-memory-utilization`을 0.85 → 0.7 정도로 낮추고 재기동해서
-GPU당 여유를 더 확보한 뒤 재시도.
+ValueError: Free memory on device (7.38/79.21 GiB) on startup is less than desired GPU memory
+utilization (0.15, 11.88 GiB). Decrease GPU memory utilization or reduce GPU memory used by other processes.
+```
+LLM이 실제로 쓰는 메모리(약 73GiB)가 `--gpu-memory-utilization 0.85`의 이론치(약 67.3GiB, 79.21GiB
+기준)보다 커서(CUDA 컨텍스트/드라이버 오버헤드 등), GPU당 실제 남는 메모리는 7.38GiB뿐인데 임베딩이
+요청한 `0.15`(11.88GiB)가 이보다 큼. **"CUDA busy"는 이 메모리 부족 에러를 사용자가 요약한 표현이었고,
+Exclusive_Process/장치 인덱스 문제는 아니었음.**
+
+해결: `--gpu-memory-utilization`을 7.38GiB보다 확실히 작게 낮춘다(`0.08` × 79.21GiB ≈ 6.3GiB로
+여유 있게). bge-reranker-v2-m3는 모델 자체가 아주 작아서(파라미터 수백M) 0.08로도 충분함:
+```bash
+docker run -dit --rm --gpus '"device=0"' --network host --ipc host \
+    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
+    --name serve-vllm-embed repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
+    --model /workspace/models/Qwen3-Embedding-8B \
+    --task embed --gpu-memory-utilization 0.08 \
+    --port 8010 --served-model-name qwen3-embedding-8b
+
+docker run -dit --rm --gpus '"device=1"' --network host --ipc host \
+    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
+    --name serve-vllm-rerank repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
+    --model /workspace/models/bge-reranker-v2-m3 \
+    --task score --gpu-memory-utilization 0.08 \
+    --port 8020 --served-model-name bge-reranker-v2-m3
+```
+이래도 같은 에러가 나면(즉, 실제 남는 메모리가 6.3GiB보다도 적다면) 0.06으로 더 낮추거나,
+LLM을 내렸다가 `--gpu-memory-utilization 0.75~0.8`로 다시 올려서 GPU당 여유를 더 확보한 뒤
+재시도.
 
 ### -1) admin-console 빌드 실패 (`openpyxl`, `python-pptx` 못 찾음) — 방금 고침, 코드 갱신 후 재시도
 
@@ -87,38 +100,20 @@ cp /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/.env.example \
 
 **앞으로는 반드시 `--exclude '.env'`를 붙인다** (아래 3번부터 반영됨).
 
-### 2) hgpu4041 — 임베딩 + 리랭커 기동 (LLM은 확인됨, 이제 이 둘 차례)
+### 2) hgpu4041 — 임베딩 + 리랭커 기동 (LLM은 확인됨, 실제 기동 커맨드는 위 -2번 참고)
 
-**임베딩** (GPU 0, LLM과 같은 GPU를 나눠 씀 — utilization 낮게):
-```bash
-docker run -dit --rm --gpus '"device=0"' --network host --ipc host \
-    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
-    --name serve-vllm-embed repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
-    --model /workspace/models/Qwen3-Embedding-8B \
-    --task embed --gpu-memory-utilization 0.15 \
-    --port 8010 --served-model-name qwen3-embedding-8b
-```
+임베딩/리랭커 `docker run` 커맨드(올바른 `--gpu-memory-utilization 0.08` 값 포함)는 위 **-2번**에
+있음 — 여기 있던 이전 버전(0.15)은 메모리 부족으로 실패 확인됨, 삭제함.
 
-**리랭커** — 모델이 아직 없으면 먼저 내려받아 전송(인터넷 되는 WSL/서버에서 1회, LLM/임베딩
+리랭커 모델이 아직 hgpu4041에 없으면 먼저 내려받아 전송(인터넷 되는 WSL/서버에서 1회, LLM/임베딩
 때와 동일한 패턴):
 ```bash
 huggingface-cli download BAAI/bge-reranker-v2-m3 --local-dir ./models/bge-reranker-v2-m3
 rsync -avz --progress ./models/bge-reranker-v2-m3 yr9.choi@75.23.32.41:/home/gpu1/yr9.choi/05_halo/models/
 ```
 확인: `ls /home/gpu1/yr9.choi/05_halo/models/bge-reranker-v2-m3` (hgpu4041에서, config.json 등
-있는지). 모델이 준비되면 GPU 1에 `--task score`로 기동(vLLM의 Cohere 호환 `/rerank` 라우트가
-자동 노출됨):
-```bash
-docker run -dit --rm --gpus '"device=1"' --network host --ipc host \
-    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
-    --name serve-vllm-rerank repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
-    --model /workspace/models/bge-reranker-v2-m3 \
-    --task score --gpu-memory-utilization 0.15 \
-    --port 8020 --served-model-name bge-reranker-v2-m3
-```
-GPU 1은 LLM(tensor-parallel-size 4라서 GPU 0~3 전부 0.85씩 사용) + 리랭커(0.15)로 딱 채워지는
-셈이라 여유가 없다. OOM 나면 0번의 LLM `--gpu-memory-utilization`을 0.8이나 0.75로 낮추거나
-리랭커를 0.1로 더 낮춰서 재시도. 상태 확인:
+있는지). 모델이 준비되면 -2번의 `docker run` 커맨드로 기동(vLLM의 Cohere 호환 `/rerank` 라우트가
+자동 노출됨). 상태 확인:
 ```bash
 docker logs serve-vllm-embed --tail 50
 docker logs serve-vllm-rerank --tail 50
