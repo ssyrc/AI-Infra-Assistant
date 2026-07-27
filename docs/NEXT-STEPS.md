@@ -13,12 +13,19 @@ git pull origin main
 admin_console 화면 검은화면(`vendor/react.production.min.js` 로드 실패) 원인은 vendor 파일 누락.
 인터넷 되는 곳에서 받아서 서버로 옮기기:
 ```bash
+# curl이 "error setting certificate file: ..." 로 죽으면 죽은 인증서 경로가 env에 남아있는 것
+unset CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR
+
 cd admin_console/frontend/vendor
 curl -o react.production.min.js https://unpkg.com/react@18/umd/react.production.min.js
 curl -o react-dom.production.min.js https://unpkg.com/react-dom@18/umd/react-dom.production.min.js
 curl -o babel.min.js https://unpkg.com/@babel/standalone/babel.min.js
 ```
-받은 3개 파일을 서버의 `admin_console/frontend/vendor/`에 rsync.
+받은 3개 파일 + 최신 코드를 서버로 반영:
+```bash
+rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
+  yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
+```
 
 컨테이너 재기동 (포트 매핑 반영):
 ```bash
@@ -28,6 +35,14 @@ curl http://localhost:8500/health
 ```
 - 관리자 콘솔: http://<서버IP>:8501 (화면 정상 뜨는지, admin/admin)
 - 사용자 웹: http://<서버IP>:8502
+
+open-webui 채팅에서 `Failed to create MCP session: Connection closed`가 뜨면 — `up -d`로 MCP
+컨테이너만 재생성되고 agent-server는 옛 연결을 붙들고 있어서 그렇다. 전부 같이 재시작:
+```bash
+bash scripts/restart-mounted.sh
+```
+(Open WebUI가 띄우는 `WebUI could not connect to Ollama` 500 에러는 무시해도 됨 — 이 프로젝트는
+Ollama를 안 쓰고 agent-server의 OpenAI 호환 API만 쓴다.)
 
 ## 1. 인터넷 되는 곳에서 모델 다운로드
 
