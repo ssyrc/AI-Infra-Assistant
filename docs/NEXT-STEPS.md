@@ -2,49 +2,45 @@
 
 ## ⚡ 지금 당장 (순서대로)
 
-### 0) hgpu4041 — vLLM "CUDA error: device busy" (LLM/임베딩만, 리랭커는 정상)
-리랭커(device=1)는 떴는데 LLM(all)/임베딩(device=0)만 안 뜨는 건, 이전 시도 때 뜬 프로세스가
-GPU를 아직 붙들고 있거나(정상 종료 안 됨) 다른 job이 같은 GPU를 쓰고 있는 것으로 보인다.
+### 0) hgpu4041 — CUDA busy는 지금 GPU 다 비어있음, 그냥 재시도
+`nvidia-smi` 확인 결과 GPU 0/2/3는 프로세스 없이 완전히 비어있고(1MiB만 사용, 드라이버 상주분),
+GPU 1은 리랭커(`VLLM::EngineCore`)만 정상적으로 붙어있다. 좀비 프로세스가 GPU를 붙들고 있는
+상태가 아니므로, 아까 에러는 일시적이었을 가능성이 높다. `docker ps -a`에도 llm/embed 컨테이너가
+없으니(생성 자체가 안 됐거나 이미 지움) 이름 충돌 걱정 없이 그냥 다시 실행하면 된다:
 ```bash
-nvidia-smi                      # 각 GPU에 실제 붙어있는 프로세스 확인
-docker ps -a | grep serve-vllm  # 이전 컨테이너가 Exited/Up 상태로 남아있는지
-docker rm -f serve-vllm-llm serve-vllm-embed 2>/dev/null   # 남아있으면 정리 후 재시도
+docker run -dit --rm --gpus all --network host --ipc host \
+    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
+    --name serve-vllm-llm repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
+    --model /workspace/models/Qwen3-235B-A22B-Instruct-2507-FP8 \
+    --tensor-parallel-size 4 --gpu-memory-utilization 0.85 \
+    --port 8000 --served-model-name qwen3-235b-a22b
+
+docker run -dit --rm --gpus '"device=0"' --network host --ipc host \
+    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
+    --name serve-vllm-embed repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
+    --model /workspace/models/Qwen3-Embedding-8B \
+    --task embed --gpu-memory-utilization 0.15 \
+    --port 8010 --served-model-name qwen3-embedding-8b
 ```
-`nvidia-smi`에 다른 사용자/프로세스가 GPU 0~3을 붙들고 있으면 폐쇄망 GPU 서버가 공유 자원이라
-그런 것 — 담당자 확인 필요. 컨테이너 이름 충돌 없이 정리됐는데도 계속 busy면 결과 알려주면 이어서 봐줄게.
+(`--rm`을 다시 붙였다 — 실패해도 컨테이너가 안 남아서 다음 재시도가 깔끔함.) 또 busy 뜨면
+`docker logs serve-vllm-llm`으로 어느 GPU에서 나는 에러인지 확인해서 알려줘.
 
-### 1) 에이전트 서버(202.20.183.30) — ⚠️ `.env`가 지워졌을 가능성 (먼저 확인)
-지금까지 쓴 `rsync --delete`에 `--exclude '.env'`가 빠져 있었다. `.env`는 git에 없는(서버에서만
-만든) 파일이라, WSL 쪽 소스에는 애초에 없다 — `--delete`가 그걸 "소스에 없는 파일"로 보고
-**서버의 `.env`를 지웠을 수 있다.** 방금 admin-console 빌드가 `docker.io/python:...`을 직접
-받으려다 실패한 것(사내 미러 `REGISTRY_DOCKERHUB` 없이 기본값으로 떨어진 것)이 정확히 이 증상과
-일치한다.
-
-먼저 확인:
+### 1) 에이전트 서버(202.20.183.30) — `.env` 확인됨: 삭제됨 → 복구
+`cat .env` 결과 `No such file or directory` — 예상대로 rsync `--delete`가 지운 것. 다행히
+`.env.example`에 이미 사내 미러 실제 값이 CHANGE_ME 없이 채워져 있고(`REGISTRY_DOCKERHUB`,
+`REGISTRY_GHCR`, `PIP_INDEX_URL`, `BUILD_PROXY`, `APT_MIRROR` 등), dev 트랙은 비밀번호도
+`docker-compose.dev.yml`에 `devpass`/`admin`/`admin`으로 고정돼 있어서 `.env`의 CHANGE_ME
+값들과 무관하다. 그냥 복사만 하면 됨:
 ```bash
-cat /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/.env
+cp /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/.env.example \
+   /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/.env
 ```
-없거나 `REGISTRY_DOCKERHUB` 줄이 없으면, 원래 쓰던 `.env`를 복구하거나 새로 채워야 한다
-(`REGISTRY_DOCKERHUB=repository.samsungds.net/proxy-docker-registry-1.docker.io` 등 사내 미러 값).
-백업이 없으면 `.env.example`을 베이스로 다시 채우는 수밖에 없다 — 기존에 어떤 값을 넣었었는지
-알려주면 같이 복구할 수 있음.
 
 **앞으로는 반드시 `--exclude '.env'`를 붙인다** (아래 3번부터 반영됨).
 
-### 2) hgpu4041 — 리랭커도 기동 (완료, 나머지 GPU도 되면 재확인만)
-LLM/임베딩은 이미 떴다(경로가 `halo_workspace/models`가 아니라 `05_halo/models`였던 게 원인).
-리랭커는 `BAAI/bge-reranker-v2-m3`를 vLLM `--task score`로 띄우면 된다(vLLM의 Cohere 호환
-`/rerank` 라우트 노출). GPU 1장에 여유 있는 만큼만 필요:
-```bash
-docker run -dit --rm --gpus '"device=0"' --network host --ipc host \
-    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
-    --name serve-vllm-rerank repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
-    --model /workspace/models/bge-reranker-v2-m3 \
-    --task score --gpu-memory-utilization 0.1 \
-    --port 8020 --served-model-name bge-reranker-v2-m3
-```
-> vLLM 버전(0.10.1.1)에 따라 `--task score` 플래그명이 다를 수 있다. 기동 로그에
-> `/rerank` 또는 `/v1/score` 라우트가 뜨는지로 확인.
+### 2) hgpu4041 — 리랭커 (완료, GPU 1에 이미 떠 있음)
+`BAAI/bge-reranker-v2-m3`를 vLLM `--task score`로 GPU 1에 띄운 게 이미 정상 동작 중(vLLM의
+Cohere 호환 `/rerank` 라우트 노출). LLM/임베딩만 0번 재시도하면 됨.
 
 ### 3) 도달 확인
 ```bash
@@ -118,11 +114,8 @@ curl http://202.20.183.30:8500/v1/models   # qwen3-235b-a22b 나오는지
   실제 커맨드 노출, 필요 역할 "전체 허용/admin 전용" 선택으로 변경.
 - 계정 관리 탭 신설(admin 계정 여러 개 관리, `.env` 기본 계정은 잠금 방지용으로 항상 유효).
 - 설정 탭 "MCP 엔드포인트" 그룹에 왜 내부망 이름을 그대로 둬야 하는지 경고 카드 추가.
-
-## 진행 중
-
-- VOC 이력 엑셀 업로드: 4행부터 헤더, 의뢰내용/조치일/처리내용/만족도만 사용, 조치일·처리내용
-  있는 행만, 만족도 "불만족"·"매우불만족" 제외, 본문 HTML은 태그만 제거하고 내용(명령어/코드
-  포함)은 그대로 보존.
+- VOC 이력 엑셀 업로드 재작성: 4행부터 헤더, 의뢰내용/조치일/처리내용/만족도만 사용, 조치일·
+  처리내용 있는 행만, 만족도 "불만족"·"매우불만족" 제외, 본문 HTML은 태그만 제거하고 내용
+  (명령어/코드 포함)은 그대로 보존.
 
 완료/과거 내역은 `docs/RUN-LOG.md` 참고.
