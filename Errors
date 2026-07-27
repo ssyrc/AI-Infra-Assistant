@@ -50,3 +50,59 @@ curl: (56) Recv failure: Connection reset by peer
 curl: (56) Recv failure: Connection reset by peer
 curl: (56) Recv failure: Connection reset by peer
 {"status":"ok","model":"mock-llm"}
+
+[root@24-gp19 AI-Infra-Assistant]# curl -s http://localhost:8500/v1/chat/completions -H 'Content-Type: application/json' \
+>   -d '{"model":"mock-llm","messages":[{"role":"user","content":"안녕"}]}'
+Internal Server Error[root@24-gp19 AI-Infra-Assistant]#
+[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml logs --tail=50 agent-server
+agent-server-1  |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+agent-server-1  |     raise exc
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+agent-server-1  |     await app(scope, receive, sender)
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 105, in app
+agent-server-1  |     response = await f(request)
+agent-server-1  |                ^^^^^^^^^^^^^^^^
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 385, in app
+agent-server-1  |     raw_response = await run_endpoint_function(
+agent-server-1  |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 284, in run_endpoint_function
+agent-server-1  |     return await dependant.call(**values)
+agent-server-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent-server-1  |   File "/app/agent_server/main.py", line 271, in chat_completions
+agent-server-1  |     async for event in runner.run_async(user_id=user_id, session_id=session_id,
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/runners.py", line 519, in run_async
+agent-server-1  |     async for event in agen:
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/runners.py", line 507, in _run_with_trace
+agent-server-1  |     async for event in agen:
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/runners.py", line 739, in _exec_with_plugin
+agent-server-1  |     async for event in agen:
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/runners.py", line 496, in execute
+agent-server-1  |     async for event in agen:
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/agents/base_agent.py", line 294, in run_async
+agent-server-1  |     async for event in agen:
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/agents/llm_agent.py", line 468, in _run_async_impl
+agent-server-1  |     async for event in agen:
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 362, in run_async
+agent-server-1  |     async for event in agen:
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 381, in _run_one_step_async
+agent-server-1  |     async for event in agen:
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 496, in _preprocess_async
+agent-server-1  |     tools = await _convert_tool_union_to_tools(
+agent-server-1  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/agents/llm_agent.py", line 180, in _convert_tool_union_to_tools
+agent-server-1  |     return await tool_union.get_tools_with_prefix(ctx)
+agent-server-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/tools/base_toolset.py", line 114, in get_tools_with_prefix
+agent-server-1  |     tools = await self.get_tools(readonly_context)
+agent-server-1  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/tools/mcp_tool/mcp_session_manager.py", line 173, in wrapper
+agent-server-1  |     return await func(self, *args, **kwargs)
+agent-server-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/tools/mcp_tool/mcp_toolset.py", line 163, in get_tools
+agent-server-1  |     session = await self._mcp_session_manager.create_session(headers=headers)
+agent-server-1  |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent-server-1  |   File "/usr/local/lib/python3.11/site-packages/google/adk/tools/mcp_tool/mcp_session_manager.py", line 426, in create_session
+agent-server-1  |     raise ConnectionError(f'Failed to create MCP session: {e}') from e
+agent-server-1  | ConnectionError: Failed to create MCP session: Connection closed
+
