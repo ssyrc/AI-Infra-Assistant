@@ -22,6 +22,49 @@ docker run -dit --gpus '"device=1"' --network host --ipc host \
     --port 8020 --served-model-name bge-reranker-v2-m3
 
 
+# 현재 상태
+[root@hgpu4041 models]# docker ps -a
+CONTAINER ID   IMAGE                                                  COMMAND                  CREATED          STATUS          PORTS     NAMES
+2a3e4ad4595f   repo.samsungds.net/docker.io/vllm/vllm-openai:latest   "python3 -m vllm.ent…"   24 minutes ago   Up 24 minutes             serve-vllm-rerank
+[root@hgpu4041 models]# nvidia-smi
+Mon Jul 27 19:56:57 2026
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 560.35.05              Driver Version: 560.35.05      CUDA Version: 12.6     |
+|-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA H100 80GB HBM3          On  |   00000000:55:00.0 Off |                    0 |
+| N/A   35C    P0             68W /  700W |       1MiB /  81559MiB |      0%   E. Process |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+|   1  NVIDIA H100 80GB HBM3          On  |   00000000:68:00.0 Off |                    0 |
+| N/A   33C    P0            119W /  700W |    2355MiB /  81559MiB |      0%   E. Process |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+|   2  NVIDIA H100 80GB HBM3          On  |   00000000:D2:00.0 Off |                    0 |
+| N/A   33C    P0             69W /  700W |       1MiB /  81559MiB |      0%   E. Process |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+|   3  NVIDIA H100 80GB HBM3          On  |   00000000:E4:00.0 Off |                    0 |
+| N/A   33C    P0             69W /  700W |       1MiB /  81559MiB |      0%   E. Process |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI        PID   Type   Process name                              GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|    1   N/A  N/A   2209676      C   VLLM::EngineCore                             2344MiB |
++-----------------------------------------------------------------------------------------+
+
+# .env 지워짐
+[root@24-gp19 AI-Infra-Assistant]# cat /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/.env
+cat: /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/.env: No such file or directory
+
+
 # 관리자 콘솔 변경 필요 사항들
 0. docker compose 에러
 [root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml build admin-console
