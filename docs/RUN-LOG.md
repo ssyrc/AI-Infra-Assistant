@@ -264,8 +264,14 @@ utilization (0.15, 11.88 GiB). Decrease GPU memory utilization or reduce GPU mem
 LLM의 실사용 메모리(약 73GiB)가 `--gpu-memory-utilization 0.85`의 이론치(약 67.3GiB)보다 커서
 (CUDA 컨텍스트/드라이버 오버헤드 등) GPU당 실제 여유는 7.38GiB뿐인데, 임베딩이 요청한 0.15
 (11.88GiB)가 이를 초과해서 난 순수 메모리 부족 에러였음("CUDA busy"는 사용자가 요약한 표현).
-해결: 임베딩/리랭커의 `--gpu-memory-utilization`을 0.15 → 0.08로 낮춤(`docs/NEXT-STEPS.md`
--2번에 새 커맨드 반영, 재시도 결과 확인 필요).
+해결: 임베딩/리랭커의 `--gpu-memory-utilization`을 0.15 → 0.08로 낮춤.
+
+## 21. 0.08로도 임베딩 OOM — 좀비 컨테이너 의심 (조치 필요)
+
+0.08로 재시도해도 `torch.OutOfMemoryError: ... GPU 0 has a total capacity of 79.21 GiB of which
+33.44 MiB is free`. 직전 실패한 시도들이 `--rm`에도 불구하고 GPU 메모리를 계속 잡고 있는 좀비
+컨테이너/프로세스일 가능성이 있음. `docs/NEXT-STEPS.md` 1번: `docker rm -f`로 정리 후 재확인,
+그래도 안 되면 실패 직후 `nvidia-smi` 전체 출력(프로세스 목록 포함)을 받아서 진단 필요.
 
 ## 20. 매뉴얼 엑셀 열 선택 UI 이해 어려움 (완료)
 
