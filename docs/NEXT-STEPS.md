@@ -2,6 +2,29 @@
 
 ## ⚡ 지금 당장 (순서대로)
 
+### -1) admin-console 빌드 실패 (`openpyxl` 못 찾음) — 방금 고침, 코드 갱신 후 재시도
+
+```
+ERROR: Could not find a version that satisfies the requirement openpyxl==3.1.5 (from versions: none)
+```
+사내 미러(Nexus)가 `openpyxl`을 간헐적으로 못 찾는 문제(asyncpg 때 있었던 것과 동일 증상).
+`vendor/`에 `openpyxl`/`et_xmlfile`을 오프라인 휠로 추가했고, 이번에 새로 추가된 `bcrypt`/
+`docker`(재시작 버튼용) 및 그 의존성도 같은 문제가 나기 전에 미리 추가해뒀다. WSL에서 최신
+커밋을 받고 서버에 반영한 뒤 다시 빌드하면 된다:
+```bash
+git -C /home/yrc/AI-Infra-Assistant fetch origin main
+git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
+rsync -avz --delete --exclude '.env' --progress /home/yrc/AI-Infra-Assistant/ \
+  yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
+```
+서버(202.20.183.30)에서:
+```bash
+docker compose -f docker-compose.dev.yml build admin-console
+docker compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.dev.yml ps
+curl http://localhost:8500/health
+```
+
 ### 0) hgpu4041 — 실제 원인 확정: KV 캐시 부족 (busy 에러 아니었음)
 ```
 ValueError: To serve at least one request with the models's max seq len (262144),
