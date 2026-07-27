@@ -242,6 +242,15 @@ requirements.txt` 캐시가 처음으로 무효화됐고, 그 순간 사내 미�
 `charset_normalizer-3.4.9`). Dockerfile은 수정 없음(vendor의 모든 `*.whl`을 자동으로 먼저
 오프라인 설치하는 기존 메커니즘 그대로 사용).
 
+## 18. admin-console 빌드 실패 (2) — `python-pptx`도 같은 증상 (완료)
+
+openpyxl을 vendor로 고치고 재빌드하니 requirements.txt의 바로 다음 줄인
+`python-pptx==1.0.2`에서 동일하게 `from versions: none`. 사내 미러 결함이 한 패키지만이
+아니라 파일 순서대로 여러 줄에 걸쳐 나타나는 것으로 확인됨. `python_pptx-1.0.2` + 의존성
+`lxml-6.1.1`, `pillow-12.2.0`, `xlsxwriter-3.2.9`(`typing_extensions`는 기존 vendor 버전과
+일치해 재사용)를 동일한 방식으로 vendor에 추가. requirements.txt의 나머지 줄(`redis`,
+`bcrypt`, `docker`)은 이미 vendor에 있어 이어서 문제 없을 것으로 예상 — 재시도 결과 확인 필요.
+
 ---
 
 ## 다음 항목은 이어서 여기 아래에 추가

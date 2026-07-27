@@ -2,15 +2,19 @@
 
 ## ⚡ 지금 당장 (순서대로)
 
-### -1) admin-console 빌드 실패 (`openpyxl` 못 찾음) — 방금 고침, 코드 갱신 후 재시도
+### -1) admin-console 빌드 실패 (`openpyxl`, `python-pptx` 못 찾음) — 방금 고침, 코드 갱신 후 재시도
 
 ```
 ERROR: Could not find a version that satisfies the requirement openpyxl==3.1.5 (from versions: none)
+...(openpyxl 고치고 재시도하니) ERROR: ... python-pptx==1.0.2 (from versions: none)
 ```
-사내 미러(Nexus)가 `openpyxl`을 간헐적으로 못 찾는 문제(asyncpg 때 있었던 것과 동일 증상).
-`vendor/`에 `openpyxl`/`et_xmlfile`을 오프라인 휠로 추가했고, 이번에 새로 추가된 `bcrypt`/
-`docker`(재시작 버튼용) 및 그 의존성도 같은 문제가 나기 전에 미리 추가해뒀다. WSL에서 최신
-커밋을 받고 서버에 반영한 뒤 다시 빌드하면 된다:
+사내 미러(Nexus)가 특정 패키지를 간헐적으로 못 찾는 문제(예전 asyncpg와 동일 증상)가
+`requirements.txt`를 한 줄씩 순서대로 덮침 — openpyxl 고치니 바로 다음 줄 python-pptx에서
+또 발생. `vendor/`에 `openpyxl`/`et_xmlfile`/`python-pptx`/`lxml`/`Pillow`/`XlsxWriter`를
+오프라인 휠로 추가했고, `bcrypt`/`docker`(재시작 버튼용) 및 그 의존성도 같은 문제가 나기 전에
+미리 추가해뒀다. **혹시 이번에도 requirements.txt의 다음 줄(`redis`)에서 같은 에러가 또 나면**
+(이미 vendor에 있어 안 날 가능성이 높지만) 그 패키지 이름/버전을 알려주면 바로 추가한다. WSL에서
+최신 커밋을 받고 서버에 반영한 뒤 다시 빌드하면 된다:
 ```bash
 git -C /home/yrc/AI-Infra-Assistant fetch origin main
 git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
