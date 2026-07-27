@@ -75,29 +75,39 @@ async def system_info(user_id: str, host: str, kind: str = "uptime") -> dict:
 
 
 # name -> 실행 핸들러와 메타데이터.
-#  - enabled: 최초 기동 시 기본 활성 여부(이후 관리자 콘솔 토글이 우선). ssh 실행은 기본 OFF.
+#  - enabled: 최초 기동 시 기본 활성 여부(이후 관리자 콘솔 토글이 우선). 전부 read-only라 기본 ON.
 #  - required_roles: 지정 시 해당 역할 보유자만 실행(콘솔 편집, 실시간). X-User-Roles로 검증.
 #  - user_scoped: True면 user_id를 LLM 스키마에서 감추고 호출자 신원에서 강제 주입.
-_COMMON = {"enabled": False, "required_roles": [], "user_scoped": True, "scope_param": "user_id"}
+_COMMON = {"enabled": True, "required_roles": [], "user_scoped": True, "scope_param": "user_id"}
 
 WHITELIST = {
     "gpu_status": {"handler": gpu_status, "example_command": "nvidia-smi",
-                   "description": ("지정 서버(host)의 GPU 상태를 조회한다(nvidia-smi). "
-                                   "'특정 서버 GPU가 이상하다/몇 장 인식되나'를 확인할 때 사용. "
+                   "description": ("지정 서버(host)의 GPU 상태를 조회한다(nvidia-smi 결과: 인식된 GPU "
+                                   "장수, 모델명, 사용률/메모리, 실행 중인 프로세스). "
+                                   "'GPU가 이상하다/몇 장 인식되나/사용률이 높나'를 확인할 때 사용. "
                                    "host는 서버 이름(예: hgpu8002)."), **_COMMON},
     "list_dir": {"handler": list_dir, "example_command": "ls -lh [-a] <path>",
-                 "description": "지정 서버(host)에서 본인 권한으로 디렉토리를 나열한다(ls).", **_COMMON},
+                 "description": ("지정 서버(host)에서 본인 권한으로 디렉토리 내용을 나열한다(ls -lh). "
+                                  "'이 경로에 뭐가 있나/파일 크기가 어떻게 되나'를 확인할 때 사용. "
+                                  "show_hidden=True면 숨김 파일(.으로 시작)도 포함."), **_COMMON},
     "find_files": {"handler": find_files, "example_command": "find <path> [-name pattern] [-type f|d|l] (read-only)",
-                   "description": ("지정 서버(host)에서 파일을 검색한다(find, 읽기 전용). "
-                                   "이름 패턴/종류로 찾는다. 수정·삭제·실행은 못 한다."), **_COMMON},
+                   "description": ("지정 서버(host)에서 파일을 이름 패턴(glob, 예: '*.log')이나 종류로 "
+                                    "검색한다(find, 읽기 전용). '이 경로 밑에 로그 파일 어디 있나' 같은 "
+                                    "질문에 사용. 수정·삭제·실행은 못 한다."), **_COMMON},
     "disk_free": {"handler": disk_free, "example_command": "df -h",
-                  "description": "지정 서버(host)의 디스크 여유/사용 용량을 조회한다(df -h).", **_COMMON},
+                  "description": ("지정 서버(host)의 파일시스템별 디스크 여유/사용 용량을 조회한다"
+                                   "(df -h). '디스크 꽉 찼나/여유 공간 얼마나 되나'를 확인할 때 사용."), **_COMMON},
     "disk_usage": {"handler": disk_usage, "example_command": "du -h --max-depth=<n> <path>",
-                   "description": "지정 서버(host)에서 경로의 디스크 사용량을 조회한다(du).", **_COMMON},
+                   "description": ("지정 서버(host)에서 특정 경로가 디스크를 얼마나 쓰는지 조회한다"
+                                    "(du -h). '이 디렉토리가 용량을 얼마나 차지하나'를 확인할 때 사용. "
+                                    "max_depth로 하위 폴더별 세부 내역까지 볼 수 있다."), **_COMMON},
     "read_file_head": {"handler": read_file_head, "example_command": "head -n <lines> <path>",
-                       "description": "지정 서버(host)에서 텍스트 파일 앞부분을 읽는다(head).", **_COMMON},
+                       "description": ("지정 서버(host)에서 텍스트 파일 앞부분을 읽는다(head). "
+                                        "로그/설정 파일 내용을 앞에서부터 확인할 때 사용. "
+                                        "lines로 줄 수 조절(기본 200, 최대 2000)."), **_COMMON},
     "system_info": {"handler": system_info,
                     "example_command": "uptime | free -h | ip addr | who | lscpu (kind로 선택)",
-                    "description": ("지정 서버(host)의 시스템 정보를 조회한다: "
-                                    "uptime/memory/network/who/cpu."), **_COMMON},
+                    "description": ("지정 서버(host)의 시스템 정보를 조회한다. kind로 uptime(가동시간/"
+                                     "로드), memory(메모리), network(네트워크 인터페이스), who(로그인 "
+                                     "사용자), cpu(CPU 스펙) 중 선택."), **_COMMON},
 }
