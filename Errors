@@ -5,27 +5,48 @@ yrc@KORCO204731:~/AI-Infra-Assistant$ git -C /home/yrc/AI-Infra-Assistant fetch 
 rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/ 2>&1
 
 
-# 관리자용 콘솔 에
-Uncaught SyntaxError: Unexpected identifier 'to'
-react-dom.production.min.js:1 Uncaught SyntaxError: Unexpected identifier 'to'
-babel.min.js:1 Uncaught SyntaxError: Unexpected identifier 'to'
-:8501/favicon.ico:1  Failed to load resource: the server responded with a status of 404 (Not Found)
+# 관리자용 콘솔 에러
+# 이것도 wsl 환경에서 하는거야. 폐쇄망 프록시 https_proxy=http://202.20.187.241:3128 를 타는게 아니야. 
+yrc@KORCO204731:~/AI-Infra-Assistant/admin_console/frontend/vendor$ head -c 300 react.production.min.js react-dom.production.min.js babel.min.js
+==> react.production.min.js <==
+Redirecting to /react@18.3.1/umd/react.production.min.js
+==> react-dom.production.min.js <==
+Redirecting to /react-dom@18.3.1/umd/react-dom.production.min.js
+==> babel.min.js <==
+Redirecting to /@babel/standalone@8.0.4/babel.min.js
 
 
-# open-webui 에 mock-llm 으로 두고 챗 보내면 에러
-size 0 27
-index.js:1158 [tiptap warn]: Duplicate extension names found: ['codeBlock']. This can lead to issues.
-resolve @ index.js:1158
-+layout.svelte:96 user-list Object
-:8502/ollama/api/version:1  Failed to load resource: the server responded with a status of 500 (Internal Server Error)
-index.ts:194 Object
-Chat.svelte:1248 submitPrompt ㅎㅇ 
-Chat.svelte:187 saveSessionSelectedModels Array(1) ["mock-llm"]
-MessageInput.svelte:343 destroy
-RichTextInput.svelte:131 
-ResponseMessage.svelte:562 <div class=​"flex justify-start overflow-x-auto buttons text-gray-600 dark:​text-gray-500 mt-0.5 svelte-1u5gq5j">​</div>​
-index.js:1158 [tiptap warn]: Duplicate extension names found: ['codeBlock']. This can lead to issues.
-resolve @ index.js:1158
-ResponseMessage.svelte:562 <div class=​"flex justify-start overflow-x-auto buttons text-gray-600 dark:​text-gray-500 mt-0.5 svelte-1u5gq5j">​…​</div>​flex
-Chat.svelte:1422 modelId mock-llm
-:8502/api/chat/completions:1  Failed to load resource: the server responded with a status of 400 (Bad Request)
+# open-webui 에 mock-llm 으로 두고 챗 보내면 에러, mount 다시하면 에러?
+[root@24-gp19 AI-Infra-Assistant]# bash scripts/restart-mounted.sh
+== restart mounted-code services ==
+[+] restart 0/7
+ ⠸ Container ai-infra-assistant-agent-server-1  Restarting                                                                                          1.4s
+ ⠸ Container ai-infra-assistant-mock-vllm-1     Restarting                                                                                          1.4s
+ ⠸ Container ai-infra-assistant-admin-console-1 Restarting                                                                                          1.4s
+ ⠸ Container ai-infra-assistant-manual-mcp-1    Restarting                                                                                          1.4s
+ ⠸ Container ai-infra-assistant-command-mcp-1   Restarting                                                                                          1.4s
+ ⠸ Container ai-infra-assistant-system-mcp-1    Restarting                                                                                          1.4s
+ ⠸ Container ai-infra-assistant-voc-mcp-1       Restarting                                                                                          1.4s
+NAME                                 IMAGE                                     COMMAND                  SERVICE         CREATED          STATUS                   PORTS
+ai-infra-assistant-admin-console-1   ai-infra-assistant-admin-console:latest   "uvicorn main:app --…"   admin-console   6 minutes ago    Up Less than a second    0.0.0.0:8501->8080/tcp, [::]:8501->8080/tcp
+ai-infra-assistant-agent-server-1    ai-infra-assistant-agent-server:latest    "uvicorn main:app --…"   agent-server    49 minutes ago   Up Less than a second    0.0.0.0:8500->8000/tcp, [::]:8500->8000/tcp
+ai-infra-assistant-command-mcp-1     ai-infra-assistant-mcp:dev                "watchfiles --filter…"   command-mcp     6 minutes ago    Up Less than a second    8001/tcp, 0.0.0.0:8504->8002/tcp, [::]:8504->8002/tcp
+ai-infra-assistant-manual-mcp-1      ai-infra-assistant-mcp:dev                "watchfiles --filter…"   manual-mcp      6 minutes ago    Up Less than a second    0.0.0.0:8503->8001/tcp, [::]:8503->8001/tcp
+ai-infra-assistant-mock-vllm-1       ai-infra-assistant-mock-vllm:latest       "uvicorn mock_vllm:a…"   mock-vllm       49 minutes ago   Up Less than a second    8000/tcp
+ai-infra-assistant-open-webui-1      ghcr.io/open-webui/open-webui:v0.6.5      "bash start.sh"          open-webui      6 minutes ago    Up 6 minutes (healthy)   0.0.0.0:8502->8080/tcp, [::]:8502->8080/tcp
+ai-infra-assistant-postgres-1        docker.io/pgvector/pgvector:pg16          "docker-entrypoint.s…"   postgres        6 minutes ago    Up 6 minutes (healthy)   0.0.0.0:8507->5432/tcp, [::]:8507->5432/tcp
+ai-infra-assistant-system-mcp-1      ai-infra-assistant-mcp:dev                "watchfiles --filter…"   system-mcp      6 minutes ago    Up Less than a second    8001/tcp, 0.0.0.0:8506->8004/tcp, [::]:8506->8004/tcp
+ai-infra-assistant-voc-mcp-1         ai-infra-assistant-mcp:dev                "watchfiles --filter…"   voc-mcp         6 minutes ago    Up Less than a second    8001/tcp, 0.0.0.0:8505->8003/tcp, [::]:8505->8003/tcp
+== health ==
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+{"status":"ok","model":"mock-llm"}
