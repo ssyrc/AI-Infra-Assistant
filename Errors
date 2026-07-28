@@ -9,7 +9,7 @@ RUN-LOG.md 파일에는 작업 내용 전체가 아니라, agent 를 서버에 �
      V100: -arch=compute_70 -code=sm_70
      
 
-2. 중간에 생각하는 과정은 웹 상에서 보이게 해줘
+2. 중간에 생각하는 과정은 웹 상에서 "생각 중" 이라고 뜨는데, 생각 중인 내용도 뜨게 하면 안되나? 
 
 3. command mcp 가 느리긴 하지만 작동하고 있어
 [root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml exec command-mcp \
@@ -19,3 +19,6 @@ RUN-LOG.md 파일에는 작업 내용 전체가 아니라, agent 를 서버에 �
 Warning: Permanently added '202.20.185.100' (ECDSA) to the list of known hosts.
 Filesystem    Directory       Used(GB)   Limit(GB)       Files File limits
 gpfs.gpu1     yr9.choi          10,557           0   4,202,591           0
+
+그리고 여전히, 물어보면 절대 실행되지 않아
+myquota 명령어 실행 중 인증 오류가 발생했습니다. SSH 키가 정상적으로 설정되어 있는지 확인하고, 필요 시 재생성하세요.
