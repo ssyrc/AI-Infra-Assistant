@@ -486,7 +486,15 @@ Open WebUI 모델 목록에 안 뜬다는 리포트. WEBUI_AUTH를 켜고 영구
 WebUI의 내부 DB가 완전히 새로 시작됐을 가능성이 있음 — 이전에 저장돼 있던 Connections 설정이
 날아갔을 수 있음(env var `OPENAI_API_BASE_URL`은 여전히 유효해야 하지만, 재확인 필요).
 `docs/NEXT-STEPS.md` 1번에 agent-server 직접 curl 확인 → open-webui 로그 확인 → Open WebUI
-관리자 패널의 Connections/Models 설정 확인까지 진단 순서를 정리함. 사용자 응답 대기 중.
+관리자 패널의 Connections/Models 설정 확인까지 진단 순서를 정리함.
+
+curl은 정상(`"AI Infra Assistant"` 응답), open-webui 로그엔 `host.docker.internal:11434`
+(Ollama 기본 포트) 연결 실패만 있음 — 이건 Open WebUI가 기본으로 시도하는 Ollama 연결이라
+우리 설정과 무관, 무시해도 됨. **로그에 agent-server(OpenAI 연결) 시도 자체가 안 보이는 게
+단서** — WEBUI_AUTH를 켜고 새 영구 볼륨으로 전환하면서(#39) Open WebUI의 "연결(Connections)"
+설정이 비어 있을 가능성이 큼(env var는 살아있어야 하지만 컨테이너 안에서 직접 확인 필요).
+`docs/NEXT-STEPS.md` 1번에 `env | grep OPENAI` 확인 커맨드 + Admin Panel Connections/Models
+수동 확인·추가 절차 정리함.
 
 ## 34. 에이전트가 "슈퍼컴" 관련 질문에 호스트를 안 밝히면 되묻기만 함 (커맨드 안내함)
 
