@@ -28,6 +28,7 @@ else:
 # --------------------------------------------------------------------------
 
 from google.adk.agents import Agent
+from google.genai import types
 from google.adk.models.lite_llm import LiteLlm
 from google.adk.tools.mcp_tool import McpToolset
 from google.adk.tools.mcp_tool.mcp_session_manager import StreamableHTTPConnectionParams
@@ -51,6 +52,12 @@ async def build_agent(caller_headers: dict | None = None,
     반환하는 toolset 목록은 요청 종료 시 호출자가 close()로 정리한다."""
     llm_base_url = await get_config("vllm_llm_base_url")
     llm_model = await get_config("vllm_llm_model", "qwen3-32b")
+    # 온도가 높으면 조회 결과 대신 학습 지식으로 그럴듯한 절차를 지어내기 쉽다(사내 시스템에
+    # 없는 스케줄러 문법을 답하는 등). 근거 충실도를 위해 기본을 낮게 둔다.
+    try:
+        temperature = float(await get_config("llm_temperature", "0.2"))
+    except (TypeError, ValueError):
+        temperature = 0.2
     instruction = await get_config("agent_system_instruction", DEFAULT_INSTRUCTION)
     # 로그인 서버 이름은 설정 탭에서 바뀔 수 있으므로 지시문에 하드코딩하지 않고 매 요청 주입한다
     # (System MCP의 "로그인 서버 실행" 툴은 host를 자동 고정하지만, disk_free처럼 host가
@@ -83,6 +90,7 @@ async def build_agent(caller_headers: dict | None = None,
         model=LiteLlm(model=f"openai/{llm_model}", api_base=llm_base_url, api_key="not-needed"),
         name="ops_assistant",
         instruction=instruction,
+        generate_content_config=types.GenerateContentConfig(temperature=temperature),
         tools=list(toolsets),
     )
     return agent, llm_model, toolsets
