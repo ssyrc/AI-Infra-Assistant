@@ -470,6 +470,24 @@ command-mcp/system-mcp에는 `docker-compose.yml`(prod)에 있던 `HOSTS_FILE`/`
 dev에 아예 없었음)를 추가. 계정/대화 데이터가 컨테이너 재생성 시 사라지지 않도록 영구 볼륨
 (`open_webui_dev_data`)도 추가함(prod와 동일 패턴, 이전엔 dev에 볼륨이 없어 매번 초기화됐음).
 
+## 40. Open WebUI 관리자 계정 이메일 변경 불가 (Open WebUI 자체 제약, 확인됨)
+
+Open WebUI 업스트림의 알려진 제약 — "슈퍼 admin"(최초 계정)은 UI에서 본인 이메일을 못 바꿈
+(다른 사용자 계정 이메일은 관리자 패널에서 바꿀 수 있는데 본인 것만 예외, 업스트림에도 미해결
+이슈로 등록돼 있음). 우회: (1) 계정을 하나 더 만들어 그 계정으로 관리자 패널에서 첫 계정 이메일
+수정, 또는 (2) `docker compose exec open-webui sqlite3 /app/backend/data/webui.db "UPDATE user
+SET email=... WHERE email=...;"`로 DB 직접 수정.
+Sources: https://github.com/open-webui/open-webui/issues/14986
+
+## 41. "AI Infra Assistant"가 모델 목록에서 안 보임 (진단 중)
+
+admin_console 설정 탭 URL은 정상인데(vllm_llm_base_url — agent-server→vLLM 연결과 무관),
+Open WebUI 모델 목록에 안 뜬다는 리포트. WEBUI_AUTH를 켜고 영구 볼륨으로 바꾸면서(#39) Open
+WebUI의 내부 DB가 완전히 새로 시작됐을 가능성이 있음 — 이전에 저장돼 있던 Connections 설정이
+날아갔을 수 있음(env var `OPENAI_API_BASE_URL`은 여전히 유효해야 하지만, 재확인 필요).
+`docs/NEXT-STEPS.md` 1번에 agent-server 직접 curl 확인 → open-webui 로그 확인 → Open WebUI
+관리자 패널의 Connections/Models 설정 확인까지 진단 순서를 정리함. 사용자 응답 대기 중.
+
 ## 34. 에이전트가 "슈퍼컴" 관련 질문에 호스트를 안 밝히면 되묻기만 함 (커맨드 안내함)
 
 `disk_free(user_id, host)`가 host를 필수로 받는데, LLM이 실제 로그인 서버 이름을 모르니
