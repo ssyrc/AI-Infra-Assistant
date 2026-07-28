@@ -35,7 +35,7 @@ _STATE = "command_whitelist_state"
 
 # ------------------------------------------------------------------ 카탈로그 검색
 @mcp.tool()
-async def search_commands(query: str, top_k: int = 10, category: str | None = None) -> list[dict]:
+async def search_commands(query: str, top_k: int = 10) -> list[dict]:
     """하려는 작업을 설명하면 의미상 가까운 사내 시스템 커맨드를 찾아 준다(카탈로그 조회).
 
     사용할 때: "무슨 커맨드로 X를 하지?"처럼 어떤 명령이 있는지 모를 때, 그리고 사용자가
@@ -44,14 +44,12 @@ async def search_commands(query: str, top_k: int = 10, category: str | None = No
 
     이 툴 자체는 실행하지 않는다. 찾은 커맨드를 실제로 실행하려면 결과의 name을 그대로
     run_command(name=...)에 넘긴다(카탈로그에 있는 커맨드는 전부 실행 가능하다).
-    정확한 사용법/인자가 필요하면 get_command_detail로 먼저 확인한다.
 
     Args:
         query: 하려는 작업 설명 또는 키워드. 예: "배치 재시작"
         top_k: 반환할 최대 건수(기본 10)
-        category: 카테고리로 한정(없으면 전체). 확실치 않으면 지정하지 않는다.
     Returns:
-        커맨드 리스트. 각 항목에 name, description, usage, category가 있다.
+        커맨드 리스트. 각 항목에 name, description, command(실제 실행되는 커맨드)가 있다.
     """
     if not query or not query.strip():
         return []
@@ -68,17 +66,16 @@ async def search_commands(query: str, top_k: int = 10, category: str | None = No
     if vec is None:
         rows = await pool.fetch(
             """
-            SELECT id, name, description, usage, category,
+            SELECT id, name, description, exec_command,
                    ts_rank(tsv, plainto_tsquery('simple', $1)) AS score
             FROM command_catalog
-            WHERE ($2::text IS NULL OR category = $2)
-              AND (tsv @@ plainto_tsquery('simple', $1)
-                   OR name ILIKE '%' || $1 || '%'
-                   OR description ILIKE '%' || $1 || '%')
+            WHERE tsv @@ plainto_tsquery('simple', $1)
+               OR name ILIKE '%' || $1 || '%'
+               OR description ILIKE '%' || $1 || '%'
             ORDER BY score DESC
-            LIMIT $3
+            LIMIT $2
             """,
-            query, category, candidate_k,
+            query, candidate_k,
         )
     else:
         rows = await pool.fetch(
@@ -86,18 +83,16 @@ async def search_commands(query: str, top_k: int = 10, category: str | None = No
             WITH vector_search AS (
                 SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> $1::vector) AS rank
                 FROM command_catalog
-                WHERE ($2::text IS NULL OR category = $2)
-                  AND embedding IS NOT NULL
+                WHERE embedding IS NOT NULL
                 ORDER BY embedding <=> $1::vector
                 LIMIT 50
             ),
             keyword_search AS (
                 SELECT id, ROW_NUMBER() OVER (
-                    ORDER BY ts_rank(tsv, plainto_tsquery('simple', $3)) DESC
+                    ORDER BY ts_rank(tsv, plainto_tsquery('simple', $2)) DESC
                 ) AS rank
                 FROM command_catalog
-                WHERE ($2::text IS NULL OR category = $2)
-                  AND tsv @@ plainto_tsquery('simple', $3)
+                WHERE tsv @@ plainto_tsquery('simple', $2)
                 LIMIT 50
             ),
             fused AS (
@@ -106,14 +101,14 @@ async def search_commands(query: str, top_k: int = 10, category: str | None = No
                 FROM vector_search v
                 FULL OUTER JOIN keyword_search k ON v.id = k.id
             )
-            SELECT c.id, c.name, c.description, c.usage, c.category,
+            SELECT c.id, c.name, c.description, c.exec_command,
                    fused.rrf_score AS score
             FROM fused
             JOIN command_catalog c ON c.id = fused.id
             ORDER BY fused.rrf_score DESC
-            LIMIT $4
+            LIMIT $3
             """,
-            vector_literal(vec), category, query, candidate_k,
+            vector_literal(vec), query, candidate_k,
         )
 
     candidates = [dict(r) for r in rows]
@@ -125,6 +120,8 @@ async def search_commands(query: str, top_k: int = 10, category: str | None = No
     result = []
     for idx, rr_score in ranked:
         item = candidates[idx]
+        # 실행 커맨드가 따로 없으면 이름이 그대로 실행된다 - LLM에는 실제 실행될 것만 보인다.
+        item["command"] = (item.pop("exec_command", None) or item["name"])
         item["rerank_score"] = rr_score
         result.append(item)
     return result
@@ -132,24 +129,25 @@ async def search_commands(query: str, top_k: int = 10, category: str | None = No
 
 @mcp.tool()
 async def get_command_detail(name: str) -> dict | None:
-    """특정 커맨드의 상세 사용법(usage)을 정확히 반환한다.
+    """특정 커맨드의 설명과 실제 실행될 커맨드를 정확히 반환한다.
 
-    사용할 때: search_commands로 후보를 찾은 뒤, 실행하거나 안내하기 전에 정확한 사용법/인자를
-      확인할 때. name은 반드시 search_commands 결과의 name을 그대로 쓴다.
+    사용할 때: search_commands 결과만으로 확신이 안 설 때 한 건을 정확히 확인할 때.
+      name은 반드시 search_commands 결과의 name을 그대로 쓴다.
 
     Args:
         name: command_catalog.name 값(추측 금지, 검색 결과의 정확한 이름)
     Returns:
-        name/description/usage/category/exec_command. exec_command는 실제로 실행되는 커맨드
-        문자열이다(비어 있으면 name이 그대로 실행된다). 없으면 null(그때는 search_commands로
-        다시 찾는다).
+        name/description/command. command는 실제로 실행되는 커맨드 문자열이다.
+        없으면 null(그때는 search_commands로 다시 찾는다).
     """
     pool = await get_pool(_DSN)
     row = await pool.fetchrow(
-        "SELECT name, description, usage, category, exec_command FROM command_catalog WHERE name = $1",
-        name,
-    )
-    return dict(row) if row else None
+        "SELECT name, description, exec_command FROM command_catalog WHERE name = $1", name)
+    if row is None:
+        return None
+    d = dict(row)
+    d["command"] = d.pop("exec_command", None) or d["name"]
+    return d
 
 
 # ------------------------------------------------------------------ 사용자 스코프 실행
@@ -161,12 +159,11 @@ async def run_command(user_id: str, name: str, args: list[str] | None = None,
     않으면 로그인 서버(scheduler_login_host)에서 실행한다."""
     pool = await get_pool(_DSN)
     row = await pool.fetchrow(
-        "SELECT name, description, usage, category, exec_command FROM command_catalog "
-        "WHERE name = $1", name)
+        "SELECT name, description, exec_command FROM command_catalog WHERE name = $1", name)
     if row is None:
         # 대소문자/앞뒤 공백 차이는 흡수한다(LLM이 검색 결과를 그대로 넘기지 못한 경우).
         row = await pool.fetchrow(
-            "SELECT name, description, usage, category, exec_command FROM command_catalog "
+            "SELECT name, description, exec_command FROM command_catalog "
             "WHERE lower(name) = lower(btrim($1))", name)
     if row is None:
         raise ValueError(
@@ -178,9 +175,7 @@ async def run_command(user_id: str, name: str, args: list[str] | None = None,
     target = (host or "").strip() or await get_config("scheduler_login_host", "login05")
 
     result = await run_ssh_as_user(target, user_id, argv)
-    result["catalog"] = {
-        "name": row["name"], "usage": row["usage"], "category": row["category"],
-    }
+    result["catalog_name"] = row["name"]
     return result
 
 
@@ -203,7 +198,7 @@ EXEC_TOOLS = {
             "결과를 돌려준다. 카탈로그에 있는 커맨드는 전부 실행 가능하므로, 사용자가 어떤 정보를 "
             "'확인해 달라'고 하면 search_commands로 맞는 커맨드를 찾아 그 name을 그대로 이 툴에 "
             "넘겨 실행한다(사용법만 안내하고 끝내지 않는다). "
-            "name은 반드시 search_commands/get_command_detail 결과의 이름을 그대로 쓴다(추측 금지). "
+            "name은 반드시 search_commands 결과의 이름을 그대로 쓴다(추측 금지). "
             "args에는 커맨드 뒤에 붙일 인자를 한 칸씩 나눠 넣는다(예: ['-l', '/home']). 인자가 "
             "필요 없으면 생략한다. host를 지정하지 않으면 로그인 서버에서 실행되며, 사용자가 특정 "
             "서버(예: hgpu4041)를 지목한 경우에만 그 서버 이름을 host에 넣는다. "
