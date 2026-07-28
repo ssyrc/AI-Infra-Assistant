@@ -301,6 +301,26 @@ LLM의 실사용 메모리(약 73GiB)가 `--gpu-memory-utilization 0.85`의 이�
   브랜딩(mock일 때는 기존처럼 실제 모델명 노출, 개발 중 구분 가능).
 - open-webui에 `ENABLE_EVALUATION_ARENA_MODELS=false` 추가해 안 쓰는 Arena 비교 모델 제거.
 
+## 24. Open WebUI 채팅 시 tool_choice 400 에러 — vLLM에 tool-calling 옵션 누락 (원인 확정)
+
+```
+litellm.BadRequestError: OpenAIException - Error code: 400 - {'error': {'message':
+'"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set', ...}}
+```
+이 에이전트는 MCP 툴콜 기반이라 매 요청 `tool_choice: "auto"`를 보내는데, vLLM은 `--enable-
+auto-tool-choice`와 `--tool-call-parser`를 명시적으로 켜야 이를 지원한다(기본은 거부). LLM을
+그 옵션 없이 띄웠던 게 원인. Qwen3 계열의 표준 파서는 `hermes`(vLLM 공식 문서 확인) —
+`docs/NEXT-STEPS.md` 1번에 옵션 추가한 `docker run` 커맨드 반영, 재기동 결과 확인 필요.
+Sources: https://docs.vllm.ai/en/latest/features/tool_calling/ , https://qwen.readthedocs.io/en/latest/deployment/vllm.html
+
+## 25. Open WebUI 기본 모델 미고정 (Open WebUI 쪽 설정, 코드로 강제 불가)
+
+설정 저장 후 모델은 잘 뜨는데(`AI Infra Assistant`) 새 채팅에서 기본으로 선택되지 않음. 이건
+agent-server/코드 문제가 아니라 Open WebUI의 기본 모델 선택 로직(브라우저별 마지막 선택 기억
+또는 admin 설정)이라 관리자 패널 → 설정 → 모델에서 수동으로 기본 모델을 지정해야 함. mock ↔
+실제 백엔드 전환 시 노출되는 모델 id 자체가 바뀌므로 그때마다 재지정 필요 — 자동화하려면 Open
+WebUI admin API 연동이 필요한 별도 작업.
+
 ## 20. 매뉴얼 엑셀 열 선택 UI 이해 어려움 (완료)
 
 "내용/제목/페이지 체크박스가 뭔지 모르겠다"는 피드백에 번호 매긴 단계별 설명과, 현재 선택으로
