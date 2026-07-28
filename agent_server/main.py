@@ -213,23 +213,41 @@ def _event_text(event) -> str:
     return "".join(p.text or "" for p in event.content.parts)
 
 
-def _tool_activity_md(event) -> str:
-    """도구 호출/결과를 Open WebUI에서 '접히는 블록'으로 보여준다.
+def _short_result(resp) -> str:
+    """도구 결과를 상태 줄에 넣을 한 조각으로 줄인다."""
+    r = resp
+    if isinstance(r, dict) and "result" in r and "exit_code" not in r and "stdout" not in r:
+        r = r["result"]
+    if isinstance(r, dict):
+        if r.get("error"):
+            return f"실패 — {str(r['error'])[:70]}"
+        if "exit_code" in r:
+            return "완료" if r.get("exit_code") == 0 else f"실패(exit {r['exit_code']})"
+        return "완료"
+    if isinstance(r, list):
+        return f"{len(r)}건"
+    text = str(r)
+    return text[:70] + "…" if len(text) > 70 else (text or "완료")
 
-    사용자가 답변 본문에 진행 상황이 섞이는 건 싫어하지만 무슨 도구가 어떤 결과를 냈는지는
-    보고 싶어 한다. LLM에게 말로 설명시키지 않고(지시문은 중계 금지), 시스템이 실제 이벤트를
-    <details>로 감싸 내보낸다 - 평소엔 접혀 있고 눌러야 펼쳐진다.
+
+def _tool_status_lines(event) -> str:
+    """도구 호출/결과를 '진행 상태 한 줄'로 바꾼다.
+
+    Open WebUI는 <think> 안의 내용을 '답변 전에 계속 갱신되며 보이는 영역'으로 렌더링하고,
+    답변이 시작되면 접는다. 그래서 진행 상황을 이 안에 흘려보내면 사용자가 원하는
+    "답변 전에 몇 줄로 바뀌며 보이는" 표시가 된다(답변 본문·장기 메모리에는 안 들어간다).
     """
-    out = []
+    lines = []
     for fc in (event.get_function_calls() or []):
-        args = json.dumps(fc.args or {}, ensure_ascii=False, default=str)[:400]
-        out.append(f"\n<details>\n<summary>도구 호출 · {fc.name}</summary>\n\n"
-                   f"```json\n{args}\n```\n\n</details>\n")
+        arg = ""
+        for v in (fc.args or {}).values():
+            if isinstance(v, str) and v.strip():
+                arg = v.strip()[:60]
+                break
+        lines.append(f"· {fc.name}{f' — {arg}' if arg else ''}")
     for fr in (event.get_function_responses() or []):
-        resp = json.dumps(fr.response, ensure_ascii=False, default=str)[:1200]
-        out.append(f"\n<details>\n<summary>도구 결과 · {fr.name}</summary>\n\n"
-                   f"```json\n{resp}\n```\n\n</details>\n")
-    return "".join(out)
+        lines.append(f"· {fr.name} → {_short_result(fr.response)}")
+    return "\n".join(lines)
 
 
 class _StreamDedup:
@@ -359,6 +377,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
 
     async def event_stream():
         dedup = _StreamDedup()
+        in_think = False
         try:
             with _trace_ctx(user_id, conv, "openwebui"):
                 async for event in runner.run_async(user_id=user_id, session_id=session_id,
@@ -368,13 +387,21 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                         print("[agent] 클라이언트 연결 종료, 스트리밍 중단")
                         break
                     if show_tools:
-                        activity = _tool_activity_md(event)
-                        if activity:
-                            yield _sse(request_id, model_name, activity)
+                        status = _tool_status_lines(event)
+                        if status:
+                            if not in_think:
+                                yield _sse(request_id, model_name, "<think>\n")
+                                in_think = True
+                            yield _sse(request_id, model_name, status + "\n")
                     delta = dedup.feed(event)
                     if delta:
+                        if in_think:          # 답변이 시작되면 생각 영역을 닫는다
+                            yield _sse(request_id, model_name, "</think>\n")
+                            in_think = False
                         yield _sse(request_id, model_name, delta)
 
+            if in_think:
+                yield _sse(request_id, model_name, "</think>\n")
             yield _sse(request_id, model_name, "", finish=True)
             yield "data: [DONE]\n\n"
         except asyncio.CancelledError:
@@ -536,6 +563,7 @@ async def agent_query(body: AgentQueryIn, request: Request):
 
     async def event_stream():
         dedup = _StreamDedup()
+        in_think = False
         try:
             with _trace_ctx(user_id, conv, body.source or "agent-api"):
                 async for event in runner.run_async(user_id=user_id, session_id=session_id,
@@ -544,12 +572,20 @@ async def agent_query(body: AgentQueryIn, request: Request):
                     if await request.is_disconnected():
                         break
                     if show_tools:
-                        activity = _tool_activity_md(event)
-                        if activity:
-                            yield _sse(request_id, model_name, activity)
+                        status = _tool_status_lines(event)
+                        if status:
+                            if not in_think:
+                                yield _sse(request_id, model_name, "<think>\n")
+                                in_think = True
+                            yield _sse(request_id, model_name, status + "\n")
                     delta = dedup.feed(event)
                     if delta:
+                        if in_think:          # 답변이 시작되면 생각 영역을 닫는다
+                            yield _sse(request_id, model_name, "</think>\n")
+                            in_think = False
                         yield _sse(request_id, model_name, delta)
+            if in_think:
+                yield _sse(request_id, model_name, "</think>\n")
             yield _sse(request_id, model_name, "", finish=True)
             yield "data: [DONE]\n\n"
         except asyncio.CancelledError:
@@ -758,6 +794,7 @@ async def voc_query(body: VocQueryIn, request: Request):
 
     async def event_stream():
         dedup = _StreamDedup()
+        in_think = False
         try:
             with _trace_ctx(user_id, conv, "voc-agent"):
                 async for event in runner.run_async(user_id=user_id, session_id=session_id,

@@ -103,7 +103,8 @@ docker compose -f docker-compose.dev.yml restart agent-server
 ## 7. [웹] Open WebUI `http://202.20.183.30:8502` — yr9.choi 계정
 
 - "gpu 노드 접근하려면?" → 매뉴얼에 있는 내용만 나오는지(bsub 같은 일반 LSF 문법이 나오면 실패)
-- "내 홈스토리지 용량 어떻게 돼?" → 답변 1회 + 접힌 도구 호출/결과 블록
+- "내 홈스토리지 용량 어떻게 돼?" → 답변이 1회만 나오는지, 답변 **전에** 진행 상황이
+  한 줄씩 바뀌며 보이는지(`· run_command — myquota` → `· run_command → 완료`) 확인
 
 ---
 `docs/RUN-LOG.md` 기동·배포 절차 · `docs/HISTORY.md` 원인분석 이력
