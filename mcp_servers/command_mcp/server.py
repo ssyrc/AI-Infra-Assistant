@@ -151,31 +151,35 @@ async def get_command_detail(name: str) -> dict | None:
 
 
 # ------------------------------------------------------------------ 사용자 스코프 실행
-async def run_command(user_id: str, name: str, args: list[str] | None = None,
+async def run_command(user_id: str, command: str, args: list[str] | None = None,
                       host: str | None = None) -> dict:
-    """카탈로그(command_catalog)에 등록된 커맨드를 호출자 본인 권한으로 실행한다.
+    """커맨드를 호출자 본인 권한으로 실행한다. 출처(카탈로그/매뉴얼)를 가리지 않는다.
 
-    카탈로그의 exec_command(없으면 name)를 셸 없이 argv로 분해해 실행한다. host를 지정하지
-    않으면 로그인 서버(scheduler_login_host)에서 실행한다."""
+    command가 카탈로그(command_catalog)에 등록된 이름이면 그 exec_command를 쓰고,
+    아니면 받은 문자열을 그대로 커맨드로 본다(매뉴얼 문서에서 찾은 커맨드를 등록 없이 실행하기
+    위함). 어느 쪽이든 셸 없이 argv로 분해해 실행하고, 파괴적 기본 명령은 거부한다.
+    host를 지정하지 않으면 로그인 서버(scheduler_login_host)에서 실행한다."""
     pool = await get_pool(_DSN)
     row = await pool.fetchrow(
-        "SELECT name, description, exec_command FROM command_catalog WHERE name = $1", name)
+        "SELECT name, exec_command FROM command_catalog WHERE name = $1", command)
     if row is None:
         # 대소문자/앞뒤 공백 차이는 흡수한다(LLM이 검색 결과를 그대로 넘기지 못한 경우).
         row = await pool.fetchrow(
-            "SELECT name, description, exec_command FROM command_catalog "
-            "WHERE lower(name) = lower(btrim($1))", name)
-    if row is None:
-        raise ValueError(
-            f"커맨드 카탈로그에 '{name}'이(가) 없습니다. search_commands로 정확한 이름을 먼저 "
-            "찾은 뒤 그 name을 그대로 넘기세요.")
+            "SELECT name, exec_command FROM command_catalog "
+            "WHERE lower(name) = lower(btrim($1))", command)
 
     deny = deny_set(await get_config("catalog_exec_deny_commands", DEFAULT_DENY_CSV))
-    argv = build_catalog_argv(row["exec_command"], row["name"], args, user_id, deny)
+    if row is not None:
+        source = "카탈로그"
+        argv = build_catalog_argv(row["exec_command"], row["name"], args, user_id, deny)
+    else:
+        # 카탈로그에 없는 커맨드(매뉴얼/VOC에서 찾은 것 등)도 그대로 실행한다.
+        source = "직접 지정"
+        argv = build_catalog_argv(command, command, args, user_id, deny)
     target = (host or "").strip() or await get_config("scheduler_login_host", "login05")
 
     result = await run_ssh_as_user(target, user_id, argv)
-    result["catalog_name"] = row["name"]
+    result["source"] = source
     return result
 
 
@@ -194,15 +198,18 @@ EXEC_TOOLS = {
     "run_command": {
         "handler": run_command,
         "description": (
-            "커맨드 카탈로그(사내 매뉴얼에서 등록된 커맨드 목록)에 있는 커맨드를 실제로 실행하고 "
-            "결과를 돌려준다. 카탈로그에 있는 커맨드는 전부 실행 가능하므로, 사용자가 어떤 정보를 "
-            "'확인해 달라'고 하면 search_commands로 맞는 커맨드를 찾아 그 name을 그대로 이 툴에 "
-            "넘겨 실행한다(사용법만 안내하고 끝내지 않는다). "
-            "name은 반드시 search_commands 결과의 이름을 그대로 쓴다(추측 금지). "
+            "사내 커맨드를 실제로 실행하고 결과를 돌려준다. 사용자가 어떤 정보를 '확인해 달라'고 "
+            "하면 사용법만 안내하지 말고 이 툴로 실행해서 결과로 답한다. "
+            "command에는 실행할 커맨드를 넣는다 — **커맨드 카탈로그(search_commands)에서 찾은 "
+            "이름이든, 매뉴얼 문서(manual.search_manual)에서 찾은 커맨드든 상관없이** 그대로 "
+            "넘기면 실행된다(별도 등록이 필요 없다). 다만 반드시 검색 결과에 실제로 있던 커맨드만 "
+            "쓰고, 없는 커맨드를 지어내지 않는다. "
             "args에는 커맨드 뒤에 붙일 인자를 한 칸씩 나눠 넣는다(예: ['-l', '/home']). 인자가 "
-            "필요 없으면 생략한다. host를 지정하지 않으면 로그인 서버에서 실행되며, 사용자가 특정 "
-            "서버(예: hgpu4041)를 지목한 경우에만 그 서버 이름을 host에 넣는다. "
-            "실행은 항상 호출자 본인 계정 권한으로 이뤄진다(사용자 id는 지정할 수 없다)."
+            "필요 없으면 생략한다(command에 인자까지 함께 적어도 된다). "
+            "host를 지정하지 않으면 로그인 서버에서 실행되며, 사용자가 특정 서버(예: hgpu4041)를 "
+            "지목한 경우에만 그 서버 이름을 host에 넣는다. "
+            "실행은 항상 호출자 본인 계정 권한으로 이뤄진다(사용자 id는 지정할 수 없다). "
+            "파일 삭제 등 파괴적 명령은 시스템이 거부한다."
         ),
         "enabled": True, "required_roles": [], "user_scoped": True, "scope_param": "user_id",
     },
