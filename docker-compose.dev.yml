@@ -172,6 +172,8 @@ services:
       OPENAI_API_BASE_URL: http://agent-server:8000/v1
       OPENAI_API_KEY: not-needed
       WEBUI_AUTH: "false"
+      # 우리 모델 하나만 쓰므로 Open WebUI 내장 Arena 비교 모델은 끈다(모델 목록에 아예 안 뜸).
+      ENABLE_EVALUATION_ARENA_MODELS: "false"
     ports: ["${OPENWEBUI_PORT:-8502}:8080"]
     depends_on:
       agent-server: { condition: service_started }

@@ -55,7 +55,21 @@ MAX_MESSAGES = 100
 MAX_MESSAGE_CHARS = 32000
 MAX_TOTAL_CHARS = 200000
 
+# dev 목업(mock-vllm)일 때는 그 사실이 바로 보이게 실제 모델명을 노출하고,
+# 실제 vLLM(운영망 IP)로 붙으면 클라이언트(Open WebUI 등)에는 내부 모델명 대신 브랜드명을 보여준다.
+MOCK_LLM_BASE_MARKER = "mock-vllm"
+DISPLAY_MODEL_NAME = "AI Infra Assistant"
+
 state: dict = {}
+
+
+async def _display_model_name() -> str:
+    """Open WebUI 등 클라이언트에 노출할 모델 이름. vllm_llm_model은 hot_reload 설정이라
+    요청마다 새로 읽어야 설정 탭에서 바꾼 값이 재시작 없이 바로 반영된다."""
+    base_url = await get_config("vllm_llm_base_url", "")
+    if MOCK_LLM_BASE_MARKER in base_url:
+        return await get_config("vllm_llm_model", "qwen3-32b")
+    return DISPLAY_MODEL_NAME
 
 
 async def _close_toolsets(toolsets: list):
@@ -69,14 +83,13 @@ async def _close_toolsets(toolsets: list):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 기동 시 1회: 설정/ MCP 주소 유효성 검증 + 모델명 확보. 실제 실행 에이전트는 요청마다 만든다.
-    _agent, model_name, toolsets = await build_agent()
+    # 기동 시 1회: 설정/ MCP 주소 유효성 검증. 실제 실행 에이전트와 모델명은 요청마다 새로 가져온다.
+    _agent, _model_name, toolsets = await build_agent()
     await _close_toolsets(toolsets)
     session_db_dsn = await get_config("agent_session_db_dsn")
     if not session_db_dsn:
         raise RuntimeError("agent_session_db_dsn이 설정되지 않았습니다.")
     state["session_service"] = DatabaseSessionService(db_url=session_db_dsn)
-    state["model_name"] = model_name
     try:
         yield
     finally:
@@ -100,12 +113,12 @@ class ChatCompletionRequest(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "model": state.get("model_name")}
+    return {"status": "ok", "model": await _display_model_name()}
 
 
 @app.get("/v1/models")
 async def list_models():
-    return {"object": "list", "data": [{"id": state["model_name"], "object": "model"}]}
+    return {"object": "list", "data": [{"id": await _display_model_name(), "object": "model"}]}
 
 
 def _text_of(content) -> str:
@@ -126,14 +139,14 @@ def _text_of(content) -> str:
     return str(content)
 
 
-def _validate(req: ChatCompletionRequest) -> list[tuple[str, str]]:
+def _validate(req: ChatCompletionRequest, model_name: str) -> list[tuple[str, str]]:
     """요청을 검증하고 (role, text) 목록을 돌려준다."""
     if not req.messages:
         raise HTTPException(400, "messages가 비어 있습니다.")
     if len(req.messages) > MAX_MESSAGES:
         raise HTTPException(413, f"메시지가 너무 많습니다(최대 {MAX_MESSAGES}개).")
 
-    if req.model and req.model != state["model_name"]:
+    if req.model and req.model != model_name:
         raise HTTPException(400, f"지원하지 않는 모델입니다: {req.model}")
 
     normalized: list[tuple[str, str]] = []
@@ -237,8 +250,8 @@ def _caller_from_request(request: Request, req: ChatCompletionRequest) -> tuple[
 
 @app.post("/v1/chat/completions")
 async def chat_completions(req: ChatCompletionRequest, request: Request):
-    convo = _validate(req)
-    model_name = state["model_name"]
+    model_name = await _display_model_name()
+    convo = _validate(req, model_name)
     user_id, user_role, chat_id = _caller_from_request(request, req)
     request_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
@@ -430,7 +443,7 @@ async def agent_query(body: AgentQueryIn, request: Request):
     user_id = _to_os_identity(body.user_id)[:128] or "anonymous"
     roles = ",".join([r.strip() for r in (body.roles or []) if r and r.strip()])
     request_id = f"agentq-{uuid.uuid4().hex[:12]}"
-    model_name = state["model_name"]
+    model_name = await _display_model_name()
 
     mem_enabled = body.use_memory and _mem_on(await get_config("memory_enabled", "true"))
     # conversation_id가 없으면 시간(일 단위)으로 자동 부여 -> 같은 날 같은 사용자는 이어짐.

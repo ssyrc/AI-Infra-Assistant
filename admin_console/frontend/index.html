@@ -1091,15 +1091,13 @@ function SettingsPanel() {
   const editable = settings.filter(s => !s.env_managed);
 
   const grouped = {
-    "인프라 주소 (LLM / 리랭커 / 스케줄러)": editable.filter(s =>
-      s.key === "vllm_llm_base_url" || s.key === "vllm_embed_base_url"
-      || s.key === "rerank_base_url" || s.key === "scheduler_api_base_url"),
-    "모델 / 임베딩": editable.filter(s =>
-      s.key === "vllm_llm_model" || s.key === "vllm_embed_model" || s.key === "embed_dim"),
-    "검색 품질 (리랭커/캐시)": editable.filter(s =>
-      (s.key.startsWith("rerank_") && s.key !== "rerank_base_url")
-      || s.key === "embed_cache_ttl_seconds" || s.key === "clean_policy_version"
-      || s.key.startsWith("search_") || s.key.startsWith("upload_")),
+    "LLM": editable.filter(s => s.key === "vllm_llm_base_url" || s.key === "vllm_llm_model"),
+    "임베딩": editable.filter(s =>
+      s.key === "vllm_embed_base_url" || s.key === "vllm_embed_model"
+      || s.key === "embed_dim" || s.key === "embed_cache_ttl_seconds"),
+    "리랭커": editable.filter(s => s.key.startsWith("rerank_")),
+    "검색 품질 / 업로드": editable.filter(s =>
+      s.key === "clean_policy_version" || s.key.startsWith("search_") || s.key.startsWith("upload_")),
     "MCP 엔드포인트": editable.filter(s => s.key.endsWith("_mcp_url")),
     "에이전트 지시문": editable.filter(s => s.key === "agent_system_instruction"),
   };
