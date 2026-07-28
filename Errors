@@ -5,6 +5,9 @@ RUN-LOG.md 파일에는 작업 내용 전체가 아니라, agent 를 서버에 �
 그리고 답변이 두번씩 생성되고 있어. 심각한 성능이니까 절대 수정해. 
 그리고 중간에 생각하는 과정은 웹 상에서 보이게 해줘
 
+그리고, 왜 instruction에 이런 직접적인 커맨드를 넣는거야? 관리자 콘솔에서 지정한 command mcp 를 쓰게끔 해야지. 정확한 함수명을 넣지 말라고. 
+## 본인 스케줄러 job
+- "내 job 상태" → command.get_scheduler_job_info (대상은 본인으로 자동 고정)
 
 [root@24-gp19 AI-Infra-Assistant]# curl -s http://75.23.32.41:8010/v1/models
 {"object":"list","data":[{"id":"bge-m3","object":"model","created":1785240910,"owned_by":"vllm","root":"/workspace/models/bge-m3","parent":null,"max_model_len":8192,"permission":[{"id":"modelperm-a4d7a5091f6542abb95218a5cd81f0e9","object":"model_permission","created":1785240910,"allow_create_engine":false,"allow_sampling":true,"allow_logprobs":true,"allow_search_indices":false,"allow_view":true,"allow_fine_tuning":false,"organization":"*","group":null,"is_blocking":false}]}]}[root@24-gp19 AI-Infra-Assistant]#
