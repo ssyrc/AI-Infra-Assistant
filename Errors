@@ -1,15 +1,29 @@
-# llm, embed, reranker 다 잘 뜸
-[root@24-gp19 AI-Infra-Assistant]# curl http://75.23.32.41:8000/v1/models
-{"object":"list","data":[{"id":"qwen3-235b-a22b","object":"model","created":1785200628,"owned_by":"vllm","root":"/workspace/models/Qwen3-235B-A22B-Instruct-2507-FP8","parent":null,"max_model_len":32768,"permission":[{"id":"modelperm-deb9b2b3aa5e4ff594a54c1717601dfa","object":"model_permission","created":1785200628,"allow_create_engine":false,"allow_sampling":true,"allow_logprobs":true,"allow_search_indices":false,"allow_view":true,"allow_fine_tuning":false,"organization":"*","group":null,"is_blocking":false}]}]}
-
-[root@24-gp19 AI-Infra-Assistant]# curl http://75.23.32.41:8010/v1/models
-{"object":"list","data":[{"id":"bge-m3","object":"model","created":1785200628,"owned_by":"vllm","root":"/workspace/models/bge-m3","parent":null,"max_model_len":8192,"permission":[{"id":"modelperm-7358fc73ff6740c5968b9770c7e46b9b","object":"model_permission","created":1785200628,"allow_create_engine":false,"allow_sampling":true,"allow_logprobs":true,"allow_search_indices":false,"allow_view":true,"allow_fine_tuning":false,"organization":"*","group":null,"is_blocking":false}]}]}
-
-[root@24-gp19 AI-Infra-Assistant]# curl http://75.23.32.41:8020/v1/models
-{"object":"list","data":[{"id":"bge-reranker-v2-m3","object":"model","created":1785200629,"owned_by":"vllm","root":"/workspace/models/bge-reranker-v2-m3","parent":null,"max_model_len":8192,"permission":[{"id":"modelperm-4e9eb3ac927149558497a82854a92ab4","object":"model_permission","created":1785200629,"allow_create_engine":false,"allow_sampling":true,"allow_logprobs":true,"allow_search_indices":false,"allow_view":true,"allow_fine_tuning":false,"organization":"*","group":null,"is_blocking":false}]}]}[
-
-
 # 관리자 콘솔 변경 필요 사항들
-1. 설정 탭
-  - 지금은 url, 모델/임베딩 다 따로 구역이 있는데, (1) llm_base  (2) 임베딩  (3) reranker 구역으로 나누어서 관련 url, model name, parameter 등 각각 지정하게 해줘.
-  - 너가 알려준대로 설정 탭에 저장하고 openwebui 새로고침해도 모델 리스트에 아무것도 안 떠. mock-llm, arena model 이라고만 떠있고 arena model은 에러 발생해. arena model은 삭제해줘. llm, 임베딩, reranker가 mock-llm 이 아닌 실제 ip로 지정되면 AI Infra Assistant 라고 뜨면 좋겠어.
+
+
+# 모델 사용
+  - 관리자 탭에서 다 설정하니 AI Infra Assistant 떴어. 설정 후에 default로 AI Infra Assistant가 설정되게 해줘. mock-llm 으로 설정하면 default는 mock-llm 으로.
+  - AI infra assistant 한테 챗 보내니까 이런 에러가 떴어
+
+# 우선 잘 떠있어
+[root@24-gp19 AI-Infra-Assistant]# curl http://202.20.183.30:8500/v1/models
+{"object":"list","data":[{"id":"AI Infra Assistant","object":"model"}]}
+
+# 에러 메시지
+[tiptap warn]: Duplicate extension names found: ['codeBlock']. This can lead to issues. index.js:1158:21
+<div class="flex justify-start overf…0 mt-0.5 svelte-1u5gq5j">
+ResponseMessage.svelte:562:12
+modelId AI Infra Assistant Chat.svelte:1422:13
+Object { chat_id: "43a6625d-8076-4577-86bb-743cabe3798a", message_id: "cbafa3d1-58ae-4177-a059-859a43ba608d", data: {…} }
+Chat.svelte:249:11
+Object { content: `[오류가 발생했습니다: litellm.BadRequestError: OpenAIException - Error code: 400 - {'error': {'message': '"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set', 'type': 'BadRequestError', 'param': None, 'code': 400}}]` }
+Chat.svelte:1237:11
+Object { chat_id: "43a6625d-8076-4577-86bb-743cabe3798a", message_id: "cbafa3d1-58ae-4177-a059-859a43ba608d", data: {…} }
+Chat.svelte:249:11
+Object { id: "chatcmpl-3be01bcb8685", object: "chat.completion.chunk", created: 1785201770, model: "AI Infra Assistant", choices: (1) […] }
+Chat.svelte:1237:11
+Object { chat_id: "43a6625d-8076-4577-86bb-743cabe3798a", message_id: "cbafa3d1-58ae-4177-a059-859a43ba608d", data: {…} }
+Chat.svelte:249:11
+Object { done: true, content: `[오류가 발생했습니다: litellm.BadRequestError: OpenAIException - Error code: 400 - {'error': {'message': '"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set', 'type': 'BadRequestError', 'param': None, 'code': 400}}]`, title: "새 채팅" }
+Chat.svelte:1237:11
+
