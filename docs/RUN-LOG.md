@@ -515,6 +515,21 @@ API 키를 Open WebUI 관리자 패널(Admin Panel → Settings → Connections,
 게 당연함). `docs/NEXT-STEPS.md` 2번에 관리자 패널 경로로 다시 등록하는 절차 안내 — 그래도
 안 되면 브라우저 콘솔 로그 요청함.
 
+**정정(중요)**: 사용자가 실제로 한 것은 Open WebUI 개인 계정의 API 키(설정 → 계정 → API 키)를
+admin_console의 "Open WebUI 연동" 설정(`openwebui_admin_api_key`)에 넣은 것 — 이건 "Open WebUI
+기본 모델 동기화" 버튼(#26)용이고, 모델이 보이고 채팅되게 하는 것과는 전혀 무관한 별개 기능임.
+실제로 필요한 건 Open WebUI 자체의 관리자 패널 → 설정 → **연결(Connections)**에
+`http://agent-server:8000/v1`을 OpenAI API 커넥션으로 등록하는 것(#41에서 이미 안내했던 것과
+동일) — 두 화면이 이름이 비슷해 혼동한 것으로 보임. `docs/NEXT-STEPS.md`에 두 기능을 표로
+명확히 구분해서 정리함.
+
+## 44. Open WebUI 데이터(계정 DB) 초기화 요청 (완료, 커맨드 제공)
+
+이메일 DB를 이상하게 만든 뒤 아예 초기화 요청. `open_webui_dev_data` 명명 볼륨만 지우면
+postgres(플랫폼 데이터)는 안 건드리고 Open WebUI 계정/대화만 초기화됨 — `docker compose down
+-v`(전체 볼륨 삭제)는 명시적으로 쓰지 말라고 경고함. 초기화 후 회원가입 + 연결(Connections)
+재등록 절차를 NEXT-STEPS에 안내.
+
 ## 34. 에이전트가 "슈퍼컴" 관련 질문에 호스트를 안 밝히면 되묻기만 함 (커맨드 안내함)
 
 `disk_free(user_id, host)`가 host를 필수로 받는데, LLM이 실제 로그인 서버 이름을 모르니

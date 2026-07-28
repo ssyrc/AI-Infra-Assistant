@@ -2,41 +2,36 @@
 
 ## 지금 당장
 
-### 1) 이메일 변경 커맨드 수정 — 이미지에 `sqlite3` CLI가 없음
+### 1) Open WebUI 데이터 초기화 (이메일 DB 꼬임) — postgres/플랫폼 데이터는 안 건드림
 
-`sqlite3: executable file not found` — open-webui 이미지엔 sqlite3 바이너리가 없다. 대신 이미
-들어있는 python3의 표준 라이브러리로 같은 작업을 한다:
 ```bash
-# 1) 현재 계정 확인
-docker compose -f docker-compose.dev.yml exec open-webui python3 -c \
-  "import sqlite3; c=sqlite3.connect('/app/backend/data/webui.db'); \
-   print(c.execute('SELECT id, name, email, role FROM user').fetchall())"
-
-# 2) 이메일 변경
-docker compose -f docker-compose.dev.yml exec open-webui python3 -c \
-  "import sqlite3; c=sqlite3.connect('/app/backend/data/webui.db'); \
-   c.execute(\"UPDATE user SET email=? WHERE email=?\", ('새이메일@example.com', '기존이메일@example.com')); \
-   c.commit(); print('done')"
+docker compose -f docker-compose.dev.yml stop open-webui
+docker compose -f docker-compose.dev.yml rm -f open-webui
+docker volume ls | grep open_webui_dev_data   # 정확한 볼륨 이름 확인(프로젝트명 접두사 붙음)
+docker volume rm <위에서 확인한 볼륨 이름>
+docker compose -f docker-compose.dev.yml up -d open-webui
 ```
-바꾼 뒤 로그아웃하고 새 이메일로 다시 로그인.
+⚠️ 이 볼륨만 지우는 것 — `docker compose down -v`는 절대 쓰지 말 것(postgres 등 전체 데이터가
+같이 날아감). 초기화 후 `:8502` 접속하면 처음 상태로 돌아가서 회원가입부터 다시 해야 함(첫 계정이
+자동 admin).
 
-### 2) "모델을 admin 계정에서만 보이고 일반 사용자는 안 보임 / admin도 채팅 시 Model not found"
+### 2) 초기화 후 — 반드시 "연결(Connections)"에 다시 등록 (계정 API 키와는 다른 것!)
 
-**십중팔구 API 키를 Open WebUI "관리자 패널"이 아니라 개인 계정(우측 상단 프로필 → 설정 →
-연결)에 등록했을 가능성이 큼** — 그건 그 계정에서만 보이는 "개인 연결(Direct Connections)"이라
-다른 사용자에게 안 뜨는 게 정상이다. 요청하신 대로 "admin이 키 하나만 등록하면 전체 사용자에게
-default로 뜨게" 하려면 반드시 **관리자 전용 설정**에 등록해야 한다:
+**중요한 오해 정리**: Open WebUI 개인 계정의 "API 키"(설정 → 계정 → API 키)를 admin_console의
+"Open WebUI 연동" 설정에 넣는 것과, 모델이 보이고 채팅이 되게 하는 것은 **완전히 다른 두 가지
+기능**임:
 
-1. 좌측 하단(또는 우측 상단) 프로필 → **관리자 패널(Admin Panel)** 클릭 (개인 "설정"이 아님 —
-   메뉴 이름 구분 필요)
-2. 관리자 패널 → **설정(Settings) → 연결(Connections)**
-3. "OpenAI API" 섹션에 `http://agent-server:8000/v1` + 아무 API 키(예: `not-needed`) 등록
-   (개인 계정 설정이 아니라 여기여야 전체 사용자에게 공통 적용됨)
-4. 저장 후 admin 계정에서 로그아웃 → 아무 계정(admin/일반 사용자 모두)으로 재로그인해서 모델이
-   보이는지, 채팅이 되는지 확인
+| 무엇을 | 어디에 등록 | 무슨 효과 |
+|---|---|---|
+| Open WebUI 계정 API 키 | admin_console 설정 탭 → "Open WebUI 연동" → `openwebui_admin_api_key` | "Open WebUI 기본 모델 동기화" 버튼이 동작하게 함(부가 기능) |
+| `http://agent-server:8000/v1` + 아무 키 | **Open WebUI 자체** 관리자 패널 → 설정 → **연결(Connections)** → OpenAI API | 모델이 뜨고 채팅이 되게 함(핵심 기능, 이게 없으면 아무것도 안 됨) |
 
-혹시 이미 "관리자 패널 → 연결"에 등록했는데도 이 증상이면(개인 설정이 아니었다면), admin으로
-채팅 보낼 때 뜨는 "Model not found" 에러 화면의 **브라우저 개발자 도구 콘솔(F12) 로그 전체**를
-같이 보내달라 — 실제 요청에 어떤 model id가 찍히는지 봐야 정확한 원인을 알 수 있음.
+1번으로 초기화한 뒤:
+1. `:8502` 접속 → 회원가입으로 admin 계정 생성
+2. 관리자 패널(Admin Panel) → 설정(Settings) → **연결(Connections)** (계정/API 키 화면 아님)
+3. OpenAI API 섹션에 URL `http://agent-server:8000/v1`, 키에 아무 값(`not-needed`) 입력 후 저장
+4. 새로고침해서 "AI Infra Assistant" 모델이 보이고 채팅되는지 확인
+5. (선택) 일반 사용자 계정도 만들어서 같은 모델이 보이는지 확인 — 연결은 관리자 패널에 등록하면
+   전체 사용자에게 공통 적용됨
 
 완료된 내역/원인 분석은 `docs/RUN-LOG.md` 참고.
