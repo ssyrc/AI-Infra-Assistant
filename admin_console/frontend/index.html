@@ -1072,6 +1072,15 @@ async function restartService(service) {
   }
 }
 
+async function syncOpenWebUIModel() {
+  try {
+    const data = await api("/api/ops/sync-openwebui-model", { method: "POST" });
+    alert(`Open WebUI 기본 모델을 "${data.default_model}"(으)로 지정했습니다.`);
+  } catch (e) {
+    alert("동기화 실패: " + e.message);
+  }
+}
+
 function SettingsPanel() {
   const [settings, setSettings] = useState([]);
   const [edits, setEdits] = useState({}); // key -> new value
@@ -1099,6 +1108,7 @@ function SettingsPanel() {
     "검색 품질 / 업로드": editable.filter(s =>
       s.key === "clean_policy_version" || s.key.startsWith("search_") || s.key.startsWith("upload_")),
     "MCP 엔드포인트": editable.filter(s => s.key.endsWith("_mcp_url")),
+    "Open WebUI 연동": editable.filter(s => s.key.startsWith("openwebui_")),
     "에이전트 지시문": editable.filter(s => s.key === "agent_system_instruction"),
   };
   const shown = new Set(Object.values(grouped).flat().map(s => s.key));
@@ -1125,6 +1135,18 @@ function SettingsPanel() {
               (예: <code>http://command-mcp:8002/mcp</code>). agent-server가 이 이름으로 내부망에서 MCP에
               접속하며, 외부 서버 IP로 바꾸면 연결이 끊깁니다. 여러 물리 서버에 MCP를 나눠 배포하는
               경우가 아니라면 건드리지 마세요.
+            </div>
+          )}
+          {group === "LLM" && (
+            <div style={{fontSize: 12.5, color: "var(--muted)", marginBottom: 10,
+                         padding: "8px 10px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4}}>
+              Open WebUI는 여기 값을 바꿔도 새 채팅의 기본 모델을 자동으로 맞추지 않습니다(브라우저별
+              마지막 선택을 따로 기억함). 아래 버튼으로 Open WebUI의 기본 모델을 지금 노출 중인 모델로
+              맞출 수 있습니다(<code>openwebui_admin_api_key</code> 설정 필요 — Open WebUI 로그인 →
+              설정 → 계정 → API 키 발급 후 아래 "Open WebUI 연동" 그룹에서 저장).
+              <div style={{marginTop: 6}}>
+                <button onClick={syncOpenWebUIModel}>Open WebUI 기본 모델 동기화</button>
+              </div>
             </div>
           )}
           {rows.map(s => {
