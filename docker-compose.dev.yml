@@ -198,9 +198,20 @@ services:
     environment:
       OPENAI_API_BASE_URL: http://agent-server:8000/v1
       OPENAI_API_KEY: not-needed
-      WEBUI_AUTH: "false"
+      # 로그인/회원가입 화면을 써서 admin 외에 일반 사용자 계정도 만들어 테스트할 수 있게 함
+      # (WEBUI_AUTH=false였을 때는 로그인 없이 항상 같은 계정으로 고정돼 다른 계정 테스트가 불가능했음).
+      WEBUI_AUTH: "true"
+      # 로그인 사용자 정보를 X-OpenWebUI-User-Id/-Email/-Role/-Chat-Id 헤더로 agent-server에
+      # 전달한다. "필요 역할(admin 전용)" 검사는 이 헤더가 있어야 실제로 동작한다.
+      ENABLE_FORWARD_USER_INFO_HEADERS: "true"
       # 우리 모델 하나만 쓰므로 Open WebUI 내장 Arena 비교 모델은 끈다(모델 목록에 아예 안 뜸).
       ENABLE_EVALUATION_ARENA_MODELS: "false"
+    volumes:
+      # 계정/대화 데이터가 컨테이너 재생성 시 사라지지 않게 영구 볼륨(prod와 동일 패턴).
+      - open_webui_dev_data:/app/backend/data
     ports: ["${OPENWEBUI_PORT:-8502}:8080"]
     depends_on:
       agent-server: { condition: service_started }
+
+volumes:
+  open_webui_dev_data:
