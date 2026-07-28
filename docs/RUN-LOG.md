@@ -413,6 +413,19 @@ command-mcp/system-mcp에는 `docker-compose.yml`(prod)에 있던 `HOSTS_FILE`/`
 비밀번호 프롬프트 없이 접속됨(개인키를 로컬에 두는 것만으로는 인증이 안 됨 — 상대측
 `authorized_keys`에 공개키 등록이 필요).
 
+## 36. ssh 키 등록 확인 완료 + `scheduler_login_host`가 설정 탭에 안 보이던 버그 (완료)
+
+`ssh-copy-id` 후 `ssh root@202.20.185.100 whoami`가 비밀번호 없이 `root`를 반환 — ssh 인프라
+준비 완료 확인. 이어서 설정 탭에서 `scheduler_login_host`를 찾을 수 없다는 리포트 — 원인은
+`admin_console/frontend/index.html`의 `grouped` 필터 목록 어디에도 이 키가 안 걸려서(LLM/임베딩/
+리랭커/검색품질/MCP엔드포인트/OpenWebUI연동/에이전트지시문 중 매칭 없음) "기타" 그룹에만
+묻혀 있었던 것(실제로는 존재했음, `env_managed`로 숨겨진 것도 아니었음). "SSH 실행
+(System/Command MCP)" 전용 그룹으로 분리해 눈에 띄게 고침.
+
+또한 "커맨드는 절대 root 권한으로 실행되면 안 된다"는 요구사항이 기존 코드로 이미 100% 보장됨을
+재확인: `shared/ssh_exec.run_ssh_as_user()`가 System/Command MCP의 모든 실행 경로에서 유일하게
+쓰이고, 매번 `su - <user_id> -c '...'`로 감싸 실행한다(우회 경로 없음, ssh 자체만 root).
+
 ## 34. 에이전트가 "슈퍼컴" 관련 질문에 호스트를 안 밝히면 되묻기만 함 (커맨드 안내함)
 
 `disk_free(user_id, host)`가 host를 필수로 받는데, LLM이 실제 로그인 서버 이름을 모르니
