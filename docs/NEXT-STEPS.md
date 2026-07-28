@@ -1,7 +1,6 @@
 # 지금 할 일
 
-**[WSL]** 인터넷 되는 로컬 · **[서버]** 202.20.183.30 (`cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant`)
-· **[웹]** 콘솔 `http://202.20.183.30:8501`
+**[WSL]** 인터넷 되는 로컬 · **[서버]** 202.20.183.30 · **[웹]** 콘솔 `http://202.20.183.30:8501`
 
 ## 1. [WSL]
 
@@ -16,30 +15,21 @@ rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker compose -f docker-compose.dev.yml run --rm db-init
 bash scripts/restart-mounted.sh
-curl -s http://75.23.32.41:8000/v1/models
-curl -s http://75.23.32.41:8010/v1/models
-curl -s http://75.23.32.41:8020/v1/models
 ```
-`db-init`에 `command_db: applied v5`, `system_db: applied v6`가 안 보이거나 에러면 출력 전달.
 
-## 3. [웹] 설정 탭 — 값 입력 후 저장
+## 3. [웹] 커맨드 카탈로그 탭 — `myquota` 등록
 
-| key | 값 |
+| 칸 | 값 |
 |---|---|
-| `vllm_llm_base_url` | `http://75.23.32.41:8000/v1` |
-| `vllm_llm_model` | 2번 8000 curl 결과의 `id` |
-| `vllm_embed_base_url` | `http://75.23.32.41:8010/v1` |
-| `vllm_embed_model` | 2번 8010 curl 결과의 `id` |
-| `rerank_provider` | `vllm` |
-| `rerank_base_url` | `http://75.23.32.41:8020/v1` |
-| `rerank_model` | `bge-reranker-v2-m3` |
-| `scheduler_login_host` | `login07` |
+| 커맨드 이름 | `myquota` |
+| 실행 커맨드 | (비움) |
+| 설명 | `개인 홈 스토리지 할당량/사용량 조회` |
 
-## 4. [웹] 설정 탭 — `agent_system_instruction`에 아래 전문 붙여넣고 저장
+## 4. [웹] 설정 탭 — `agent_system_instruction` 아래 전문으로 교체 후 저장
 
-<!-- AGENT_INSTRUCTION_BEGIN -->
+(지난번 붙여넣은 것에서 System MCP 라우팅과 개인 계정 질문 처리가 바뀌었다.)
+
 ```
 당신은 사내 인프라/시스템 운영을 돕는 한국어 어시스턴트(AI Infra Assistant)입니다.
 
@@ -99,7 +89,6 @@ curl -s http://75.23.32.41:8020/v1/models
 
 핵심 재확인: 도구로 찾은 근거에만 기반해 답하고, 출처를 제시하며, 서버가 필요한 질문에서 서버를 임의로 추측하지 않고, 없는 정보나 없는 기능은 지어내지 않습니다.
 ```
-<!-- AGENT_INSTRUCTION_END -->
 
 ## 5. [서버]
 
@@ -107,34 +96,13 @@ curl -s http://75.23.32.41:8020/v1/models
 docker compose -f docker-compose.dev.yml restart agent-server
 ```
 
-## 6. [웹] 커맨드 카탈로그 탭 — `myquota` 등록
+## 6. [웹] 확인 — Open WebUI `http://202.20.183.30:8502`
 
-홈 스토리지 질문에 쓸 커맨드가 카탈로그에 있어야 한다. 없으면 등록:
-- 이름: `myquota`
-- 실행 커맨드: 비워둠(이름이 그대로 실행됨)
-- 설명: `개인 홈 스토리지 할당량/사용량 조회`
+**yr9.choi 계정으로** "내 홈 스토리지 용량 어떻게 돼?" 질문 → `myquota` 실행 결과가 나와야 한다.
 
-매뉴얼 CSV로 한 번에 올려도 된다(이제 `.csv` 업로드 지원 — 열 매핑 화면에서 이름/설명/실행 커맨드 열 지정).
-
-## 7. [웹] System MCP 탭
-
-`disk_free` 스위치 껐다 켜고 저장 → **"⚠ System MCP 재시작"** 버튼 클릭.
-
-## 8. [웹] 확인 — Open WebUI `http://202.20.183.30:8502`
-
-**yr9.choi 계정으로** 로그인해서 "내 홈 스토리지 용량 어떻게 돼?" 질문.
-(관리자 계정 이메일이 `root@...`면 이제 실행이 거부된다 — 커맨드는 일반 사용자 계정으로만 실행됨.)
-
-실패하면 [서버]에서 아래 출력 전달:
+안 되면 [서버]에서 아래 출력 전달:
 ```bash
 docker compose -f docker-compose.dev.yml logs command-mcp --tail 50
-docker compose -f docker-compose.dev.yml logs system-mcp --tail 50
-```
-
-## 9. [서버] Open WebUI 계정 ↔ 리눅스 계정 확인
-
-Open WebUI 계정 이메일의 `@` 앞부분이 실제 서버 계정명과 같아야 실행된다.
-```bash
 ssh root@202.20.185.100 "id yr9.choi"
 ```
 
