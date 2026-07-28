@@ -11,16 +11,11 @@ RUN-LOG.md 파일에는 작업 내용 전체가 아니라, agent 를 서버에 �
 
 2. 중간에 생각하는 과정은 웹 상에서 보이게 해줘
 
-3. command mcp 가 제대로 작동을 안하나보네
-[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml exec command-mcp ls -l /root/.ssh/id_ed25519
--rw------- 1 root root 399 Jul 28 05:40 /root/.ssh/id_ed25519
-[root@24-gp19 AI-Infra-Assistant]# ls -l /root/.ssh/id_*
--rw------- 1 root root  399 Jun  1 09:36 /root/.ssh/id_ed25519
--rw-r--r-- 1 root root   94 Jun  1 09:36 /root/.ssh/id_ed25519.pub
--rw------- 1 root root 1675 May 14  2024 /root/.ssh/id_rsa
--rw-r--r-- 1 root root  397 May 14  2024 /root/.ssh/id_rsa.pub
-[root@24-gp19 AI-Infra-Assistant]# echo 'SSH_KEY_PATH=/root/.ssh/id_rsa' >> .env
-[root@24-gp19 AI-Infra-Assistant]#
+3. command mcp 가 느리긴 하지만 작동하고 있어
 [root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml exec command-mcp \
->   ssh -o BatchMode=yes root@202.20.185.100 "su - yr9.choi -c myquota"
-Host key verification failed.
+>   ssh -o BatchMode=yes -o PasswordAuthentication=no \
+>       -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_agent \
+>       -i /root/.ssh/id_ed25519 root@202.20.185.100 "su - yr9.choi -c myquota"
+Warning: Permanently added '202.20.185.100' (ECDSA) to the list of known hosts.
+Filesystem    Directory       Used(GB)   Limit(GB)       Files File limits
+gpfs.gpu1     yr9.choi          10,557           0   4,202,591           0
