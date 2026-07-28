@@ -213,6 +213,42 @@ def _event_text(event) -> str:
     return "".join(p.text or "" for p in event.content.parts)
 
 
+class _StreamDedup:
+    """ADK 스트리밍 이벤트를 '사용자에게 새로 보낼 증가분'으로 바꾼다.
+
+    왜 필요한가: ADK는 한 메시지를 partial 이벤트 여러 개로 흘려보낸 뒤, **같은 내용을 담은
+    최종 이벤트를 한 번 더** 보낸다. 이걸 그대로 흘리면 답변이 두 번씩 출력된다.
+    까다로운 점 두 가지를 모두 처리한다.
+      1) partial의 text가 '델타'인 경우와 '지금까지 누적'인 경우가 둘 다 있다.
+      2) 툴 호출이 끼면 메시지가 여러 개 생기고, 메시지마다 누적이 처음부터 다시 시작한다.
+    그래서 partial 플래그로 메시지 경계를 잡고(최종 이벤트 = 경계), 경계마다 누적을 리셋한다.
+    """
+
+    def __init__(self):
+        self.cur = ""            # 현재 메시지에서 이미 보낸 텍스트
+        self.saw_partial = False
+        self.full = ""           # 이번 턴 전체 텍스트(메모리 저장·완성 응답용)
+
+    def feed(self, event) -> str:
+        text = _event_text(event)
+        if not text:
+            return ""
+        if getattr(event, "partial", False):
+            self.saw_partial = True
+            delta = text[len(self.cur):] if text.startswith(self.cur) else text
+            self.cur += delta
+        else:
+            if not self.saw_partial:
+                delta = text                      # partial 없이 최종만 온 메시지
+            elif text.startswith(self.cur):
+                delta = text[len(self.cur):]      # 대개 "" (이미 다 보냄)
+            else:
+                delta = ""                        # 이미 보낸 내용의 재전송 -> 버린다
+            self.cur, self.saw_partial = "", False   # 메시지 경계
+        self.full += delta
+        return delta
+
+
 def _trace_ctx(user_id: str, session_id: str | None, source: str | None):
     """Langfuse 트레이스에 user_id/session_id(대화)를 붙여 사용자별로 묶이게 한다.
     openinference가 없거나 트레이싱이 꺼져 있으면 무해한 no-op이다."""
@@ -302,8 +338,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         })
 
     async def event_stream():
-        cur = ""    # '현재 메시지'에서 이미 보낸 텍스트 (메시지가 바뀌면 리셋된다)
-        full = ""   # 이번 턴 전체 텍스트 (메모리 저장용)
+        dedup = _StreamDedup()
         try:
             with _trace_ctx(user_id, conv, "openwebui"):
                 async for event in runner.run_async(user_id=user_id, session_id=session_id,
@@ -312,19 +347,8 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                     if await request.is_disconnected():
                         print("[agent] 클라이언트 연결 종료, 스트리밍 중단")
                         break
-
-                    text = _event_text(event)
-                    if not text:
-                        continue
-                    # ADK는 한 메시지에 대해 '누적 텍스트'를 담은 partial 이벤트들을 보내고,
-                    # 마지막에 같은 내용의 최종 이벤트를 한 번 더 보낸다. 툴 호출로 메시지가
-                    # 여러 개 생기면 누적 기준이 메시지마다 새로 시작하므로, 비교 기준을
-                    # '지금까지 전체'가 아니라 '현재 메시지'로 잡아야 한다.
-                    # (전체 기준으로 비교하면 최종 이벤트가 매번 통째로 재전송돼 답변이 두 번씩 나온다.)
-                    delta = text[len(cur):] if text.startswith(cur) else text
-                    cur = text
+                    delta = dedup.feed(event)
                     if delta:
-                        full += delta
                         yield _sse(request_id, model_name, delta)
 
             yield _sse(request_id, model_name, "", finish=True)
@@ -339,7 +363,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         finally:
             await _cleanup_session(user_id, session_id)
             await _close_toolsets(toolsets)
-            _bg_persist(user_id, conv, "openwebui", last_text, full, mem_enabled)
+            _bg_persist(user_id, conv, "openwebui", last_text, dedup.full, mem_enabled)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -486,8 +510,7 @@ async def agent_query(body: AgentQueryIn, request: Request):
                              "request_id": request_id})
 
     async def event_stream():
-        cur = ""    # '현재 메시지' 기준 누적 (위 /v1/chat/completions와 동일한 이유)
-        full = ""
+        dedup = _StreamDedup()
         try:
             with _trace_ctx(user_id, conv, body.source or "agent-api"):
                 async for event in runner.run_async(user_id=user_id, session_id=session_id,
@@ -495,13 +518,8 @@ async def agent_query(body: AgentQueryIn, request: Request):
                                                     run_config=STREAMING_RUN_CONFIG):
                     if await request.is_disconnected():
                         break
-                    text = _event_text(event)
-                    if not text:
-                        continue
-                    delta = text[len(cur):] if text.startswith(cur) else text
-                    cur = text
+                    delta = dedup.feed(event)
                     if delta:
-                        full += delta
                         yield _sse(request_id, model_name, delta)
             yield _sse(request_id, model_name, "", finish=True)
             yield "data: [DONE]\n\n"
@@ -514,7 +532,7 @@ async def agent_query(body: AgentQueryIn, request: Request):
         finally:
             await _cleanup_session(user_id, session_id)
             await _close_toolsets(toolsets)
-            _bg_persist(user_id, conv, body.source, body.message, sent, mem_enabled)
+            _bg_persist(user_id, conv, body.source, body.message, dedup.full, mem_enabled)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -710,8 +728,7 @@ async def voc_query(body: VocQueryIn, request: Request):
         return JSONResponse({"success": True, "answer": answer})
 
     async def event_stream():
-        cur = ""    # '현재 메시지' 기준 누적 (위 /v1/chat/completions와 동일한 이유)
-        sent = ""   # 이번 턴 전체 텍스트 (완성 envelope/메모리용)
+        dedup = _StreamDedup()
         try:
             with _trace_ctx(user_id, conv, "voc-agent"):
                 async for event in runner.run_async(user_id=user_id, session_id=session_id,
@@ -719,18 +736,13 @@ async def voc_query(body: VocQueryIn, request: Request):
                                                     run_config=STREAMING_RUN_CONFIG):
                     if await request.is_disconnected():
                         break
-                    text = _event_text(event)
-                    if not text:
-                        continue
-                    delta = text[len(cur):] if text.startswith(cur) else text
-                    cur = text
+                    delta = dedup.feed(event)
                     if delta:
-                        sent += delta
                         yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
             # 마지막에 가이드 계약 형태의 완성 envelope을 한 번 더 보낸다.
-            if sent:
+            if dedup.full:
                 similar = await _collect_similar()
-                answer = {"content": sent}
+                answer = {"content": dedup.full}
                 if similar:
                     answer["similar_voc"] = similar
                 envelope = {"success": True, "answer": answer}
@@ -744,10 +756,10 @@ async def voc_query(body: VocQueryIn, request: Request):
             yield f"data: {json.dumps({'success': False, 'answer': None, 'error': str(e)}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
         finally:
-            if not similar_task.done():   # sent가 비어 await를 안 한 경우 고아 방지
+            if not similar_task.done():   # 답이 비어 await를 안 한 경우 고아 방지
                 similar_task.cancel()
             await _cleanup_session(user_id, session_id)
             await _close_toolsets(toolsets)
-            _bg_persist(user_id, conv, "voc-agent", message, sent, mem_enabled)
+            _bg_persist(user_id, conv, "voc-agent", message, dedup.full, mem_enabled)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
