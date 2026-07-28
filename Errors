@@ -4,3 +4,17 @@ RUN-LOG.md 파일에는 작업 내용 전체가 아니라, agent 를 서버에 �
 지금 manual db 가 제대로 임베딩이 안된건지, db가 이상해진건지, gpu 사용법을 물었더니 cpu 사용법을 알려줘. 그리고 command 실행이 전혀 안되고 있어. 
 그리고 답변이 두번씩 생성되고 있어. 심각한 성능이니까 절대 수정해. 
 그리고 중간에 생각하는 과정은 웹 상에서 보이게 해줘
+
+
+[root@24-gp19 AI-Infra-Assistant]# curl -s http://75.23.32.41:8010/v1/models
+{"object":"list","data":[{"id":"bge-m3","object":"model","created":1785240910,"owned_by":"vllm","root":"/workspace/models/bge-m3","parent":null,"max_model_len":8192,"permission":[{"id":"modelperm-a4d7a5091f6542abb95218a5cd81f0e9","object":"model_permission","created":1785240910,"allow_create_engine":false,"allow_sampling":true,"allow_logprobs":true,"allow_search_indices":false,"allow_view":true,"allow_fine_tuning":false,"organization":"*","group":null,"is_blocking":false}]}]}[root@24-gp19 AI-Infra-Assistant]#
+[root@24-gp19 AI-Infra-Assistant]#
+[root@24-gp19 AI-Infra-Assistant]# curl -s -X POST http://75.23.32.41:8020/v1/rerank \
+>   -H 'Content-Type: application/json' \
+>   -d '{"model":"bge-reranker-v2-m3","query":"gpu","documents":["gpu 노드","cpu 노드"]}'
+{"id":"rerank-f6f7822f295e4594a40b491e2e5cedcf","model":"bge-reranker-v2-m3","usage":{"total_tokens":20},"results":[{"index":0,"document":{"text":"gpu 노드","multi_modal":null},"relevance_score":0.69970703125},{"index":1,"document":{"text":"cpu 노드","multi_modal":null},"relevance_score":0.2166748046875}]}[root@24-gp19 AI-Infra-Assistant]#
+[root@24-gp19 AI-Infra-Assistant]#
+[root@24-gp19 AI-Infra-Assistant]# curl -s -X POST http://75.23.32.41:8020/rerank \
+>   -H 'Content-Type: application/json' \
+>   -d '{"query":"gpu","texts":["gpu 노드","cpu 노드"]}'
+{"error":{"message":"[{'type': 'missing', 'loc': ('body', 'documents'), 'msg': 'Field required', 'input': {'query': 'gpu', 'texts': ['gpu 노드', 'cpu 노드']}}]","type":"Bad Request","param":null,"code":400}}
