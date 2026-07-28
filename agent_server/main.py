@@ -302,7 +302,8 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         })
 
     async def event_stream():
-        sent = ""   # 지금까지 클라이언트로 보낸 텍스트
+        cur = ""    # '현재 메시지'에서 이미 보낸 텍스트 (메시지가 바뀌면 리셋된다)
+        full = ""   # 이번 턴 전체 텍스트 (메모리 저장용)
         try:
             with _trace_ctx(user_id, conv, "openwebui"):
                 async for event in runner.run_async(user_id=user_id, session_id=session_id,
@@ -315,14 +316,15 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                     text = _event_text(event)
                     if not text:
                         continue
-                    # ADK 이벤트는 누적 텍스트로 올 수 있다 -> 증가분만 전송
-                    if text.startswith(sent):
-                        delta = text[len(sent):]
-                        sent = text
-                    else:
-                        delta = text
-                        sent += text
+                    # ADK는 한 메시지에 대해 '누적 텍스트'를 담은 partial 이벤트들을 보내고,
+                    # 마지막에 같은 내용의 최종 이벤트를 한 번 더 보낸다. 툴 호출로 메시지가
+                    # 여러 개 생기면 누적 기준이 메시지마다 새로 시작하므로, 비교 기준을
+                    # '지금까지 전체'가 아니라 '현재 메시지'로 잡아야 한다.
+                    # (전체 기준으로 비교하면 최종 이벤트가 매번 통째로 재전송돼 답변이 두 번씩 나온다.)
+                    delta = text[len(cur):] if text.startswith(cur) else text
+                    cur = text
                     if delta:
+                        full += delta
                         yield _sse(request_id, model_name, delta)
 
             yield _sse(request_id, model_name, "", finish=True)
@@ -337,7 +339,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         finally:
             await _cleanup_session(user_id, session_id)
             await _close_toolsets(toolsets)
-            _bg_persist(user_id, conv, "openwebui", last_text, sent, mem_enabled)
+            _bg_persist(user_id, conv, "openwebui", last_text, full, mem_enabled)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -484,7 +486,8 @@ async def agent_query(body: AgentQueryIn, request: Request):
                              "request_id": request_id})
 
     async def event_stream():
-        sent = ""
+        cur = ""    # '현재 메시지' 기준 누적 (위 /v1/chat/completions와 동일한 이유)
+        full = ""
         try:
             with _trace_ctx(user_id, conv, body.source or "agent-api"):
                 async for event in runner.run_async(user_id=user_id, session_id=session_id,
@@ -495,13 +498,10 @@ async def agent_query(body: AgentQueryIn, request: Request):
                     text = _event_text(event)
                     if not text:
                         continue
-                    if text.startswith(sent):
-                        delta = text[len(sent):]
-                        sent = text
-                    else:
-                        delta = text
-                        sent += text
+                    delta = text[len(cur):] if text.startswith(cur) else text
+                    cur = text
                     if delta:
+                        full += delta
                         yield _sse(request_id, model_name, delta)
             yield _sse(request_id, model_name, "", finish=True)
             yield "data: [DONE]\n\n"
@@ -710,7 +710,8 @@ async def voc_query(body: VocQueryIn, request: Request):
         return JSONResponse({"success": True, "answer": answer})
 
     async def event_stream():
-        sent = ""
+        cur = ""    # '현재 메시지' 기준 누적 (위 /v1/chat/completions와 동일한 이유)
+        sent = ""   # 이번 턴 전체 텍스트 (완성 envelope/메모리용)
         try:
             with _trace_ctx(user_id, conv, "voc-agent"):
                 async for event in runner.run_async(user_id=user_id, session_id=session_id,
@@ -721,13 +722,10 @@ async def voc_query(body: VocQueryIn, request: Request):
                     text = _event_text(event)
                     if not text:
                         continue
-                    if text.startswith(sent):
-                        delta = text[len(sent):]
-                        sent = text
-                    else:
-                        delta = text
-                        sent += text
+                    delta = text[len(cur):] if text.startswith(cur) else text
+                    cur = text
                     if delta:
+                        sent += delta
                         yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
             # 마지막에 가이드 계약 형태의 완성 envelope을 한 번 더 보낸다.
             if sent:

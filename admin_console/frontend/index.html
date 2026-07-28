@@ -130,8 +130,31 @@ function ManualsPanel() {
   const [titleCol, setTitleCol] = useState("");
   const [pageCol, setPageCol] = useState("");
 
+  const [embStatus, setEmbStatus] = useState(null);
+  const [reembedBusy, setReembedBusy] = useState(false);
+
   const load = useCallback(async () => setManuals(await api("/api/manuals")), []);
-  useEffect(() => { load(); }, [load]);
+  const loadEmbStatus = useCallback(async () => {
+    try { setEmbStatus(await api("/api/manuals/embedding-status")); } catch (e) { setEmbStatus(null); }
+  }, []);
+  useEffect(() => { load(); loadEmbStatus(); }, [load, loadEmbStatus]);
+
+  // 현재 임베딩 설정과 어긋난 청크를 반복 호출로 전부 다시 임베딩한다.
+  const reembed = async () => {
+    if (!confirm("현재 임베딩 설정으로 다시 임베딩할까요? 청크 수에 따라 시간이 걸립니다.")) return;
+    setReembedBusy(true);
+    try {
+      let total = 0;
+      for (let i = 0; i < 200; i++) {
+        const r = await api("/api/manuals/reembed", { method: "POST" });
+        total += r.processed;
+        if (r.remaining === 0 || r.processed === 0) break;
+      }
+      await loadEmbStatus();
+      alert(`재임베딩 완료 · ${total}개 처리`);
+    } catch (e) { alert("재임베딩 실패: " + e.message); }
+    setReembedBusy(false);
+  };
 
   const openDetail = async (id) => {
     setDetail(await api(`/api/manuals/${id}`));
@@ -264,6 +287,26 @@ function ManualsPanel() {
         PPT·Word·PDF·txt는 파일 형식에 맞춰 자동 분할되고, 엑셀·CSV는 열을 골라 등록합니다.
         업로드 시 HTML·불필요한 문자는 자동으로 정제됩니다. 같은 제목으로 재업로드하면 새 버전이 생깁니다.
       </div>
+
+      {embStatus && embStatus.stale_chunks > 0 && (
+        <div className="card" style={{borderColor: "var(--warn)"}}>
+          <div style={{color: "var(--warn)", fontSize: 13, marginBottom: 8}}>
+            <strong>의미 검색이 정상 동작하지 않는 청크가 {embStatus.stale_chunks}개 있습니다</strong>
+            {" "}(전체 {embStatus.total_chunks}개). 임베딩이 없거나 현재 설정
+            (<code>{embStatus.current_model}</code>, {embStatus.current_dim}차원)과 다른 모델로 만들어진
+            벡터입니다 — 등록 시점에 임베딩 주소가 잘못돼 있었다는 뜻이고, 이 상태면 검색이 엉뚱한
+            문서를 물어옵니다. 설정 탭에서 임베딩 주소/모델을 먼저 확인한 뒤 다시 임베딩하세요.
+          </div>
+          <div style={{fontSize: 11.5, color: "var(--muted)", marginBottom: 8, fontFamily: "var(--mono)"}}>
+            {embStatus.by_model.map((m, i) => (
+              <span key={i}>{m.embed_model || "(없음)"}/{m.embed_dim || "-"}: {m.count}개{" "}</span>
+            ))}
+          </div>
+          <button className="primary" disabled={reembedBusy} onClick={reembed}>
+            {reembedBusy ? "재임베딩 중…" : "현재 설정으로 다시 임베딩"}
+          </button>
+        </div>
+      )}
 
       <div className="card">
         <div className="toolbar">
@@ -614,9 +657,25 @@ function CommandsPanel() {
 
       {items.some(c => !c.embedded) && (
         <div className="card" style={{borderColor: "var(--warn)", color: "var(--warn)", fontSize: 12.5}}>
-          {items.filter(c => !c.embedded).length}건은 의미 검색용 임베딩 없이 등록됐습니다(키워드가 정확히
-          맞아야만 검색됨). 등록 시점에 임베딩 서버가 응답하지 않았다는 뜻입니다 — 설정 탭의
-          임베딩 주소를 확인한 뒤, 해당 항목을 편집 후 저장하면 임베딩이 다시 생성됩니다.
+          <div style={{marginBottom: 8}}>
+            {items.filter(c => !c.embedded).length}건은 의미 검색용 임베딩 없이 등록됐습니다(키워드가 정확히
+            맞아야만 검색됨). 등록 시점에 임베딩 서버가 응답하지 않았다는 뜻입니다 — 설정 탭의
+            임베딩 주소를 확인한 뒤 아래 버튼을 누르세요.
+          </div>
+          <button className="primary" disabled={busy} onClick={async () => {
+            setBusy(true);
+            try {
+              let total = 0;
+              for (let i = 0; i < 200; i++) {
+                const r = await api("/api/commands/reembed", { method: "POST" });
+                total += r.processed;
+                if (r.remaining === 0 || r.processed === 0) break;
+              }
+              await load();
+              alert(`재임베딩 완료 · ${total}개 처리`);
+            } catch (e) { alert("재임베딩 실패: " + e.message); }
+            setBusy(false);
+          }}>현재 설정으로 다시 임베딩</button>
         </div>
       )}
 

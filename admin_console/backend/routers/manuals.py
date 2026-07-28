@@ -390,3 +390,68 @@ async def delete_manual(manual_id: int, admin: str = Depends(require_admin)):
         raise HTTPException(400, "발행 중인 버전은 삭제할 수 없습니다. 먼저 발행취소하세요.")
     await pool.execute("DELETE FROM manual_files WHERE id = $1", manual_id)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- 임베딩 상태/재생성
+# 임베딩은 "등록 시점의 임베딩 서버 설정"으로 만들어진다. 설정이 잘못돼 있던 동안(예: mock
+# 주소로 되돌아간 상태) 올린 문서는 임베딩이 없거나(NULL) 다른 모델의 벡터를 갖게 되고,
+# 그러면 의미 검색이 엉뚱한 청크를 물어온다("GPU 사용법"에 CPU 문서가 나오는 증상).
+# 여기서 현재 설정과 어긋난 청크를 찾아 다시 임베딩할 수 있게 한다.
+async def _embed_settings() -> tuple[str, int]:
+    model = await get_config("vllm_embed_model", "bge-m3")
+    try:
+        dim = int(await get_config("embed_dim", "1024"))
+    except (TypeError, ValueError):
+        dim = 1024
+    return model, dim
+
+
+def _stale_where() -> str:
+    """현재 설정과 어긋나 다시 임베딩해야 하는 청크 조건(발행된 문서만 검색에 쓰이므로 전체 대상)."""
+    return ("embedding IS NULL OR embed_model IS DISTINCT FROM $1 "
+            "OR embed_dim IS DISTINCT FROM $2")
+
+
+@router.get("/embedding-status")
+async def embedding_status(admin: str = Depends(require_admin)):
+    """현재 임베딩 설정과 저장된 청크 임베딩이 맞는지 알려준다."""
+    model, dim = await _embed_settings()
+    pool = await get_pool(_DSN)
+    total = await pool.fetchval("SELECT count(*) FROM manual_chunks")
+    stale = await pool.fetchval(
+        f"SELECT count(*) FROM manual_chunks WHERE {_stale_where()}", model, dim)
+    by_model = await pool.fetch(
+        "SELECT embed_model, embed_dim, count(*) AS count FROM manual_chunks "
+        "GROUP BY embed_model, embed_dim ORDER BY count DESC"
+    )
+    return {"current_model": model, "current_dim": dim, "total_chunks": total,
+            "stale_chunks": stale, "by_model": [dict(r) for r in by_model]}
+
+
+@router.post("/reembed")
+async def reembed(limit: int = 300, admin: str = Depends(require_admin)):
+    """현재 설정과 어긋난 청크를 다시 임베딩한다(한 번에 limit개, 남으면 이어서 호출).
+    임베딩 서버가 죽어 있으면 즉시 중단하고 몇 개까지 했는지 알려준다."""
+    model, dim = await _embed_settings()
+    pool = await get_pool(_DSN)
+    rows = await pool.fetch(
+        f"SELECT id, chunk_text FROM manual_chunks WHERE {_stale_where()} ORDER BY id LIMIT $3",
+        model, dim, max(1, min(int(limit), 1000)),
+    )
+    done = 0
+    for c in rows:
+        try:
+            vec = await embed_text(c["chunk_text"])
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(503, f"임베딩 서버 오류로 중단했습니다({done}개 완료). 원인: {e}")
+        if len(vec) != dim:
+            raise HTTPException(
+                500, f"임베딩 차원이 맞지 않습니다(모델 {len(vec)} vs 스키마 {dim}). "
+                     "설정의 임베딩 모델/embed_dim을 확인하세요.")
+        await pool.execute(
+            "UPDATE manual_chunks SET embedding = $1::vector, embed_model = $2, embed_dim = $3 "
+            "WHERE id = $4", vector_literal(vec), model, dim, c["id"])
+        done += 1
+    remaining = await pool.fetchval(
+        f"SELECT count(*) FROM manual_chunks WHERE {_stale_where()}", model, dim)
+    return {"processed": done, "remaining": remaining}

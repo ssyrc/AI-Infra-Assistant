@@ -210,3 +210,28 @@ async def commit_command_excel(body: CommandExcelCommitIn, admin: str = Depends(
                 else:
                     updated += 1
     return {"inserted": inserted, "updated": updated, "total": len(items)}
+
+
+# ---------------------------------------------------------------- 임베딩 재생성
+# 매뉴얼과 같은 이유(등록 시점 임베딩 설정이 잘못돼 있으면 의미 검색이 망가진다).
+@router.post("/reembed")
+async def reembed_commands(limit: int = 300, admin: str = Depends(require_admin)):
+    """임베딩이 없거나 현재 모델과 다른 카탈로그 항목을 다시 임베딩한다."""
+    model = await get_config("vllm_embed_model", "bge-m3")
+    pool = await get_pool(_DSN)
+    where = "embedding IS NULL OR embed_model IS DISTINCT FROM $1"
+    rows = await pool.fetch(
+        f"SELECT id, name, description FROM command_catalog WHERE {where} ORDER BY id LIMIT $2",
+        model, max(1, min(int(limit), 1000)),
+    )
+    done = 0
+    for c in rows:
+        emb, m, dim = await _embed(f"{c['name']}\n{c['description']}")
+        if emb is None:
+            raise HTTPException(503, f"임베딩 서버 오류로 중단했습니다({done}개 완료).")
+        await pool.execute(
+            "UPDATE command_catalog SET embedding = $1::vector, embed_model = $2, embed_dim = $3, "
+            "updated_at = now() WHERE id = $4", emb, m, dim, c["id"])
+        done += 1
+    remaining = await pool.fetchval(f"SELECT count(*) FROM command_catalog WHERE {where}", model)
+    return {"processed": done, "remaining": remaining}
