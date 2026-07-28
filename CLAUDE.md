@@ -129,6 +129,11 @@ docker compose -f docker-compose.dev.yml up -d --no-build
 | `hot_reload=false` 설정값 | 해당 서비스 재시작(콘솔에 "지금 재시작" 버튼 있음) |
 | requirements 변경 | 이미지 재빌드(재시작만으로는 pip 패키지가 안 깔림) |
 
+재시작 커맨드([서버] `cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant`):
+`docker compose -f docker-compose.dev.yml restart <agent-server|command-mcp|system-mcp|admin-console>`
+· 전부 한 번에는 `bash scripts/restart-mounted.sh` · 콘솔 재시작 버튼은
+agent-server/manual-mcp/command-mcp/voc-mcp/system-mcp 5개만 지원(admin-console은 CLI로만).
+
 ## 6. 이미 규명된 것 — 다시 추측하지 말 것
 
 - Open WebUI에 모델이 안 보이는 문제: 관리자 패널 → 설정 → **연결(Connections)** 에

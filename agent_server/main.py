@@ -226,11 +226,12 @@ def _trace_ctx(user_id: str, session_id: str | None, source: str | None):
 def _to_os_identity(raw: str) -> str:
     """OS 계정 신원으로 정규화한다.
     - 이메일 형태(user@corp.com)면 로컬파트(@ 앞)만 사용한다 -> 리눅스 계정명으로 매핑.
-    - 앞뒤 공백 제거. 이후 실제 검증은 System MCP의 pwd.getpwnam이 담당한다(없으면 실행 거부)."""
+    - 리눅스 계정명은 소문자라 소문자로 맞춘다(Open WebUI 이메일에 대문자가 섞여 있어도 매핑되게).
+    - 형식 검증/특권 계정 거부는 실행 직전 shared/ssh_exec.validate_user가 담당한다."""
     ident = (raw or "").strip()
     if "@" in ident:
         ident = ident.split("@", 1)[0].strip()
-    return ident
+    return ident.lower()
 
 
 def _caller_from_request(request: Request, req: ChatCompletionRequest) -> tuple[str, str, str]:

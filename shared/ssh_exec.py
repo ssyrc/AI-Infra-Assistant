@@ -38,7 +38,16 @@ MAX_OUTPUT = 64 * 1024
 DEFAULT_TIMEOUT = 25
 
 _HOSTNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,253}$")
-_USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,63}$")   # 리눅스 계정명 형식
+# 리눅스 계정명 형식. 사내 계정이 `yr9.choi`처럼 점을 포함하므로 '.'을 허용한다.
+# 첫 글자를 [a-z_]로 고정해서 '-'로 시작하는 이름(ssh/su 옵션으로 해석될 수 있음)을 막는다.
+_USER_RE = re.compile(r"^[a-z_][a-z0-9_.-]{0,63}$")
+
+# 이 계정들로는 절대 실행하지 않는다(uid 0). agent 컨테이너가 root로 ssh하므로,
+# user_id가 root로 들어오면 강등 없이 root로 실행되어 "절대 root 금지" 원칙이 깨진다.
+DENY_USERS = {"root", "toor"}
+
+# `su`가 계정을 못 찾았을 때의 대표적인 stderr 문구(배포판마다 조금씩 다름).
+_NO_SUCH_USER = ("does not exist", "no passwd entry", "unknown id", "user not found")
 
 
 def resolve_host(name: str) -> str:
@@ -65,7 +74,13 @@ def resolve_host(name: str) -> str:
 
 def validate_user(user_id: str) -> str:
     if not user_id or not _USER_RE.match(user_id):
-        raise PermissionError(f"잘못된 사용자 계정 형식입니다: {user_id!r}")
+        raise PermissionError(
+            f"리눅스 계정명 형식이 아니어서 실행할 수 없습니다: {user_id!r}. "
+            "Open WebUI 계정 이메일의 '@' 앞부분이 서버 계정명과 같아야 합니다.")
+    if user_id in DENY_USERS:
+        raise PermissionError(
+            f"'{user_id}' 계정으로는 실행할 수 없습니다. 커맨드는 반드시 일반 사용자 권한으로만 "
+            "실행됩니다. 서버 계정과 연결된 일반 사용자 계정으로 로그인해 주세요.")
     return user_id
 
 
@@ -116,7 +131,7 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
         s = b.decode("utf-8", "replace")
         return s if len(s) <= max_output else s[:max_output] + "\n…(출력 잘림)"
 
-    return {
+    result = {
         "host": host,
         "ip": ip,
         "as_user": user,
@@ -125,3 +140,11 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
         "stdout": _clip(out),
         "stderr": _clip(err),
     }
+    # "계정이 서버에 없음"을 권한 문제로 오해하지 않도록 원인을 명시해 준다.
+    # (su가 실패하면 커맨드 자체는 실행되지도 않는데, 에이전트가 "권한 거부"로 답해버린다.)
+    low = result["stderr"].lower()
+    if proc.returncode != 0 and any(m in low for m in _NO_SUCH_USER):
+        result["error"] = (
+            f"서버 '{host}'에 '{user}' 계정이 없어 실행하지 못했습니다(권한 문제가 아님). "
+            "Open WebUI 계정 이메일의 '@' 앞부분이 서버 계정명과 같아야 합니다.")
+    return result

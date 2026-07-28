@@ -1,18 +1,9 @@
 # 지금 할 일
 
-실행 위치: **[WSL]** 인터넷 되는 로컬 · **[서버]** 폐쇄망 배포 호스트 202.20.183.30 ·
-**[웹]** 관리자 콘솔 `http://202.20.183.30:8501`
+**[WSL]** 인터넷 되는 로컬 · **[서버]** 202.20.183.30 (`cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant`)
+· **[웹]** 콘솔 `http://202.20.183.30:8501`
 
-**[서버] 작업은 전부 이 디렉토리에서 실행한다:**
-```bash
-cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-```
-
-이번 변경은 코드만 바뀜(requirements 변경 없음) → 이미지 재빌드 불필요.
-
----
-
-## 1. [WSL] 코드 받아서 서버로 전송
+## 1. [WSL]
 
 ```bash
 git -C /home/yrc/AI-Infra-Assistant fetch origin main
@@ -21,47 +12,32 @@ rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
   yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
 ```
 
-## 2. [서버] 마이그레이션 + 전체 재기동
+## 2. [서버]
 
 ```bash
+cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
 docker compose -f docker-compose.dev.yml run --rm db-init
 bash scripts/restart-mounted.sh
-```
-- `db-init` 출력에 `command_db: applied v5`, `system_db: applied v6`가 보여야 한다.
-  에러가 나면 전체 출력을 그대로 전달.
-- `restart-mounted.sh`가 agent-server·MCP 4개·admin-console을 한 번에 재시작하고
-  마지막에 `{"status":"ok"...}` health를 찍는다. 안 찍히면 그 출력을 전달.
-
-## 3. [웹] 초기화된 설정 복구
-
-먼저 [서버]에서 실제 서빙 중인 모델 id 확인:
-```bash
 curl -s http://75.23.32.41:8000/v1/models
 curl -s http://75.23.32.41:8010/v1/models
 curl -s http://75.23.32.41:8020/v1/models
 ```
+`db-init`에 `command_db: applied v5`, `system_db: applied v6`가 안 보이거나 에러면 출력 전달.
 
-콘솔 → **설정** 탭에서 입력 후 저장:
+## 3. [웹] 설정 탭 — 값 입력 후 저장
 
 | key | 값 |
 |---|---|
 | `vllm_llm_base_url` | `http://75.23.32.41:8000/v1` |
-| `vllm_llm_model` | 위 8000 curl 결과의 `id` (예: `qwen3-235b-a22b`) |
+| `vllm_llm_model` | 2번 8000 curl 결과의 `id` |
 | `vllm_embed_base_url` | `http://75.23.32.41:8010/v1` |
-| `vllm_embed_model` | 위 8010 curl 결과의 `id` (예: `bge-m3`) |
+| `vllm_embed_model` | 2번 8010 curl 결과의 `id` |
 | `rerank_provider` | `vllm` |
 | `rerank_base_url` | `http://75.23.32.41:8020/v1` |
 | `rerank_model` | `bge-reranker-v2-m3` |
 | `scheduler_login_host` | `login07` |
 
-한 번 저장하면 이후 `dev-config`가 다시 못 덮어쓴다. 저장 후 **[서버]**:
-```bash
-docker compose -f docker-compose.dev.yml restart agent-server
-```
-
-## 4. [웹] 에이전트 지시문 교체
-
-콘솔 → **설정** 탭 → `agent_system_instruction` 에 아래 전문을 붙여넣고 저장.
+## 4. [웹] 설정 탭 — `agent_system_instruction`에 아래 전문 붙여넣고 저장
 
 <!-- AGENT_INSTRUCTION_BEGIN -->
 ```
@@ -122,60 +98,32 @@ docker compose -f docker-compose.dev.yml restart agent-server
 ```
 <!-- AGENT_INSTRUCTION_END -->
 
-저장 후 **[서버]**:
+## 5. [서버]
+
 ```bash
 docker compose -f docker-compose.dev.yml restart agent-server
 ```
 
-## 5. [웹] System MCP 확인
+## 6. [웹] System MCP 탭
 
-콘솔 → **System MCP** 탭 → `disk_free` 스위치를 껐다 켜고 저장 → 화면에 뜨는
-**"⚠ System MCP 재시작"** 버튼 클릭. (버튼 대신 [서버]에서
-`docker compose -f docker-compose.dev.yml restart system-mcp` 해도 동일)
+`disk_free` 스위치 껐다 켜고 저장 → **"⚠ System MCP 재시작"** 버튼 클릭.
 
-그다음 Open WebUI에서 질문 → 콘솔 System MCP 탭 하단 실행 로그가 `blocked`가 아니라
-`success`인지 확인. 여전히 `blocked`면 **[서버]**에서:
+## 7. [웹] 확인 — Open WebUI `http://202.20.183.30:8502`
+
+**yr9.choi 계정으로** 로그인해서 "내 홈 스토리지 용량 어떻게 돼?" 질문.
+(관리자 계정 이메일이 `root@...`면 이제 실행이 거부된다 — 커맨드는 일반 사용자 계정으로만 실행됨.)
+
+실패하면 [서버]에서 아래 출력 전달:
 ```bash
-docker compose -f docker-compose.dev.yml logs db-init --tail 80
+docker compose -f docker-compose.dev.yml logs command-mcp --tail 50
+docker compose -f docker-compose.dev.yml logs system-mcp --tail 50
 ```
-출력 전달.
 
-## 6. [웹] 커맨드 카탈로그 확인
+## 8. [서버] Open WebUI 계정 ↔ 리눅스 계정 확인
 
-콘솔 → **커맨드 카탈로그** 탭:
-- 항목이 이름 / 실행 커맨드 / 설명 3개로만 보이는지 확인(사용법·카테고리·검색 열 삭제됨).
-- 상단에 **"N건은 의미 검색용 임베딩 없이 등록됐습니다"** 경고가 보이면, 3번에서 임베딩 주소를
-  고친 뒤 그 항목들을 **편집 → 저장**하면 임베딩이 다시 생성된다(경고가 사라짐).
-- `myquota`가 없으면 등록: 이름 `myquota`, 실행 커맨드는 비워둠(이름이 그대로 실행됨), 설명 입력.
-
-## 7. 동작 확인
-
-Open WebUI(`http://202.20.183.30:8502`)에 **일반 사용자 계정**으로 로그인 후
-"내 홈 스토리지 용량 어떻게 돼?" 질문:
-- 사용법 안내가 아니라 **실제 실행 결과**가 나와야 한다.
-- 콘솔 System MCP 탭 실행 로그에 `run_command` 행이 남아야 한다
-  (`requested_by`가 본인 계정, `status`가 `success`).
-
----
-
-## 참고: 서비스 재시작 방법
-
-**[웹]** 콘솔 버튼: 설정 탭에서 "재시작 필요" 배지가 붙은 값을 저장하거나 System MCP 탭에서
-설정을 바꾸면 재시작 버튼이 그 자리에 나타난다. 버튼으로 재시작 가능한 서비스는
-`agent-server`, `manual-mcp`, `command-mcp`, `voc-mcp`, `system-mcp` 5개.
-
-**[서버]** 커맨드:
+Open WebUI 계정 이메일의 `@` 앞부분이 실제 서버 계정명과 같아야 실행된다.
 ```bash
-cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-
-docker compose -f docker-compose.dev.yml restart agent-server     # 지시문·LLM 설정 변경 후
-docker compose -f docker-compose.dev.yml restart command-mcp      # 커맨드 MCP 툴 변경 후
-docker compose -f docker-compose.dev.yml restart system-mcp       # 화이트리스트 설명·분류·커스텀 커맨드 변경 후
-docker compose -f docker-compose.dev.yml restart admin-console    # 콘솔 코드 변경 후(버튼 없음)
-
-bash scripts/restart-mounted.sh                                    # 위 전부 한 번에
-docker compose -f docker-compose.dev.yml ps                        # 상태 확인
-docker compose -f docker-compose.dev.yml logs agent-server --tail 50   # 로그 확인
+ssh root@202.20.185.100 "id yr9.choi"
 ```
 
 ---
