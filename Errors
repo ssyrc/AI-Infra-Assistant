@@ -1,6 +1,19 @@
 # open webui 모델 자동 선택
-  - 가이드 대로 완료
-  - 하지만, 설정 탭 "LLM" 그룹의 "Open WebUI 기본 모델 동기화" 버튼 클릭하면 이런 에러 뜸 동기화 실패: 405: {"detail":"Method Not Allowed"}
+  - 일단 agent 다시 올리니 default로 ai infra assistant 설정되어 있음
+  - 하지만 동일한 설정임에도 관리자 콘솔에서 동기화 버튼 누르면 에러 발생함동기화 실패: 405: {"detail":"Method Not Allowed"}
+  - vllm llm base url을 http://mock-llm:8000 으로 바꾸고 vlm llm model 을 mock-llm 으로 바꾼담 동기화 버튼 눌러도 동일한 에러 발생함 동기화 실패: 405: {"detail":"Method Not Allowed"}
+  - 그리고 mock-llm 으로 변겨앟고 저장했는데도 open webui 에서는 ai infra assistant라고 나옴
 
-# 관리자 콘솔
-  - 설정 탭에 url, model 모두 설정하고 저장해도, 다시 콘솔 띄우면 mock-llm 으로 돌아감. 이전 세팅값을 기억해서 계속 사용할 수 있도록 업데이트
+# open webui
+  - 일단 ai infra assistant 대답은 잘 나오고 있음
+  - 지금 streamable 하게 output 이 나오지 않고 한번에 나오고 있음, streamable하게 나오도록 변경
+  - 매뉴얼 데이터 등록했음에도 mcp manual 이 rag 하고 있지 않음,  "슈퍼컴 계정 신청 방법 알려줘" 했는데 이런 답변 나옴 "현재 제공된 자료에서는 슈퍼컴퓨터 계정 신청 방법에 대한 정보를 찾지 못했습니다.
+내부 매뉴얼 및 과거 질의응답(VOC) 기록에서도 관련 내용이 확인되지 않았습니다. 
+
+추가로 확인 가능한 경로: 
+
+     소속 부서의 시스템 관리자 또는 운영팀 문의
+     사내 포털의 시스템 계정 신청 메뉴 확인
+     
+
+정확한 정보는 관리 부서를 통해 안내받는 것을 권장드립니다. "
