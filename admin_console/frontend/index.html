@@ -1108,6 +1108,7 @@ function SettingsPanel() {
     "검색 품질 / 업로드": editable.filter(s =>
       s.key === "clean_policy_version" || s.key.startsWith("search_") || s.key.startsWith("upload_")),
     "MCP 엔드포인트": editable.filter(s => s.key.endsWith("_mcp_url")),
+    "SSH 실행 (System/Command MCP)": editable.filter(s => s.key === "scheduler_login_host"),
     "Open WebUI 연동": editable.filter(s => s.key.startsWith("openwebui_")),
     "에이전트 지시문": editable.filter(s => s.key === "agent_system_instruction"),
   };
@@ -1147,6 +1148,14 @@ function SettingsPanel() {
               <div style={{marginTop: 6}}>
                 <button onClick={syncOpenWebUIModel}>Open WebUI 기본 모델 동기화</button>
               </div>
+            </div>
+          )}
+          {group === "SSH 실행 (System/Command MCP)" && (
+            <div style={{fontSize: 12.5, color: "var(--muted)", marginBottom: 10,
+                         padding: "8px 10px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4}}>
+              System/Command MCP가 job 조회 등에 ssh할 로그인 서버 이름(호스트의 <code>/etc/hosts</code>에
+              등록된 이름이어야 함). System MCP의 <code>disk_free</code> 등 개별 툴의 <code>host</code>
+              파라미터와는 별개 설정 — 그쪽은 에이전트 지시문에서 기본 호스트를 알려줘야 함.
             </div>
           )}
           {rows.map(s => {
