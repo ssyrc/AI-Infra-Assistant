@@ -1,12 +1,21 @@
 # 지금 할 일
 
-## 1. 배포 (202.20.183.30)
+이번 변경은 **코드만** 바뀜(requirements 변경 없음) → 이미지 재빌드 불필요.
 
+## 1. 코드 반영 (WSL → rsync → 폐쇄망)
+
+WSL(인터넷 O):
 ```bash
-cd /home/yrc/AI-Infra-Assistant
-git pull origin main
+git -C /home/yrc/AI-Infra-Assistant fetch origin main
+git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
+rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
+  yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
+```
+
+폐쇄망 배포 호스트(202.20.183.30), `05_halo/AI-Infra-Assistant`에서:
+```bash
 docker compose -f docker-compose.dev.yml run --rm db-init
-docker compose -f docker-compose.dev.yml restart command-mcp agent-server admin-console system-mcp
+bash scripts/restart-mounted.sh
 ```
 `db-init` 출력에 `command_db: applied v5`, `system_db: applied v6` 확인. 에러 나면 전체 출력 전달.
 

@@ -22,19 +22,58 @@
 
 ## 2. 배포 토폴로지
 
-| 대상 | 주소 | 비고 |
+**GitHub은 폐쇄망에서 안 닿는다.** 코드는 항상 WSL을 거쳐 rsync로 들어간다.
+
+| 위치 | 주소 / 경로 | 역할 |
 |---|---|---|
-| 배포 호스트 | 202.20.183.30 | 도커 컨테이너 전부 여기. 코드는 `/home/yrc/AI-Infra-Assistant` |
-| 게이트/로그인 서버 | 202.20.185.100 (`login07`) | 내부 서버로 자동 라우팅. ssh 키 등록 완료 |
+| WSL (인터넷 O) | `/home/yrc/AI-Infra-Assistant` | GitHub pull, 이미지 빌드, 휠 다운로드 |
+| 게이트/로그인 서버 | 202.20.185.100 (`login07`), `/home/gpu1/yr9.choi/05_halo/` | rsync 수신 지점. 내부 서버로 자동 라우팅. ssh 키 등록 완료 |
+| 폐쇄망 배포 호스트 | 202.20.183.30, `05_halo/AI-Infra-Assistant` | 도커 컨테이너 전부 여기 |
 | GPU 서버 | 75.23.32.41 (`hgpu4041`) | vLLM LLM :8000 / 임베딩 :8010 / 리랭커 :8020 |
 | 포트 | agent :8500 · 관리자 콘솔 :8501 · 사용자 웹(Open WebUI) :8502 |
 
 - 모델: LLM `Qwen3-235B-A22B-Instruct-2507-FP8`(TP=4, `--max-model-len 32768`,
   `--enable-auto-tool-choice --tool-call-parser hermes` 필수), 임베딩 `bge-m3`(1024차원 —
   DB 스키마가 `vector(1024)` 고정), 리랭커 `bge-reranker-v2-m3`.
-- 폐쇄망: 사내 pip 미러(Nexus)가 패키지를 간헐적으로 `from versions: none`으로 뱉는다 →
-  `vendor/*.whl` 오프라인 휠을 쓴다(Dockerfile이 vendor의 모든 휠을 먼저 설치). 이미지는
-  인터넷 환경에서 빌드 후 tar로 옮긴다(`scripts/*.sh`).
+
+## 2-1. 반영 절차 — 매번 이대로 안내한다
+
+**(A) 코드만 바뀐 경우** (requirements/Dockerfile 변경 없음) — 대부분 여기 해당. 재빌드 불필요.
+`docker-compose.dev.yml`이 `./mcp_servers`·`./shared`를 마운트하므로 재시작만으로 반영된다.
+
+```bash
+# WSL
+git -C /home/yrc/AI-Infra-Assistant fetch origin main
+git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
+rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
+  yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
+
+# 폐쇄망 배포 호스트(202.20.183.30)
+docker compose -f docker-compose.dev.yml run --rm db-init   # 마이그레이션/새 설정 키가 있을 때만
+bash scripts/restart-mounted.sh
+```
+
+**(B) requirements/Dockerfile이 바뀐 경우** — 이미지를 다시 만들어 tar로 옮겨야 한다.
+
+```bash
+# WSL: 빌드 → 저장 → 전송
+bash scripts/rebuild.sh                    # 순차 빌드(병렬 금지 — 미러가 간헐적으로 빈 응답)
+TAG=main-$(git rev-parse --short HEAD) bash scripts/save-runtime-images.sh
+rsync -avz --progress dist/ai-infra-assistant-runtime-<TAG>.tar \
+  yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/
+
+# 폐쇄망: 로드 → 재태깅 → 기동
+docker load < ai-infra-assistant-runtime-<TAG>.tar
+bash scripts/retag-runtime-images.sh <TAG>     # ellie0/*:<TAG> → compose가 찾는 로컬 태그
+docker compose -f docker-compose.dev.yml up -d --no-build
+```
+재태깅을 빼먹으면 `No such image: ai-infra-assistant-admin-console:latest`가 난다(RUN-LOG #2).
+
+- 사내 pip 미러(Nexus)가 패키지를 간헐적으로 `from versions: none`으로 뱉는다 →
+  WSL에서 `pip download <pkg>==<ver> -d vendor/`로 받아 `vendor/*.whl`에 넣는다
+  (Dockerfile이 vendor의 모든 휠을 먼저 오프라인 설치 — Dockerfile 수정 불필요).
+  미러에 어떤 버전이 있는지는 `bash scripts/debug-now.sh <pkg>==<ver>`로 확인.
+- 내부 미러도 프록시(`202.20.187.241:3128`) 경유 필수.
 
 ## 3. 절대 규칙
 
