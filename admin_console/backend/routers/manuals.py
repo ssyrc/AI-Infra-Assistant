@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from auth import require_admin
 from config_store import get_config
-from db import get_pool, embed_text, vector_literal
+from db import get_pool, embed_text, vector_literal, get_http_client
 from parser import parse_file, SUPPORTED_EXTS
 from cleaning import clean_text, clean_options_from_dict, CleanOptions
 from spreadsheet import TABLE_EXTS, read_table_meta, load_table_rows
@@ -455,3 +455,111 @@ async def reembed(limit: int = 300, admin: str = Depends(require_admin)):
     remaining = await pool.fetchval(
         f"SELECT count(*) FROM manual_chunks WHERE {_stale_where()}", model, dim)
     return {"processed": done, "remaining": remaining}
+
+
+# ---------------------------------------------------------------- 검색 진단
+# "왜 GPU를 물었는데 CPU 문서가 나오나"를 눈으로 확인하기 위한 도구.
+# Manual MCP의 search_manual과 '완전히 같은' 쿼리를 돌리되, 조용히 fallback되는 지점
+# (임베딩 실패 -> 키워드 전용, 리랭커 실패 -> RRF 순위)을 숨기지 않고 그대로 보여준다.
+async def _rerank_probe(query: str, docs: list[str]) -> dict:
+    """리랭커를 직접 호출해 성공/실패와 원인을 그대로 돌려준다(rerank()는 실패를 삼킨다)."""
+    base_url = await get_config("rerank_base_url", "")
+    provider = (await get_config("rerank_provider", "tei") or "tei").lower()
+    if not base_url or provider == "none":
+        return {"used": False, "reason": "rerank_base_url이 비었거나 provider=none"}
+    model = await get_config("rerank_model", "bge-reranker-v2-m3")
+    url = f"{base_url.rstrip('/')}/rerank"
+    if provider == "vllm":
+        payload = {"model": model, "query": query, "documents": docs}
+    else:
+        payload = {"query": query, "texts": docs, "raw_scores": False}
+    try:
+        client = await get_http_client()
+        resp = await client.post(url, json=payload, timeout=10.0)
+        if resp.status_code >= 400:
+            return {"used": False, "provider": provider, "url": url,
+                    "reason": f"HTTP {resp.status_code}: {resp.text[:200]}",
+                    "hint": "provider 설정이 서버 종류와 다를 수 있습니다(vllm ↔ tei)."}
+        return {"used": True, "provider": provider, "url": url}
+    except Exception as e:  # noqa: BLE001
+        return {"used": False, "provider": provider, "url": url,
+                "reason": f"{type(e).__name__}: {e}"}
+
+
+class SearchTestIn(BaseModel):
+    query: str
+    top_k: int = 10
+
+
+@router.post("/search-test")
+async def search_test(body: SearchTestIn, admin: str = Depends(require_admin)):
+    """관리자 콘솔에서 매뉴얼 검색을 그대로 재현하고, 어느 단계가 죽었는지 보여준다."""
+    query = (body.query or "").strip()
+    if not query:
+        raise HTTPException(422, "검색어를 입력하세요.")
+    top_k = max(1, min(int(body.top_k), 20))
+    pool = await get_pool(_DSN)
+
+    embed_info: dict = {}
+    vec = None
+    try:
+        vec = await embed_text(query)
+        embed_info = {"ok": True, "dim": len(vec)}
+    except Exception as e:  # noqa: BLE001
+        embed_info = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    published = await pool.fetchval(
+        "SELECT count(*) FROM manual_chunks c JOIN manual_files f ON f.id = c.manual_file_id "
+        "WHERE f.status = 'published'")
+    with_vec = await pool.fetchval(
+        "SELECT count(*) FROM manual_chunks c JOIN manual_files f ON f.id = c.manual_file_id "
+        "WHERE f.status = 'published' AND c.embedding IS NOT NULL")
+
+    if vec is None:
+        mode = "키워드 전용(임베딩 실패)"
+        rows = await pool.fetch(
+            """
+            SELECT c.id, c.section_title, c.chunk_text, f.title,
+                   ts_rank(c.tsv, plainto_tsquery('simple', $1)) AS score
+            FROM manual_chunks c JOIN manual_files f ON f.id = c.manual_file_id
+            WHERE f.status = 'published' AND c.tsv @@ plainto_tsquery('simple', $1)
+            ORDER BY score DESC LIMIT $2
+            """, query, top_k)
+    else:
+        mode = "하이브리드(의미+키워드)"
+        rows = await pool.fetch(
+            """
+            WITH vector_search AS (
+                SELECT c.id, ROW_NUMBER() OVER (ORDER BY c.embedding <=> $1::vector) AS rank
+                FROM manual_chunks c JOIN manual_files f ON f.id = c.manual_file_id
+                WHERE f.status = 'published' AND c.embedding IS NOT NULL
+                ORDER BY c.embedding <=> $1::vector LIMIT 50
+            ),
+            keyword_search AS (
+                SELECT c.id, ROW_NUMBER() OVER (
+                    ORDER BY ts_rank(c.tsv, plainto_tsquery('simple', $2)) DESC) AS rank
+                FROM manual_chunks c JOIN manual_files f ON f.id = c.manual_file_id
+                WHERE f.status = 'published' AND c.tsv @@ plainto_tsquery('simple', $2) LIMIT 50
+            ),
+            fused AS (
+                SELECT COALESCE(v.id, k.id) AS id, v.rank AS vrank, k.rank AS krank,
+                       COALESCE(1.0/(60+v.rank),0) + COALESCE(1.0/(60+k.rank),0) AS rrf
+                FROM vector_search v FULL OUTER JOIN keyword_search k ON v.id = k.id
+            )
+            SELECT c.id, c.section_title, c.chunk_text, f.title,
+                   fused.rrf AS score, fused.vrank, fused.krank
+            FROM fused JOIN manual_chunks c ON c.id = fused.id
+            JOIN manual_files f ON f.id = c.manual_file_id
+            ORDER BY fused.rrf DESC LIMIT $3
+            """, vector_literal(vec), query, top_k)
+
+    hits = [dict(r) for r in rows]
+    docs = [(f"{h['section_title']}\n{h['chunk_text']}" if h.get("section_title")
+             else h["chunk_text"]) for h in hits]
+    rerank_info = await _rerank_probe(query, docs) if docs else {"used": False, "reason": "후보 없음"}
+
+    for h in hits:
+        h["chunk_text"] = (h["chunk_text"] or "")[:300]
+        h["score"] = float(h["score"]) if h["score"] is not None else None
+    return {"mode": mode, "embedding": embed_info, "rerank": rerank_info,
+            "published_chunks": published, "chunks_with_embedding": with_vec, "hits": hits}

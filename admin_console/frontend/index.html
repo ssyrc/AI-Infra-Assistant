@@ -140,6 +140,21 @@ function ManualsPanel() {
   useEffect(() => { load(); loadEmbStatus(); }, [load, loadEmbStatus]);
 
   // 현재 임베딩 설정과 어긋난 청크를 반복 호출로 전부 다시 임베딩한다.
+  const [testQuery, setTestQuery] = useState("");
+  const [testResult, setTestResult] = useState(null);
+  const [testBusy, setTestBusy] = useState(false);
+
+  const runSearchTest = async () => {
+    if (!testQuery.trim()) return;
+    setTestBusy(true);
+    try {
+      setTestResult(await api("/api/manuals/search-test", {
+        method: "POST", body: JSON.stringify({ query: testQuery, top_k: 10 }),
+      }));
+    } catch (e) { alert("검색 테스트 실패: " + e.message); }
+    setTestBusy(false);
+  };
+
   const reembed = async () => {
     if (!confirm("현재 임베딩 설정으로 다시 임베딩할까요? 청크 수에 따라 시간이 걸립니다.")) return;
     setReembedBusy(true);
@@ -320,6 +335,55 @@ function ManualsPanel() {
           <button className="primary" disabled={busy} onClick={analyze}>{busy ? "처리 중..." : "전처리 미리보기"}</button>
         </div>
         <div style={{marginTop: 10}}><OptToggles /></div>
+      </div>
+
+      <div className="card">
+        <div className="toolbar" style={{marginBottom: 6}}>
+          <strong style={{fontSize: 13}}>검색 테스트</strong>
+          <input placeholder="예: gpu 노드 접근하려면" value={testQuery}
+                 onChange={e => setTestQuery(e.target.value)}
+                 onKeyDown={e => e.key === "Enter" && runSearchTest()} style={{width: 320}} />
+          <button disabled={testBusy} onClick={runSearchTest}>{testBusy ? "검색 중…" : "검색"}</button>
+          <span style={{fontSize: 11.5, color: "var(--muted)"}}>
+            에이전트가 실제로 받는 검색 결과를 그대로 보여줍니다(어느 단계가 죽었는지 확인용).
+          </span>
+        </div>
+        {testResult && (
+          <div style={{fontSize: 12.5}}>
+            <div style={{marginBottom: 8, fontFamily: "var(--mono)", fontSize: 11.5}}>
+              <div>검색 방식: <strong>{testResult.mode}</strong> · 발행 청크 {testResult.published_chunks}개
+                (임베딩 있는 것 {testResult.chunks_with_embedding}개)</div>
+              <div style={{color: testResult.embedding.ok ? "var(--accent)" : "var(--danger)"}}>
+                임베딩: {testResult.embedding.ok ? `정상 (${testResult.embedding.dim}차원)` : `실패 — ${testResult.embedding.error}`}
+              </div>
+              <div style={{color: testResult.rerank.used ? "var(--accent)" : "var(--danger)"}}>
+                리랭커: {testResult.rerank.used
+                  ? `정상 (${testResult.rerank.provider})`
+                  : `미적용 — ${testResult.rerank.reason}`}
+                {testResult.rerank.hint && <span> · {testResult.rerank.hint}</span>}
+              </div>
+            </div>
+            <table>
+              <thead><tr><th>#</th><th>문서</th><th>섹션</th><th>내용</th><th>점수</th></tr></thead>
+              <tbody>
+                {testResult.hits.map((h, i) => (
+                  <tr key={h.id}>
+                    <td>{i + 1}</td>
+                    <td style={{fontSize: 12}}>{h.title}</td>
+                    <td style={{fontSize: 12, color: "var(--muted)"}}>{h.section_title || "-"}</td>
+                    <td style={{fontSize: 11.5}}>{h.chunk_text}</td>
+                    <td style={{fontFamily: "var(--mono)", fontSize: 11}}>
+                      {h.score != null ? h.score.toFixed(4) : "-"}
+                      {h.vrank != null && <span style={{color: "var(--muted)"}}> v{h.vrank}</span>}
+                      {h.krank != null && <span style={{color: "var(--muted)"}}> k{h.krank}</span>}
+                    </td>
+                  </tr>
+                ))}
+                {testResult.hits.length === 0 && <tr><td colSpan="5" className="empty">검색 결과 없음</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {showBrowser && (

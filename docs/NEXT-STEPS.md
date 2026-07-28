@@ -18,15 +18,30 @@ cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
 bash scripts/restart-mounted.sh
 ```
 
-## 3. [웹] 설정 탭 — 임베딩 설정 확인
+## 3. [서버] 임베딩·리랭커가 실제로 뭘로 떠 있는지 확인
 
-`vllm_embed_base_url`, `vllm_embed_model`이 실제 값인지 먼저 확인(mock이면 RAG가 망가진다).
+```bash
+curl -s http://75.23.32.41:8010/v1/models
+curl -s -X POST http://75.23.32.41:8020/v1/rerank \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"bge-reranker-v2-m3","query":"gpu","documents":["gpu 노드","cpu 노드"]}'
+curl -s -X POST http://75.23.32.41:8020/rerank \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"gpu","texts":["gpu 노드","cpu 노드"]}'
+```
+- 두 번째(`/v1/rerank`)가 성공 → 설정 `rerank_provider=vllm`, `rerank_base_url=http://75.23.32.41:8020/v1`
+- 세 번째(`/rerank`)가 성공 → 설정 `rerank_provider=tei`, `rerank_base_url=http://75.23.32.41:8020`
+- 둘 다 실패하면 출력 그대로 전달.
 
-## 4. [웹] 매뉴얼 탭 — 재임베딩
+## 4. [웹] 매뉴얼 탭 — 검색 테스트
 
-상단에 **"의미 검색이 정상 동작하지 않는 청크가 N개 있습니다"** 경고가 뜨면
-**"현재 설정으로 다시 임베딩"** 버튼 클릭. (GPU 질문에 CPU 답이 나오던 원인)
-커맨드 카탈로그 탭에도 같은 경고가 뜨면 동일하게 처리.
+새로 생긴 **검색 테스트** 칸에 `gpu 노드 접근하려면` 입력 → 검색.
+화면에 나오는 3줄을 그대로 보내주면 원인이 확정된다:
+- 검색 방식(하이브리드 / 키워드 전용)
+- 임베딩 정상/실패
+- 리랭커 정상/미적용
+
+경고 배너가 떠 있으면 **"현재 설정으로 다시 임베딩"** 먼저 클릭.
 
 ## 5. [웹] 설정 탭 — `agent_system_instruction` 아래 전문으로 교체 후 저장
 
@@ -85,19 +100,12 @@ bash scripts/restart-mounted.sh
 docker compose -f docker-compose.dev.yml restart agent-server
 ```
 
-## 7. [웹] 확인 — Open WebUI `http://202.20.183.30:8502`
-
-yr9.choi 계정으로:
-- "내 홈스토리지 용량 어떻게 돼?" → 중간 설명 없이 `myquota` 실행 결과만 나와야 한다.
-- "gpu 노드 접근하려면 어떻게 해야해?" → GPU 관련 매뉴얼 내용이 나와야 한다.
-
-## 8. [서버] myquota 실패 시 — 아래 출력 전달
+## 7. [서버] myquota 실패 원인 확인
 
 ```bash
 ssh root@202.20.185.100 "su - yr9.choi -c myquota"
-docker compose -f docker-compose.dev.yml logs command-mcp --tail 30
 ```
-첫 커맨드가 서버에서 직접 실행했을 때도 실패하는지가 핵심이다(우리 코드 문제인지 구분).
+직접 실행해도 실패하면 우리 코드 문제가 아니다. 출력 전달.
 
 ---
 변경 내역은 `docs/RUN-LOG.md` 참고.
