@@ -532,6 +532,23 @@ Open WebUI 커뮤니티에 다수 보고된 알려진 동작으로, 모델을 ad
 Models에서 해당 모델을 Public으로 바꾸도록 안내함(`docs/NEXT-STEPS.md` 1번).
 Sources: https://github.com/open-webui/open-webui/discussions/9058 , https://github.com/open-webui/open-webui/discussions/4468 , https://docs.openwebui.com/features/authentication-access/rbac/permissions/
 
+## 45. System MCP "disabled by admin" 재발 — db-init 미실행 의심 (조치 안내)
+
+host_mode 컬럼 추가(#37) 이후 admin_console의 PATCH /whitelist가 `host_mode`도 같이 조회하도록
+바뀌었는데, 그 컬럼이 없는 채로(=db-init 재실행 없이 코드만 최신화) 콘솔에서 스위치를 켜면 PATCH
+자체가 서버 에러로 실패해서 겉보기엔 "켰는데 다시 꺼진 것처럼" 보일 수 있음(enabled 토글이 실제로
+DB에 반영이 안 됨). `docs/NEXT-STEPS.md` 1번에 db-init 재실행 확인 절차 안내 — 재현되면
+db-init 로그도 받아서 마이그레이션 자체 실패 여부 확인 예정.
+
+## 46. 카탈로그에만 있는 커맨드도 실행 가능하게 해달라는 요청 — 안전 설계 확인 요청 (진행 중)
+
+"Command/System MCP에 등록 안 된 커맨드도 카탈로그(매뉴얼 db)에서 찾아서 실행"이라는 요청.
+현재 커맨드 카탈로그(`command_catalog`, Command MCP `search_commands`)는 순수 조회용 메타데이터
+(이름/설명/사용법 텍스트)라 실행 가능한 argv가 없음 — 이걸 그대로 실행하면 검증 안 된 텍스트를
+셸/argv로 실행하는 셈이라 위험(엑셀 대량 업로드 데이터라 사람이 한 줄씩 검토 안 했을 수 있음).
+System MCP에 이미 있는 "커스텀 커맨드"(argv_template + `shared/custom_commands.py` 검증) 방식을
+Command MCP에도 동일하게 추가하는 안전한 방식을 제안하고 사용자 확인 요청함 — 승인되면 구현.
+
 ## 44. Open WebUI 데이터(계정 DB) 초기화 요청 (완료, 커맨드 제공)
 
 이메일 DB를 이상하게 만든 뒤 아예 초기화 요청. `open_webui_dev_data` 명명 볼륨만 지우면
