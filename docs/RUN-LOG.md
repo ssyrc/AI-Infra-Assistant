@@ -426,6 +426,50 @@ command-mcp/system-mcp에는 `docker-compose.yml`(prod)에 있던 `HOSTS_FILE`/`
 재확인: `shared/ssh_exec.run_ssh_as_user()`가 System/Command MCP의 모든 실행 경로에서 유일하게
 쓰이고, 매번 `su - <user_id> -c '...'`로 감싸 실행한다(우회 경로 없음, ssh 자체만 root).
 
+## 37. System MCP 툴 "분류"(host_mode) 기능 추가 (완료)
+
+요청: list_dir/find_files/read_file_head처럼 서버별로 결과가 다르지 않은 툴은 host를 안 물어보고
+로그인 서버로 고정 실행, gpu_status/disk_usage/system_info처럼 서버마다 다른 툴은 LLM이 서버명을
+지정하도록 관리자 콘솔에서 "분류"로 지정할 수 있게 해달라는 요청.
+
+- `shared/mcp_caller.py`의 `build_wrapped()`에 `host_mode`/`login_host` 파라미터 추가 —
+  `user_scoped`의 `scope_param` 숨김·강제주입과 완전히 같은 메커니즘을 host에도 적용
+  (`host_mode="login_server"`면 host를 LLM 스키마에서 제거하고 `login_host()`가 돌려주는 값을
+  강제 주입). `load_overrides_sync()`는 `extra_columns`로 일반화해서 Command MCP 쪽 동작은
+  그대로 유지.
+- `system_whitelist_state`/`system_custom_commands`에 `host_mode` 컬럼 추가(마이그레이션
+  system_db v6, CHECK 제약 target_server|login_server).
+- 코드 내장 화이트리스트: list_dir/find_files/read_file_head → login_server, gpu_status/
+  disk_free/disk_usage/system_info → target_server. disk_free는 예외로 "개인 홈 스토리지
+  질문이면 로그인 서버로" 문구를 설명에 추가(target_server 유지 — 서버 특정 질문과 개인 계정
+  저장공간 질문을 구분해야 해서 스키마 레벨로 자동화하지 않고 프롬프트 레벨로 처리).
+- admin_console 설정 탭 System MCP 카드/커스텀 커맨드 폼에 "분류" 드롭다운 추가(변경 시 System
+  MCP 재시작 필요 — description_override와 동일한 제약, 스키마에 영향을 주기 때문).
+- Command MCP는 애초에 host 파라미터가 없어서(항상 로그인 서버 기준) 이 기능이 필요 없음 —
+  사용자 질문에 답변: "실행은 System MCP 담당"은 System MCP의 서버 점검 툴 섹션을 가리킨 것이고,
+  Command MCP도 `get_scheduler_job_info`(본인 job 조회)는 실제로 ssh 실행한다.
+
+## 38. 에이전트 지시문 SOTA 프롬프트로 재작성 (완료, 콘솔에서 직접 붙여넣기 필요)
+
+기존 지시문에 실제로 존재하지 않는 `command.get_scheduler_queue_status` 툴이 언급돼 있었음
+(command_mcp/server.py의 EXEC_WHITELIST에 없음 — 발견해서 제거). 최우선 원칙/답변 전
+체크리스트/도구 라우팅(로그인서버 고정형 vs 서버지정형 명확히 구분)/답변 형식/최종 재확인
+구조로 재작성. `shared/migrations.py`의 `AGENT_INSTRUCTION` 기본값을 갱신했지만
+`agent_system_instruction`은 non-force 시드라 기존 배포 DB에는 자동 반영 안 됨 — 설정 탭에
+직접 붙여넣어야 함(`docs/NEXT-STEPS.md` 3번에 전체 텍스트 있음).
+
+로그인 서버 이름(`login07`)을 지시문 텍스트에 하드코딩하지 않고 `agent_server/agent.py`의
+`build_agent()`가 매 요청 `scheduler_login_host`를 읽어 지시문 끝에 동적으로 붙이도록 함 —
+나중에 로그인 서버가 바뀌어도 지시문을 다시 편집할 필요 없음.
+
+## 39. Open WebUI dev에서 일반 사용자 계정 테스트 불가 (완료)
+
+`WEBUI_AUTH=false`라 로그아웃해도 항상 같은 계정으로 자동 로그인돼 admin 외 일반 계정을 만들 수
+없었음. `docker-compose.dev.yml`에서 `WEBUI_AUTH=true`로 전환하고, 역할 판단에 필수인
+`ENABLE_FORWARD_USER_INFO_HEADERS=true`(이게 없으면 "필요 역할" 검사가 항상 실패함 — 이전엔
+dev에 아예 없었음)를 추가. 계정/대화 데이터가 컨테이너 재생성 시 사라지지 않도록 영구 볼륨
+(`open_webui_dev_data`)도 추가함(prod와 동일 패턴, 이전엔 dev에 볼륨이 없어 매번 초기화됐음).
+
 ## 34. 에이전트가 "슈퍼컴" 관련 질문에 호스트를 안 밝히면 되묻기만 함 (커맨드 안내함)
 
 `disk_free(user_id, host)`가 host를 필수로 받는데, LLM이 실제 로그인 서버 이름을 모르니
