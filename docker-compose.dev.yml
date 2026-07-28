@@ -109,7 +109,19 @@ services:
   command-mcp:
     <<: *mcpimage
     command: ["watchfiles", "--filter", "python", "python mcp_servers/command_mcp/server.py", "mcp_servers/command_mcp", "shared"]
-    environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8002" }
+    environment:
+      CONFIG_DB_DSN: *configdsn
+      MCP_PORT: "8002"
+      # 대상 서버로 ssh(root) 후 su - <user>로 실행하는 툴(job 조회 등)에 필요.
+      HOSTS_FILE: /etc/hosts.targets
+      SSH_KEY: /root/.ssh/id_ed25519
+      SSH_ROOT_USER: root
+    volumes:
+      - ./mcp_servers:/app/mcp_servers:ro
+      - ./shared:/app/shared:ro
+      # 대상 서버 IP 매핑(이 배포 호스트의 /etc/hosts, 예: `202.20.185.10  login07`) + ssh 개인키.
+      - /etc/hosts:/etc/hosts.targets:ro
+      - ${SSH_KEY_PATH:-./secrets/id_ed25519}:/root/.ssh/id_ed25519:ro
     ports: ["${COMMAND_MCP_PORT:-8504}:8002"]
     depends_on:
       dev-config: { condition: service_completed_successfully }
@@ -125,7 +137,20 @@ services:
   system-mcp:
     <<: *mcpimage
     command: ["watchfiles", "--filter", "python", "python mcp_servers/system_mcp/server.py", "mcp_servers/system_mcp", "shared"]
-    environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8004" }
+    environment:
+      CONFIG_DB_DSN: *configdsn
+      MCP_PORT: "8004"
+      # 리눅스 실행 툴(disk_free 등)은 대상 서버로 ssh(root) 후 su - <user>로 실행한다.
+      HOSTS_FILE: /etc/hosts.targets
+      SSH_KEY: /root/.ssh/id_ed25519
+      SSH_ROOT_USER: root
+      SSH_CONNECT_TIMEOUT: "8"
+    volumes:
+      - ./mcp_servers:/app/mcp_servers:ro
+      - ./shared:/app/shared:ro
+      # 대상 서버 IP 매핑(이 배포 호스트의 /etc/hosts, 예: `202.20.185.10  login07`) + ssh 개인키.
+      - /etc/hosts:/etc/hosts.targets:ro
+      - ${SSH_KEY_PATH:-./secrets/id_ed25519}:/root/.ssh/id_ed25519:ro
     ports: ["${SYSTEM_MCP_PORT:-8506}:8004"]
     depends_on:
       dev-config: { condition: service_completed_successfully }
