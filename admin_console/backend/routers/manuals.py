@@ -565,5 +565,10 @@ async def search_test(body: SearchTestIn, admin: str = Depends(require_admin)):
     for h in hits:
         h["chunk_text"] = (h["chunk_text"] or "")[:300]
         h["score"] = float(h["score"]) if h["score"] is not None else None
+    try:
+        min_score = float(await get_config("rerank_min_score", "0.05"))
+    except (TypeError, ValueError):
+        min_score = 0.05
     return {"mode": mode, "embedding": embed_info, "rerank": rerank_info,
+            "min_score": min_score,
             "published_chunks": published, "chunks_with_embedding": with_vec, "hits": hits}

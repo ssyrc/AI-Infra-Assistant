@@ -362,6 +362,8 @@ function ManualsPanel() {
                   : `미적용 — ${testResult.rerank.reason}`}
                 {testResult.rerank.hint && <span> · {testResult.rerank.hint}</span>}
               </div>
+              <div>관련도 하한: {testResult.min_score} (이 점수 미만은 에이전트에 전달되지 않음 —
+                설정 <code>rerank_min_score</code>)</div>
             </div>
             <table>
               <thead><tr><th>#</th><th>문서</th><th>섹션</th><th>내용</th><th>점수</th></tr></thead>

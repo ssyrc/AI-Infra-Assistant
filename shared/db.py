@@ -185,6 +185,21 @@ async def rerank(query: str, documents: list[str], top_k: int) -> list[tuple[int
     if not scored:
         return fallback
     scored.sort(key=lambda x: x[1], reverse=True)
+
+    # 관련 없는 문서 걸러내기: 리랭커 점수가 기준 미만이면 아예 돌려주지 않는다.
+    # RRF 상위라는 건 '후보 중 상대적으로 나은 것'일 뿐이라, 질문과 무관한 문서라도
+    # 후보가 적으면 그냥 1등이 된다(그걸 근거로 답하면 엉뚱한 답이 나온다).
+    # 리랭커가 실제로 점수를 매긴 경우에만 적용한다 - fallback(전부 0.0)에는 적용하지 않는다.
+    try:
+        min_score = float(await get_config("rerank_min_score", "0.05"))
+    except (TypeError, ValueError):
+        min_score = 0.05
+    if min_score > 0:
+        kept = [(i, sc) for i, sc in scored if sc >= min_score]
+        if len(kept) < len(scored):
+            print(f"[rerank] 관련도 미달 {len(scored) - len(kept)}건 제외"
+                  f"(기준 {min_score}, 최고점 {scored[0][1]:.4f})")
+        scored = kept
     return scored[:top_k]
 
 
