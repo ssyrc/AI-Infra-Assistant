@@ -72,17 +72,19 @@ services:
       postgres: { condition: service_healthy }
     restart: "no"
 
-  # dev 전용: 설정을 mock vLLM으로 덮어쓴다 (db-init 이후 실행)
+  # dev 전용: 처음 설치할 때만 설정을 mock vLLM으로 채워둔다 (db-init 이후 실행).
+  # updated_by='bootstrap'인 값만 건드린다 -> 관리자가 설정 탭에서 한 번이라도 저장한 값은
+  # (updated_by가 admin 계정으로 바뀌므로) `down && up`을 다시 해도 mock으로 되돌아가지 않는다.
   dev-config:
     image: ${REGISTRY_DOCKERHUB:-docker.io}/postgres:16-alpine
     environment:
       PGPASSWORD: *pgpass
     entrypoint: >
       sh -c "psql -h postgres -U agent -d platform_config -c \"
-        UPDATE platform_settings SET value='http://mock-vllm:8000/v1' WHERE key IN ('vllm_llm_base_url','vllm_embed_base_url');
-        UPDATE platform_settings SET value='mock-llm' WHERE key='vllm_llm_model';
-        UPDATE platform_settings SET value='mock-embed' WHERE key='vllm_embed_model';
-        UPDATE platform_settings SET value='' WHERE key IN ('redis_url','rerank_base_url');\""
+        UPDATE platform_settings SET value='http://mock-vllm:8000/v1' WHERE key IN ('vllm_llm_base_url','vllm_embed_base_url') AND updated_by='bootstrap';
+        UPDATE platform_settings SET value='mock-llm' WHERE key='vllm_llm_model' AND updated_by='bootstrap';
+        UPDATE platform_settings SET value='mock-embed' WHERE key='vllm_embed_model' AND updated_by='bootstrap';
+        UPDATE platform_settings SET value='' WHERE key IN ('redis_url','rerank_base_url') AND updated_by='bootstrap';\""
     depends_on:
       db-init: { condition: service_completed_successfully }
     restart: "no"
