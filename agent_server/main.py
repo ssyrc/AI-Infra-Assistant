@@ -30,6 +30,9 @@ from pydantic import BaseModel, Field
 from google.adk.runners import Runner
 from google.adk.sessions import DatabaseSessionService
 from google.adk.events import Event
+from google.adk.agents.run_config import RunConfig, StreamingMode
+
+STREAMING_RUN_CONFIG = RunConfig(streaming_mode=StreamingMode.SSE)
 from google.genai import types
 
 import httpx
@@ -302,7 +305,8 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         try:
             with _trace_ctx(user_id, conv, "openwebui"):
                 async for event in runner.run_async(user_id=user_id, session_id=session_id,
-                                                    new_message=new_message):
+                                                    new_message=new_message,
+                                                    run_config=STREAMING_RUN_CONFIG):
                     if await request.is_disconnected():
                         print("[agent] 클라이언트 연결 종료, 스트리밍 중단")
                         break
@@ -483,7 +487,8 @@ async def agent_query(body: AgentQueryIn, request: Request):
         try:
             with _trace_ctx(user_id, conv, body.source or "agent-api"):
                 async for event in runner.run_async(user_id=user_id, session_id=session_id,
-                                                    new_message=new_message):
+                                                    new_message=new_message,
+                                                    run_config=STREAMING_RUN_CONFIG):
                     if await request.is_disconnected():
                         break
                     text = _event_text(event)
@@ -708,7 +713,8 @@ async def voc_query(body: VocQueryIn, request: Request):
         try:
             with _trace_ctx(user_id, conv, "voc-agent"):
                 async for event in runner.run_async(user_id=user_id, session_id=session_id,
-                                                    new_message=new_message):
+                                                    new_message=new_message,
+                                                    run_config=STREAMING_RUN_CONFIG):
                     if await request.is_disconnected():
                         break
                     text = _event_text(event)
