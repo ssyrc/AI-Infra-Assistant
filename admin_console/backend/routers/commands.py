@@ -118,7 +118,10 @@ async def preview_command_excel(
     session = await get_upload_session(_DSN, upload_id, admin, "command_catalog")
 
     try:
-        sheet, header, sample, total = await run_in_threadpool(read_table_meta, session["saved_path"])
+        # 헤더 행은 자동 판별한다(위에 제목 줄이 있어도 됨). commit도 같은 파일을 같은 방식으로
+        # 읽으므로 결과가 어긋나지 않는다.
+        sheet, header, sample, total, header_row = await run_in_threadpool(
+            read_table_meta, session["saved_path"])
     except Exception as e:  # noqa: BLE001
         await delete_upload_session(_DSN, upload_id)
         raise HTTPException(422, f"파일을 읽을 수 없습니다: {e}")
@@ -128,7 +131,8 @@ async def preview_command_excel(
         raise HTTPException(422, "빈 파일입니다(헤더 행이 없습니다).")
 
     return {"upload_id": upload_id, "filename": filename, "sheet": sheet,
-            "columns": header, "sample_rows": sample, "total_rows": total, "options": options}
+            "columns": header, "sample_rows": sample, "total_rows": total,
+            "header_row": header_row, "options": options}
 
 
 class CommandExcelCommitIn(BaseModel):

@@ -419,7 +419,7 @@ function ManualsPanel() {
       {/* 엑셀 열 선택 */}
       {excelPreview && (
         <div className="card">
-          <div style={{marginBottom: 8}}><strong>열 선택</strong> · {excelPreview.filename} · {excelPreview.sheet} · {excelPreview.total_rows}행</div>
+          <div style={{marginBottom: 8}}><strong>열 선택</strong> · {excelPreview.filename} · {excelPreview.sheet} · {excelPreview.total_rows}행 · 헤더 {excelPreview.header_row}행</div>
           <div className="subtitle">
             행 하나가 검색 청크(chunk) 하나가 됩니다. 아래 표에서 열마다 3가지를 고르세요(전부 선택 사항, 필요한 것만 체크):<br/>
             ① <strong>내용</strong>(체크박스, 여러 개 가능) — 청크 본문에 넣을 열. 체크한 열들이 전부 <code>열이름: 값</code> 줄로 이어붙습니다.<br/>
@@ -561,15 +561,69 @@ function VocPanel() {
   const edit = (row) => { setForm(row); setEditingId(row.id); };
   const remove = async (id) => { if (confirm("삭제할까요?")) { await api(`/api/voc/${id}`, { method: "DELETE" }); load(); } };
 
-  const importFile = async (f) => {
-    const fd = new FormData();
-    if (f.serverPath) fd.append("server_path", f.serverPath); else fd.append("file", f);
-    const r = await fetch("/api/voc/import", { method: "POST", body: fd });
-    const data = await r.json();
-    if (!r.ok) return alert("가져오기 실패: " + JSON.stringify(data));
-    alert(`${data.inserted}건 등록, ${data.skipped || 0}건 제외(조치일/처리내용 없음 또는 불만족류)`);
-    load();
+  // 엑셀/CSV: 헤더 행을 자동으로 찾고 열을 골라 등록한다(형식 고정 없음).
+  const [tbl, setTbl] = useState(null);   // {upload_id, columns, sample_rows, header_row, ...}
+  const [map, setMap] = useState({ question_column: "", answer_column: "", department_column: "",
+                                   exclude_column: "", exclude_values: "", require_columns: [] });
+  const [busy, setBusy] = useState(false);
+  const [lastFile, setLastFile] = useState(null);
+
+  const importFile = async (f, headerRow) => {
+    if (!f) return;
+    setBusy(true); setTbl(null); setLastFile(f);
+    try {
+      const fd = new FormData();
+      if (f.serverPath) fd.append("server_path", f.serverPath); else fd.append("file", f);
+      if (headerRow) fd.append("header_row", String(headerRow));
+      const r = await fetch("/api/voc/excel/preview", { method: "POST", body: fd });
+      if (!r.ok) throw new Error(await r.text());
+      const data = await r.json();
+      setTbl(data);
+      setMap({
+        question_column: data.suggest.question_column,
+        answer_column: data.suggest.answer_column,
+        department_column: data.suggest.department_column,
+        exclude_column: data.suggest.exclude_column,
+        exclude_values: data.suggest.exclude_column ? "불만족, 매우불만족" : "",
+        require_columns: [],
+      });
+    } catch (e) { alert("전처리 실패: " + e.message); }
+    setBusy(false);
   };
+
+  const commitTable = async () => {
+    if (!map.question_column || !map.answer_column) return alert("질문/답변 열을 지정하세요.");
+    setBusy(true);
+    try {
+      const data = await api("/api/voc/excel/commit", {
+        method: "POST",
+        body: JSON.stringify({
+          upload_id: tbl.upload_id,
+          header_row: tbl.header_row,
+          question_column: map.question_column,
+          answer_column: map.answer_column,
+          department_column: map.department_column || null,
+          exclude_column: map.exclude_column || null,
+          exclude_values: map.exclude_values.split(",").map(v => v.trim()).filter(Boolean),
+          require_columns: map.require_columns,
+        }),
+      });
+      setTbl(null);
+      await load();
+      alert(`${data.inserted}건 등록 · ${data.skipped}건 제외`);
+    } catch (e) { alert("등록 실패: " + e.message); }
+    setBusy(false);
+  };
+
+  const colSel = (field, label) => (
+    <label style={{fontSize: 12.5, display: "flex", flexDirection: "column", gap: 4}}>
+      <span style={{color: "var(--muted)"}}>{label}</span>
+      <select value={map[field]} onChange={e => setMap({...map, [field]: e.target.value})}>
+        <option value="">(선택 안 함)</option>
+        {tbl.columns.map(c => <option key={c} value={c}>{c}</option>)}
+      </select>
+    </label>
+  );
 
   return (
     <div>
@@ -587,12 +641,74 @@ function VocPanel() {
           <button className="primary" onClick={submit}>{editingId ? "수정 저장" : "등록"}</button>
           {editingId && <button onClick={() => { setEditingId(null); setForm({ question: "", answer: "", department: "", resolved: true }); }}>취소</button>}
           <span style={{marginLeft: "auto", display: "flex", alignItems: "center", gap: 6}}>
-            <input type="file" accept=".xlsx" onChange={e => e.target.files[0] && importFile(e.target.files[0])} />
-            <button onClick={() => setShowBrowser(true)}>서버 파일에서 선택</button>
-            <span style={{fontSize: 11.5, color: "var(--muted)"}}>엑셀 일괄 등록(.xlsx만 지원) — 1행 헤더 Question/Answer 또는 사내 표준 4행 헤더(의뢰내용/조치일/처리내용/만족도) 형식을 자동 인식</span>
+            <input type="file" accept=".xlsx,.xls,.csv" disabled={busy}
+                   onChange={e => { importFile(e.target.files[0]); e.target.value = ""; }} />
+            <button disabled={busy} onClick={() => setShowBrowser(true)}>서버 파일에서 선택</button>
+            <span style={{fontSize: 11.5, color: "var(--muted)"}}>
+              엑셀·CSV 일괄 등록 — 표가 몇 번째 행부터 시작하든 자동으로 찾아 열을 고르게 합니다.
+            </span>
           </span>
         </div>
       </div>
+
+      {tbl && (
+        <div className="card">
+          <div style={{marginBottom: 8}}>
+            <strong>열 매핑</strong> · {tbl.filename} · {tbl.sheet} · 데이터 {tbl.total_rows}행
+          </div>
+          <div className="toolbar" style={{marginBottom: 10}}>
+            <span style={{fontSize: 12.5}}>
+              헤더 행: <strong>{tbl.header_row}행</strong>으로 인식했습니다.
+            </span>
+            <span style={{fontSize: 12.5, color: "var(--muted)"}}>틀렸다면 실제 행 번호로 다시 읽기:</span>
+            <input type="number" min="1" defaultValue={tbl.header_row} style={{width: 70}}
+                   onKeyDown={e => e.key === "Enter" && importFile(lastFile, Number(e.target.value))} />
+            <span style={{fontSize: 11.5, color: "var(--muted)"}}>(입력 후 Enter)</span>
+          </div>
+
+          <div style={{display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12}}>
+            {colSel("question_column", "질문(question) *")}
+            {colSel("answer_column", "답변(answer) *")}
+            {colSel("department_column", "부서(선택)")}
+            {colSel("exclude_column", "제외 기준 열(선택)")}
+            {map.exclude_column && (
+              <label style={{fontSize: 12.5, display: "flex", flexDirection: "column", gap: 4}}>
+                <span style={{color: "var(--muted)"}}>이 값이면 제외(콤마 구분)</span>
+                <input value={map.exclude_values} style={{width: 180}}
+                       onChange={e => setMap({...map, exclude_values: e.target.value})} />
+              </label>
+            )}
+          </div>
+          <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 10}}>
+            비어 있으면 그 행을 건너뛸 열(선택):{" "}
+            {tbl.columns.map(c => (
+              <label key={c} style={{marginRight: 10}}>
+                <input type="checkbox" checked={map.require_columns.includes(c)}
+                       onChange={e => setMap({...map, require_columns: e.target.checked
+                         ? [...map.require_columns, c]
+                         : map.require_columns.filter(x => x !== c)})} /> {c}
+              </label>
+            ))}
+          </div>
+
+          {tbl.sample_rows.length > 0 && (
+            <table style={{marginBottom: 12}}>
+              <thead><tr>{tbl.columns.map(c => <th key={c}>{c}</th>)}</tr></thead>
+              <tbody>
+                {tbl.sample_rows.map((r, i) => (
+                  <tr key={i}>{tbl.columns.map((c, j) => (
+                    <td key={j} style={{color: "var(--muted)", fontSize: 12, maxWidth: 220}}>{r[j]}</td>
+                  ))}</tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <div className="row-actions">
+            <button className="primary" disabled={busy} onClick={commitTable}>매핑대로 일괄 등록</button>
+            <button onClick={() => setTbl(null)}>취소</button>
+          </div>
+        </div>
+      )}
 
       {showBrowser && (
         <ServerFileBrowser
@@ -777,7 +893,7 @@ function CommandsPanel() {
       {/* 엑셀 열 매핑 */}
       {excel && (
         <div className="card">
-          <div style={{marginBottom: 8}}><strong>열 매핑</strong> · {excel.filename} · {excel.sheet} · {excel.total_rows}행</div>
+          <div style={{marginBottom: 8}}><strong>열 매핑</strong> · {excel.filename} · {excel.sheet} · {excel.total_rows}행 · 헤더 {excel.header_row}행</div>
           <div className="subtitle">
             각 항목에 대응하는 엑셀 열을 고르세요. 이름 기준으로 등록/갱신(upsert)됩니다.
             "실행 커맨드" 열을 지정하지 않으면 커맨드 이름이 그대로 실행됩니다(이름 열이 실제

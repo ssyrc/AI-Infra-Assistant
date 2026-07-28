@@ -306,6 +306,21 @@ MIGRATIONS: list[tuple[str, int, str]] = [
             ADD CONSTRAINT system_custom_commands_host_mode_check
             CHECK (host_mode IN ('target_server', 'login_server'));
     """),
+    # v5: VOC 탭도 엑셀/CSV 열 매핑 업로드를 쓴다(형식 고정 대신 어떤 표든 받기 위함).
+    ("voc_db", 5, """
+        CREATE TABLE IF NOT EXISTS upload_sessions (
+            upload_id   TEXT PRIMARY KEY,
+            owner       TEXT NOT NULL,
+            filename    TEXT NOT NULL,
+            ext         TEXT NOT NULL,
+            saved_path  TEXT NOT NULL,
+            kind        TEXT NOT NULL,
+            options     JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+            expires_at  TIMESTAMPTZ NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS voc_upload_sessions_expires_idx ON upload_sessions (expires_at);
+    """),
     # v5: 카탈로그(매뉴얼 엑셀 업로드본)에 등록된 커맨드를 그대로 실행할 수 있게 한다.
     #     exec_command = 실제 실행할 커맨드 문자열(셸 없이 shlex 분해 후 argv로 실행).
     #     비어 있으면 name을 그대로 실행한다 -> 기존에 올린 카탈로그도 추가 작업 없이 실행 가능.

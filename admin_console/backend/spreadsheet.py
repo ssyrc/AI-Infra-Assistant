@@ -44,72 +44,95 @@ def _is_csv(path: str) -> bool:
     return os.path.splitext(path)[1].lower() in CSV_EXTS
 
 
+def _norm(v) -> str:
+    return "" if v is None else str(v).strip()
+
+
+def detect_header_row(rows: list[list], max_scan: int = 15) -> int:
+    """헤더로 보이는 행의 인덱스(0-based)를 추정한다.
+
+    엑셀마다 1행부터 표가 시작하기도 하고, 2행에 제목이 있고 4행부터 표가 나오기도 한다.
+    "헤더 행은 (1) 채워진 칸이 여러 개고 (2) 각 칸이 짧은 라벨이며 (3) 값이 서로 다르고
+    (4) 바로 아래에 비슷한 폭의 데이터 행이 이어진다"는 성질로 점수를 매겨 가장 높은 행을 고른다.
+    """
+    best_idx, best_score = 0, -1.0
+    for i, row in enumerate(rows[:max_scan]):
+        cells = [_norm(v) for v in row]
+        filled = [c for c in cells if c]
+        if len(filled) < 2:
+            continue
+        # 제목 줄(한 칸에 긴 문장)이 헤더로 뽑히지 않도록 긴 칸에 벌점
+        long_cells = sum(1 for c in filled if len(c) > 40)
+        distinct = len(set(filled)) / len(filled)
+        # 아래로 3행이 이 폭을 유지하는지(데이터가 실제로 이어지는지)
+        follow = 0
+        for r in rows[i + 1:i + 4]:
+            if sum(1 for v in r if _norm(v)) >= max(2, len(filled) * 0.6):
+                follow += 1
+        score = len(filled) + distinct * 2 + follow * 1.5 - long_cells * 3
+        if score > best_score:
+            best_idx, best_score = i, score
+    return best_idx
+
+
 def _header_of(row) -> list[str]:
     return [str(v).strip() if v is not None and str(v).strip() else f"column_{i}"
             for i, v in enumerate(row)]
 
 
-def read_table_meta(path: str, sample_size: int = 5):
-    """(sheet, header, sample_rows, total_rows)를 반환한다. 첫 행을 헤더로 본다.
-    빈 파일이면 header가 빈 리스트다. CSV면 sheet는 "CSV"."""
+def _all_rows(path: str) -> list[list]:
+    """엑셀/CSV를 2차원 리스트로 읽는다. 빈 행도 그대로 둔다 —
+    그래야 헤더 행 번호가 사용자가 엑셀에서 보는 실제 행 번호와 일치한다."""
     if _is_csv(path):
-        rows = _read_csv_all(path)
-        rows = [r for r in rows if any((v or "").strip() for v in r)]
-        if not rows:
-            return None, [], [], 0
-        header = _header_of(rows[0])
-        body = rows[1:]
-        sample = [[("" if v is None else str(v)) for v in r] for r in body[:sample_size]]
-        return "CSV", header, sample, len(body)
-
+        return [list(r) for r in _read_csv_all(path)]
     wb = openpyxl.load_workbook(path, read_only=True)
     try:
-        ws = wb.active
-        it = ws.iter_rows(values_only=True)
-        try:
-            header_row = next(it)
-        except StopIteration:
-            return None, [], [], 0
-        header = _header_of(header_row)
-        sample, total = [], 0
-        for i, row in enumerate(it):
-            total += 1
-            if i < sample_size:
-                sample.append(["" if v is None else str(v) for v in row])
-        return ws.title, header, sample, total
+        return [list(r) for r in wb.active.iter_rows(values_only=True)]
     finally:
         wb.close()
 
 
-def load_table_rows(path: str):
-    """(header, col_idx, rows)를 반환한다. 완전히 빈 행은 제외한다.
-    col_idx는 열 이름 -> 인덱스 매핑이다."""
+def _sheet_name(path: str) -> str:
     if _is_csv(path):
-        rows = _read_csv_all(path)
-        rows = [r for r in rows if any((v or "").strip() for v in r)]
-        if not rows:
-            return [], {}, []
-        header = _header_of(rows[0])
-        col_idx = {name: i for i, name in enumerate(header)}
-        # 헤더보다 열이 적은 행이 있어도 인덱스 접근이 터지지 않도록 길이를 맞춘다.
-        body = [r + [None] * (len(header) - len(r)) if len(r) < len(header) else r
-                for r in rows[1:]]
-        return header, col_idx, body
-
+        return "CSV"
     wb = openpyxl.load_workbook(path, read_only=True)
     try:
-        ws = wb.active
-        it = ws.iter_rows(values_only=True)
-        try:
-            header_row = next(it)
-        except StopIteration:
-            return [], {}, []
-        header = _header_of(header_row)
-        col_idx = {name: i for i, name in enumerate(header)}
-        rows = [row for row in it if not all(v is None for v in row)]
-        return header, col_idx, rows
+        return wb.active.title
     finally:
         wb.close()
+
+
+def read_table_meta(path: str, sample_size: int = 5, header_row: int | None = None):
+    """(sheet, header, sample_rows, total_rows, header_row)를 반환한다.
+
+    header_row(1-based)를 주지 않으면 자동으로 찾는다 — 1행부터 표가 시작하는 파일도,
+    위에 제목/설명 줄이 몇 개 있고 중간부터 표가 시작하는 파일도 그대로 받기 위함이다.
+    """
+    rows = _all_rows(path)
+    if not rows:
+        return None, [], [], 0, 1
+    idx = (header_row - 1) if header_row else detect_header_row(rows)
+    idx = max(0, min(idx, len(rows) - 1))
+    header = _header_of(rows[idx])
+    body = [r for r in rows[idx + 1:] if any(_norm(v) for v in r)]
+    sample = [[_norm(v) for v in r] for r in body[:sample_size]]
+    return _sheet_name(path), header, sample, len(body), idx + 1
+
+
+def load_table_rows(path: str, header_row: int | None = None):
+    """(header, col_idx, rows)를 반환한다. col_idx는 열 이름 -> 인덱스 매핑이다.
+    header_row(1-based)를 주지 않으면 read_table_meta와 같은 방식으로 자동 판별한다."""
+    rows = _all_rows(path)
+    if not rows:
+        return [], {}, []
+    idx = (header_row - 1) if header_row else detect_header_row(rows)
+    idx = max(0, min(idx, len(rows) - 1))
+    header = _header_of(rows[idx])
+    col_idx = {name: i for i, name in enumerate(header)}
+    # 헤더보다 열이 적은 행이 있어도 인덱스 접근이 터지지 않게 길이를 맞춘다.
+    body = [r + [None] * (len(header) - len(r)) if len(r) < len(header) else r
+            for r in rows[idx + 1:] if any(_norm(v) for v in r)]
+    return header, col_idx, body
 
 
 # 이전 이름 유지(호출부 점진 이행용).
