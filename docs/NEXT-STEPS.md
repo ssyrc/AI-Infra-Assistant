@@ -2,31 +2,20 @@
 
 **[WSL]** 로컬 · **[서버]** 202.20.183.30 · **[웹]** 콘솔 `http://202.20.183.30:8501`
 
-## 1. [서버] .env 되돌리기 — 방금 추가한 줄이 오히려 문제가 된다
+## 1. [서버] 원인 확인 — TTY 없이 실행하면 실패하는지 (핵심)
 
-컨테이너 안 키(`/root/.ssh/id_ed25519`, 399바이트)는 **정상 파일**이었다. 게이트 서버에 등록된
-키가 그것이므로 `id_rsa`로 바꾸면 안 된다.
-
+아까 성공한 명령에 **`-T`(TTY 끄기)** 만 붙인 것. 우리 코드와 같은 조건이 된다.
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-sed -i '/^SSH_KEY_PATH=\/root\/.ssh\/id_rsa$/d' .env
-grep SSH_KEY_PATH .env        # id_ed25519를 가리키거나 아예 없어야 한다
-```
-
-## 2. [서버] 진짜 원인 확인 — 우리 코드가 쓰는 옵션 그대로 실행
-
-```bash
-docker compose -f docker-compose.dev.yml exec command-mcp \
+docker compose -f docker-compose.dev.yml exec -T command-mcp \
   ssh -o BatchMode=yes -o PasswordAuthentication=no \
       -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_agent \
-      -i /root/.ssh/id_ed25519 root@202.20.185.100 "su - yr9.choi -c myquota"
+      -i /root/.ssh/id_ed25519 root@202.20.185.100 "su - yr9.choi -c myquota" < /dev/null
 ```
-(아까 실행한 명령에는 이 옵션들이 빠져 있어서 `Host key verification failed`가 난 것 —
-BatchMode에서 호스트 키 확인을 물어볼 수 없어 그냥 실패한다. 위 명령이 진짜 우리 경로다.)
+여기서 **실패하면 원인 확정**(TTY 없으면 `su`가 PAM에서 막히는 것) — 2번 코드가 그걸 고친다.
+성공하면 그 출력을 전달(다른 원인).
 
-성공하면 3번으로. 여전히 실패하면 출력 전달.
-
-## 3. [WSL] 코드 반영
+## 2. [WSL] 코드 반영
 
 ```bash
 git -C /home/yrc/AI-Infra-Assistant fetch origin main
@@ -35,16 +24,15 @@ rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
   yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
 ```
 
-## 4. [서버] 재기동
+## 3. [서버] 재기동 (환경변수가 추가돼 컨테이너 재생성 필요)
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
 docker compose -f docker-compose.dev.yml run --rm db-init
 docker compose -f docker-compose.dev.yml up -d
 ```
-2번이 계속 실패했다면 `.env`에 `SSH_STRICT_HOST_KEY=no` 를 넣고 위 `up -d`를 다시 실행한다.
 
-## 5. [웹] 설정 탭 — `agent_system_instruction` 아래 전문으로 교체 후 저장
+## 4. [웹] 설정 탭 — `agent_system_instruction` 아래 전문으로 교체 후 저장
 
 ```
 당신은 사내 인프라/시스템 운영을 돕는 한국어 어시스턴트(AI Infra Assistant)입니다.
@@ -58,6 +46,9 @@ docker compose -f docker-compose.dev.yml up -d
 - 조회 결과에 없으면 지어내지 말고 "매뉴얼에서 확인되지 않습니다"라고 답합니다.
   일부만 확인됐으면 확인된 부분만 답하고 나머지는 확인되지 않았다고 밝힙니다.
 - 예시 코드·스크립트를 창작하지 않습니다. 문서에 있는 명령만 그대로 옮깁니다.
+- **조회한 내용에 없는 것을 덧붙이지 않습니다.** 도움이 될 것 같은 일반 지식(하드웨어별 컴파일
+  옵션, 성능 팁, 주의사항, 추가 예시 등)을 스스로 붙이지 마세요. 우리 인프라에서는 쓸 수 없거나
+  틀린 안내가 됩니다. **조회된 범위에서 끝내고, 더 필요하면 "문서에는 여기까지"라고 밝힙니다.**
 
 # 2. 답변 방식
 - **진행 상황을 중계하지 않습니다.** "확인해 드리겠습니다", "검색해 보겠습니다", "실행하겠습니다"
@@ -97,21 +88,20 @@ docker compose -f docker-compose.dev.yml up -d
   안내됨)을 넣습니다. 특정 서버 이야기인데 이름을 모르면 되묻습니다.
 ```
 
-## 6. [서버]
+## 5. [서버]
 
 ```bash
 docker compose -f docker-compose.dev.yml restart agent-server
 ```
 
-## 7. [웹] Open WebUI `http://202.20.183.30:8502` — yr9.choi 계정
+## 6. [웹] Open WebUI `http://202.20.183.30:8502` — yr9.choi 계정
 
-- "내 홈스토리지 용량 어떻게 돼?" → 답변 **전에** 진행 상황이 한 줄씩 바뀌며 보이고
-  (`· run_command — myquota` → `· run_command → 완료`), 답변은 **한 번만** 나와야 한다.
-- "gpu 노드 접근하려면?" → `bsub` 같은 일반 LSF 문법이 나오면 실패(매뉴얼 내용만 나와야 함).
-
-## 8. [웹] 매뉴얼 탭 — 검색 테스트
-
-`gpu 노드 접근` 검색 → 상위 5건이 실제 GPU 문서인지, 위 3줄(검색 방식/임베딩/리랭커) 전달.
+- "내 홈스토리지 용량 어떻게 돼?"
+  → **진행 상황** 블록에 `· run_command — myquota` / `· run_command → 완료`가 펼쳐진 채로 보이고,
+    그 아래에 실제 quota 수치가 나와야 한다.
+  → 실패하면 진행 상황 블록의 실패 줄을 그대로 전달(진짜 오류가 거기 찍힌다).
+- "gpu 노드 접근하려면?"
+  → 매뉴얼에 있는 내용만. CUDA 아키텍처 옵션(`-arch=compute_90` 등) 같은 일반 지식이 붙으면 실패.
 
 ---
 `docs/RUN-LOG.md` 기동·배포 절차 · `docs/HISTORY.md` 원인분석 이력

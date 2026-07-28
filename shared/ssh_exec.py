@@ -35,6 +35,10 @@ SSH_KNOWN_HOSTS = os.environ.get("SSH_KNOWN_HOSTS", "/root/.ssh/known_hosts_agen
 # accept-new: 처음 보는 호스트는 자동 등록, 등록된 키와 '다르면' 거부(기본).
 # 게이트 서버 키가 바뀌어 계속 막히면 .env에 SSH_STRICT_HOST_KEY=no 로 완화할 수 있다.
 SSH_STRICT_HOST_KEY = os.environ.get("SSH_STRICT_HOST_KEY", "accept-new")
+# `su - <user> -c ...`는 원격에 TTY가 없으면 PAM 설정에 따라 인증 단계에서 실패할 수 있다
+# (`docker compose exec`로 손으로 돌리면 TTY가 붙어서 되는데 에이전트에서만 안 되는 원인).
+# ssh -tt로 TTY를 강제해 손으로 돌릴 때와 같은 조건을 만든다. 문제가 있으면 .env에서 끈다.
+SSH_FORCE_TTY = os.environ.get("SSH_FORCE_TTY", "true").strip().lower() != "false"
 try:
     SSH_CONNECT_TIMEOUT = int(os.environ.get("SSH_CONNECT_TIMEOUT", "8"))
 except ValueError:
@@ -112,6 +116,8 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
         "-o", f"UserKnownHostsFile={SSH_KNOWN_HOSTS}",
         "-o", f"ConnectTimeout={SSH_CONNECT_TIMEOUT}",
     ]
+    if SSH_FORCE_TTY:
+        ssh_argv.append("-tt")
     # SSH_KEY 경로가 '파일'일 때만 -i로 넘긴다. compose가 없는 경로를 bind mount하면 도커가
     # 그 자리에 '빈 디렉토리'를 만들어 버리는데, 그걸 -i로 주면 ssh가 무조건 인증 실패한다
     # (서버에서 직접 ssh하면 되는데 에이전트로만 안 되는 전형적인 원인).
@@ -125,6 +131,7 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
     try:
         proc = await asyncio.create_subprocess_exec(
             *ssh_argv,
+            stdin=asyncio.subprocess.DEVNULL,   # -tt로 pty를 붙여도 입력 대기에 걸리지 않게
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -141,7 +148,10 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
         raise TimeoutError(f"명령이 {timeout}초 안에 끝나지 않아 중단했습니다({host}).")
 
     def _clip(b: bytes) -> str:
-        s = b.decode("utf-8", "replace")
+        # -tt로 pty를 쓰면 줄바꿈이 CRLF로 오고 "Connection to ... closed." 안내가 붙는다.
+        s = b.decode("utf-8", "replace").replace("\r\n", "\n")
+        s = "\n".join(line for line in s.split("\n")
+                       if not line.startswith("Connection to ") or not line.endswith("closed."))
         return s if len(s) <= max_output else s[:max_output] + "\n…(출력 잘림)"
 
     result = {
