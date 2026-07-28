@@ -318,8 +318,28 @@ Sources: https://docs.vllm.ai/en/latest/features/tool_calling/ , https://qwen.re
 설정 저장 후 모델은 잘 뜨는데(`AI Infra Assistant`) 새 채팅에서 기본으로 선택되지 않음. 이건
 agent-server/코드 문제가 아니라 Open WebUI의 기본 모델 선택 로직(브라우저별 마지막 선택 기억
 또는 admin 설정)이라 관리자 패널 → 설정 → 모델에서 수동으로 기본 모델을 지정해야 함. mock ↔
-실제 백엔드 전환 시 노출되는 모델 id 자체가 바뀌므로 그때마다 재지정 필요 — 자동화하려면 Open
-WebUI admin API 연동이 필요한 별도 작업.
+실제 백엔드 전환 시 노출되는 모델 id 자체가 바뀌므로 그때마다 재지정 필요.
+
+## 26. Open WebUI 기본 모델 자동 동기화 기능 (완료)
+
+24번 후속으로 자동화 진행. Open WebUI 소스(v0.6.5) 확인 결과:
+- `POST /api/v1/auths/signin`(email/password)으로 로그인하거나, 사용자별로 발급 가능한 API
+  키(`GET/POST/DELETE /api/v1/auths/api_key`)를 그대로 `Authorization: Bearer` 로 admin 엔드포인트에
+  쓸 수 있음 — 사람 비밀번호를 저장하지 않아도 되는 API 키 방식을 채택함.
+- `POST /api/v1/configs/models`(`ModelsConfigForm`: `DEFAULT_MODELS`, `MODEL_ORDER_LIST`)가
+  기본 모델을 설정하는 admin 전용 엔드포인트(`get_admin_user` 의존성).
+
+구현:
+- `shared/migrations.py`: `openwebui_base_url`(기본 `http://open-webui:8080`),
+  `openwebui_admin_api_key`(secret) 설정 추가.
+- `admin_console/backend/routers/ops.py`: `POST /api/ops/sync-openwebui-model` — agent-server
+  `/v1/models`로 현재 노출 모델을 확인한 뒤 Open WebUI에 그 모델을 `DEFAULT_MODELS`로 지정.
+  API 키 미설정 시 발급 방법을 안내하는 400 에러로 안전하게 생략.
+- `admin_console/frontend/index.html`: 설정 탭에 "Open WebUI 연동" 그룹(API 키/주소 입력) +
+  "LLM" 그룹에 "Open WebUI 기본 모델 동기화" 버튼 추가.
+- 새 설정 키는 db-init을 다시 돌려야 심어짐 — `docs/NEXT-STEPS.md` 2번 참고.
+
+Sources: https://github.com/open-webui/open-webui (v0.6.5 태그, backend/open_webui/routers/{auths,configs}.py)
 
 ## 20. 매뉴얼 엑셀 열 선택 UI 이해 어려움 (완료)
 

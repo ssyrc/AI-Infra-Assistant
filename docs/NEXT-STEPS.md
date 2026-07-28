@@ -27,29 +27,29 @@ docker logs serve-vllm-llm --tail 50
 안 뜨거나 툴콜이 여전히 깨지면(예: 파서가 모델 출력 포맷과 안 맞는 에러) 로그 그대로 보내줘 —
 `--chat-template` 지정이 추가로 필요할 수 있음.
 
-### 2) Open WebUI 기본 모델 고정
-
-Open WebUI는 우리 백엔드가 노출하는 모델(현재 하나뿐)을 "기본 모델"로 자동 고정하지 않고,
-브라우저별 마지막 선택을 기억하거나 admin 설정을 따른다 — 코드로 강제할 수 있는 부분이 아니라
-Open WebUI 쪽 설정임:
-
-`:8502` 접속 → 우측 상단 프로필 → **관리자 패널 → 설정 → 모델** (또는 일반 설정) → **기본 모델**을
-지금 뜨는 모델(mock이면 `mock-llm`, 실제 백엔드면 `AI Infra Assistant`)로 선택.
-mock ↔ 실제 백엔드를 바꿀 때마다 노출되는 모델 id 자체가 바뀌므로, 바꿀 때마다 여기서 한 번씩
-다시 선택해줘야 함(자동 동기화는 Open WebUI admin API 연동이 필요한 별도 작업이라 필요하면
-말해줘).
-
-### 3) 코드 최신화 (아직 안 했으면 — 모델명 표시 버그 수정 + Arena 모델 제거)
+### 2) 코드 최신화 (Open WebUI 기본 모델 자동 동기화 기능 추가됨)
 ```bash
 git -C /home/yrc/AI-Infra-Assistant fetch origin main
 git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
 rsync -avz --delete --exclude '.env' --progress /home/yrc/AI-Infra-Assistant/ \
   yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
 ```
+새 설정 키(`openwebui_base_url`/`openwebui_admin_api_key`)를 심으려면 db-init을 한 번 다시
+돌려야 함(그냥 `up -d`는 이미 완료된 db-init을 다시 안 돌림):
 ```bash
 docker compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.dev.yml run --rm db-init
 docker compose -f docker-compose.dev.yml restart agent-server open-webui
 ```
+
+### 3) Open WebUI 기본 모델 동기화
+
+1. `:8502` 접속 → 우측 상단 프로필 → **설정 → 계정 → API 키** 발급(관리자 계정으로).
+2. admin_console 설정 탭 → "Open WebUI 연동" 그룹 → `openwebui_admin_api_key`에 붙여넣고 저장
+   (`openwebui_base_url`은 기본값 `http://open-webui:8080` 그대로 두면 됨).
+3. 설정 탭 "LLM" 그룹의 **"Open WebUI 기본 모델 동기화"** 버튼 클릭 → agent-server가 지금
+   노출 중인 모델(mock이면 실제 모델명, 실제 백엔드면 "AI Infra Assistant")로 Open WebUI 기본
+   모델이 맞춰짐. mock ↔ 실제 백엔드 전환할 때마다 이 버튼 한 번씩 눌러주면 됨.
 
 ### 4) admin_console 설정 탭 — LLM/임베딩/리랭커 값 (아직 저장 안 했으면)
 
