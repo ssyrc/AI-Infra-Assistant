@@ -1,29 +1,6 @@
-# 관리자 콘솔 변경 필요 사항들
+# open webui 모델 자동 선택
+  - 가이드 대로 완료
+  - 하지만, 설정 탭 "LLM" 그룹의 "Open WebUI 기본 모델 동기화" 버튼 클릭하면 이런 에러 뜸 동기화 실패: 405: {"detail":"Method Not Allowed"}
 
-
-# 모델 사용
-  - 관리자 탭에서 다 설정하니 AI Infra Assistant 떴어. 설정 후에 default로 AI Infra Assistant가 설정되게 해줘. mock-llm 으로 설정하면 default는 mock-llm 으로.
-  - AI infra assistant 한테 챗 보내니까 이런 에러가 떴어
-
-# 우선 잘 떠있어
-[root@24-gp19 AI-Infra-Assistant]# curl http://202.20.183.30:8500/v1/models
-{"object":"list","data":[{"id":"AI Infra Assistant","object":"model"}]}
-
-# 에러 메시지
-[tiptap warn]: Duplicate extension names found: ['codeBlock']. This can lead to issues. index.js:1158:21
-<div class="flex justify-start overf…0 mt-0.5 svelte-1u5gq5j">
-ResponseMessage.svelte:562:12
-modelId AI Infra Assistant Chat.svelte:1422:13
-Object { chat_id: "43a6625d-8076-4577-86bb-743cabe3798a", message_id: "cbafa3d1-58ae-4177-a059-859a43ba608d", data: {…} }
-Chat.svelte:249:11
-Object { content: `[오류가 발생했습니다: litellm.BadRequestError: OpenAIException - Error code: 400 - {'error': {'message': '"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set', 'type': 'BadRequestError', 'param': None, 'code': 400}}]` }
-Chat.svelte:1237:11
-Object { chat_id: "43a6625d-8076-4577-86bb-743cabe3798a", message_id: "cbafa3d1-58ae-4177-a059-859a43ba608d", data: {…} }
-Chat.svelte:249:11
-Object { id: "chatcmpl-3be01bcb8685", object: "chat.completion.chunk", created: 1785201770, model: "AI Infra Assistant", choices: (1) […] }
-Chat.svelte:1237:11
-Object { chat_id: "43a6625d-8076-4577-86bb-743cabe3798a", message_id: "cbafa3d1-58ae-4177-a059-859a43ba608d", data: {…} }
-Chat.svelte:249:11
-Object { done: true, content: `[오류가 발생했습니다: litellm.BadRequestError: OpenAIException - Error code: 400 - {'error': {'message': '"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set', 'type': 'BadRequestError', 'param': None, 'code': 400}}]`, title: "새 채팅" }
-Chat.svelte:1237:11
-
+# 관리자 콘솔
+  - 설정 탭에 url, model 모두 설정하고 저장해도, 다시 콘솔 띄우면 mock-llm 으로 돌아감. 이전 세팅값을 기억해서 계속 사용할 수 있도록 업데이트
