@@ -389,22 +389,27 @@ dev-config가 다시 실행돼도 안 건드림.
 발행을 안 했으면 검색에 안 잡히는 게 정상 동작. 발행 후 정상적으로 매뉴얼('supercom_guide_260727')
 기반 답변이 나오는 것 확인됨(홈 스토리지 할당량 질문에 매뉴얼 내용 인용해서 답변).
 
-## 33. System MCP `disk_free`가 "비활성화" 응답 — enabled 표시와 실제 실행 결과 불일치 (조치 중)
+## 33. System MCP `disk_free`가 "비활성화" 응답 — 실제 원인은 dev에 ssh 인프라가 없었던 것 (완료)
 
 admin_console 화면엔 `disk_free`가 enabled로 보이는데, 실제 질문하면 에이전트가
-"'disk_free' 툴 비활성화"라고 답함. 이 문구는 `shared/mcp_caller.py`의
-`build_wrapped()`가 `is_enabled()` 체크 실패 시 던지는 `PermissionError` 메시지와 정확히
-일치 — `system_whitelist_state.enabled`가 호출 시점엔 false였다는 뜻(화면과 실행이 같은
-테이블을 보므로, 화면 조회 시점과 실행 시점 사이에 값이 바뀌었거나, 화면에 보인 게 사실
-default 값 표시였을 가능성). `docs/NEXT-STEPS.md` 1번에 System MCP "실행 로그" 탭에서 실제
-차단 사유를 확인하는 진단 순서 안내함 — 로그 확인 후 원인 확정 예정.
+"'disk_free' 툴 비활성화"라고 답함. `shared/mcp_caller.py`의 `PermissionError` 메시지와
+문구가 비슷해서 처음엔 enabled 상태 불일치로 의심했으나, **실행 로그 자체가 하나도 없다는
+사실**로 원인이 바뀜 — 로그가 없다는 건 LLM이 애초에 툴 호출을 시도조차 안 했다는 뜻(호출됐다면
+성공/차단/에러 어느 경우든 `job_logs`에 남는다). 확인해보니 `docker-compose.dev.yml`의
+command-mcp/system-mcp에는 `docker-compose.yml`(prod)에 있던 `HOSTS_FILE`/`SSH_KEY` 환경변수와
+`/etc/hosts`·ssh 개인키 마운트가 **아예 없었음** — dev 환경 자체가 ssh 실행을 위한 인프라를
+갖추지 못한 상태였고(LLM이 사용할 host 이름도 몰라서 애초에 호출을 안 한 것으로 보임), enabled
+플래그와는 무관한 문제였음. prod와 동일한 방식으로 dev compose에 배선함(`docs/NEXT-STEPS.md`
+1~4번). 로그인 서버는 `login07`(202.20.185.10)로 확정, 호스트 `/etc/hosts` 등록 + ssh 개인키
+준비가 추가로 필요함(사용자가 직접 수행).
 
-## 34. 에이전트가 "슈퍼컴" 관련 질문에 호스트를 안 밝히면 되묻기만 함 (요청, 조치 중)
+## 34. 에이전트가 "슈퍼컴" 관련 질문에 호스트를 안 밝히면 되묻기만 함 (커맨드 안내함)
 
 `disk_free(user_id, host)`가 host를 필수로 받는데, LLM이 실제 로그인 서버 이름을 모르니
-"어떤 시스템 기준이냐"고 되묻는다. 요구사항은 "슈퍼컴/홈스토리지" 질문이면 바로 로그인 서버로
-간주하고 실행하는 것 — `scheduler_login_host` 설정값을 에이전트 지시문에 명시하면 해결될
-것으로 보임. 실제 로그인 서버 이름 확인 후 지시문에 반영 예정.
+"어떤 시스템 기준이냐"고 되묻는다. `scheduler_login_host`(Command MCP 전용, disk_free와는
+별개 설정)와 별개로, `agent_system_instruction`에 로그인 서버 이름(`login07`)과 "되묻지 말고
+바로 호출하라"는 문장을 추가해야 함 — 정확한 문구는 `docs/NEXT-STEPS.md` 5번 참고(설정 탭에서
+직접 저장 후 agent-server 재시작 필요, hot_reload=false 키라서).
 
 ## 20. 매뉴얼 엑셀 열 선택 UI 이해 어려움 (완료)
 
