@@ -2,56 +2,33 @@
 
 ## 지금 당장
 
-### 1) hgpu4041 — LLM에 tool-calling 옵션 켜서 재기동 (필수)
+### 1) 동기화 버튼 "405: Method Not Allowed" — admin-console이 새 코드를 못 읽은 것
 
-```
-litellm.BadRequestError: ... '"auto" tool choice requires --enable-auto-tool-choice and
---tool-call-parser to be set'
-```
-이 에이전트는 MCP 툴콜 기반이라 매 요청 `tool_choice: "auto"`를 보내는데, vLLM은 이 옵션을 켜야
-지원한다. Qwen3 계열은 `hermes` 파서를 쓴다:
-```bash
-docker rm -f serve-vllm-llm
-docker run -dit --rm --gpus all --network host --ipc host \
-    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
-    --name serve-vllm-llm repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
-    --model /workspace/models/Qwen3-235B-A22B-Instruct-2507-FP8 \
-    --tensor-parallel-size 4 --gpu-memory-utilization 0.85 \
-    --max-model-len 32768 \
-    --enable-auto-tool-choice --tool-call-parser hermes \
-    --port 8000 --served-model-name qwen3-235b-a22b
-```
-```bash
-docker logs serve-vllm-llm --tail 50
-```
-안 뜨거나 툴콜이 여전히 깨지면(예: 파서가 모델 출력 포맷과 안 맞는 에러) 로그 그대로 보내줘 —
-`--chat-template` 지정이 추가로 필요할 수 있음.
-
-### 2) 코드 최신화 (Open WebUI 기본 모델 자동 동기화 기능 추가됨)
+`/api/ops/sync-openwebui-model`은 admin-console 백엔드 코드에 있는데, 405는 그 라우트가 아예
+없을 때 정적 파일 서버가 대신 응답하는 에러다(경로 자체는 매칭 안 됐는데 POST라서 405). 즉
+admin-console 컨테이너가 아직 최신 코드를 안 읽은 상태 — 코드 최신화 후 admin-console도
+재시작해야 한다(이전엔 agent-server/open-webui만 재시작하라고 안내했었음, 빠뜨렸음):
 ```bash
 git -C /home/yrc/AI-Infra-Assistant fetch origin main
 git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
 rsync -avz --delete --exclude '.env' --progress /home/yrc/AI-Infra-Assistant/ \
   yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
 ```
-새 설정 키(`openwebui_base_url`/`openwebui_admin_api_key`)를 심으려면 db-init을 한 번 다시
-돌려야 함(그냥 `up -d`는 이미 완료된 db-init을 다시 안 돌림):
 ```bash
 docker compose -f docker-compose.dev.yml up -d
 docker compose -f docker-compose.dev.yml run --rm db-init
-docker compose -f docker-compose.dev.yml restart agent-server open-webui
+docker compose -f docker-compose.dev.yml restart admin-console agent-server open-webui
 ```
 
-### 3) Open WebUI 기본 모델 동기화
+### 2) 설정 탭 값이 콘솔 재기동하면 mock으로 되돌아가는 문제 — 방금 고침
 
-1. `:8502` 접속 → 우측 상단 프로필 → **설정 → 계정 → API 키** 발급(관리자 계정으로).
-2. admin_console 설정 탭 → "Open WebUI 연동" 그룹 → `openwebui_admin_api_key`에 붙여넣고 저장
-   (`openwebui_base_url`은 기본값 `http://open-webui:8080` 그대로 두면 됨).
-3. 설정 탭 "LLM" 그룹의 **"Open WebUI 기본 모델 동기화"** 버튼 클릭 → agent-server가 지금
-   노출 중인 모델(mock이면 실제 모델명, 실제 백엔드면 "AI Infra Assistant")로 Open WebUI 기본
-   모델이 맞춰짐. mock ↔ 실제 백엔드 전환할 때마다 이 버튼 한 번씩 눌러주면 됨.
+`dev-config`가 `vllm_llm_base_url` 등을 무조건 mock 값으로 덮어써서, `docker compose down && up`
+등으로 서비스가 다시 뜰 때마다 저장한 값이 사라졌던 것. 이제 관리자가 설정 탭에서 한 번이라도
+저장한 값(`updated_by`가 bootstrap이 아닌 값)은 안 건드리도록 고침 — 위 1번 커맨드로 최신 코드
+반영하면 이후로는 재현 안 됨. 이미 mock으로 되돌아간 상태라면 아래 3번 표대로 다시 한 번만
+저장하면 그 뒤로는 유지됨.
 
-### 4) admin_console 설정 탭 — LLM/임베딩/리랭커 값 (아직 저장 안 했으면)
+### 3) admin_console 설정 탭 — LLM/임베딩/리랭커 값 (되돌아갔으면 다시 저장)
 
 `http://202.20.183.30:8501` → 설정 탭:
 
@@ -65,13 +42,30 @@ docker compose -f docker-compose.dev.yml restart agent-server open-webui
 | `rerank_base_url` | `http://75.23.32.41:8020` |
 | `rerank_model` | `bge-reranker-v2-m3` |
 
-⚠️ `docker compose -f docker-compose.dev.yml down` 후 `up`하면 `dev-config`가 이 값들을 mock으로
-재덮어씀. 컨테이너를 살려둔 채로만 설정 변경.
+### 4) Open WebUI 기본 모델 동기화 (1번 반영 후)
+
+1. `:8502` 접속 → 우측 상단 프로필 → **설정 → 계정 → API 키** 발급(관리자 계정으로).
+2. admin_console 설정 탭 → "Open WebUI 연동" 그룹 → `openwebui_admin_api_key`에 붙여넣고 저장.
+3. 설정 탭 "LLM" 그룹의 **"Open WebUI 기본 모델 동기화"** 버튼 클릭.
 
 ### 5) 확인
 ```bash
 curl http://202.20.183.30:8500/v1/models
 ```
-open-webui(`:8502`)에서 실제 채팅 + 매뉴얼/시스템 조회 등 툴콜 필요한 질문으로 테스트.
+open-webui(`:8502`)에서 실제 채팅 + 매뉴얼/시스템 조회 등 툴콜 필요한 질문으로 테스트. LLM에
+`--enable-auto-tool-choice --tool-call-parser hermes`가 이미 적용돼 있어야 함(아래 6번 참고).
+
+### 6) hgpu4041 — LLM tool-calling 옵션 (아직 안 했으면)
+```bash
+docker rm -f serve-vllm-llm
+docker run -dit --rm --gpus all --network host --ipc host \
+    -v /home/gpu1/yr9.choi/05_halo/models:/workspace/models \
+    --name serve-vllm-llm repo.samsungds.net/docker.io/vllm/vllm-openai:latest \
+    --model /workspace/models/Qwen3-235B-A22B-Instruct-2507-FP8 \
+    --tensor-parallel-size 4 --gpu-memory-utilization 0.85 \
+    --max-model-len 32768 \
+    --enable-auto-tool-choice --tool-call-parser hermes \
+    --port 8000 --served-model-name qwen3-235b-a22b
+```
 
 완료된 내역/원인 분석은 `docs/RUN-LOG.md` 참고.

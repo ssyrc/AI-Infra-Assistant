@@ -341,6 +341,23 @@ agent-server/코드 문제가 아니라 Open WebUI의 기본 모델 선택 로�
 
 Sources: https://github.com/open-webui/open-webui (v0.6.5 태그, backend/open_webui/routers/{auths,configs}.py)
 
+## 27. 동기화 버튼 "405: Method Not Allowed" — admin-console 재시작 누락 (원인 확정)
+
+새 라우트(`/api/ops/sync-openwebui-model`)를 추가했는데, admin-console을 재시작하라고 안내를
+안 해서(agent-server/open-webui만 재시작하라고 했었음) 컨테이너가 옛 코드를 그대로 쓰고 있었음.
+405는 FastAPI가 모르는 경로에 POST가 오면 `StaticFiles` 마운트가 대신 받아서 내는 기본 에러
+(GET/HEAD만 지원) — 즉 그 라우트 자체가 없다는 신호였음. `docs/NEXT-STEPS.md` 1번에 admin-console
+재시작을 포함하도록 커맨드 수정.
+
+## 28. dev-config가 관리자 지정 vLLM 설정을 mock으로 되돌리는 문제 (완료)
+
+`docker-compose.dev.yml`의 `dev-config`가 `vllm_llm_base_url` 등을 무조건 UPDATE로 mock 값 덮어써서,
+`down && up` 등으로 서비스가 재기동될 때마다 관리자가 설정 탭에서 저장한 값이 사라졌음(이전에
+"컨테이너를 살려둔 채로만 설정 변경"이라고 우회 안내했던 근본 원인). `config_seed()`가 최초
+시딩 시 `updated_by='bootstrap'`으로 넣고, 설정 탭 저장 시엔 관리자 계정명으로 바뀌는 것을
+이용해 각 UPDATE에 `AND updated_by='bootstrap'` 조건을 추가 — 한 번이라도 손댄 값은 이후
+dev-config가 다시 실행돼도 안 건드림.
+
 ## 20. 매뉴얼 엑셀 열 선택 UI 이해 어려움 (완료)
 
 "내용/제목/페이지 체크박스가 뭔지 모르겠다"는 피드백에 번호 매긴 단계별 설명과, 현재 선택으로
