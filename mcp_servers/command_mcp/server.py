@@ -1,9 +1,15 @@
 """
 Command MCP - 두 가지 역할.
 1) 커맨드 카탈로그 조회: "어떤 커맨드가 있고 어떻게 쓰는지" 하이브리드 의미검색(읽기 전용).
-2) 사용자 스코프 실행: 스케줄러 job 등 '본인' 자원에 대한 애플리케이션 명령 실행.
-   실행 툴은 user_scoped=True로, user_id를 LLM 스키마에서 감추고 호출자 신원에서 강제 주입한다
-   (남의 job을 조회할 수 없다). enabled/역할/감사로그는 shared/mcp_caller로 공통 처리한다.
+2) 실행: 카탈로그에 등록된 커맨드(run_command)와 스케줄러 job 조회 등 '본인' 자원에 대한
+   애플리케이션 명령 실행. 모든 실행 툴은 user_scoped=True로, user_id를 LLM 스키마에서 감추고
+   호출자 신원에서 강제 주입한다(남의 자원에 접근할 수 없다).
+
+화이트리스트 정책(관리자 결정): Command MCP의 툴은 항목별 on/off 없이 항상 실행 가능하다.
+  실행 허용 여부를 관리자가 켜고 끄는 '화이트리스트 관리'는 System MCP에서만 한다.
+  Command MCP에서는 권한 검사 대신 (a) 호출자 권한 강등 실행, (b) 셸 미사용 argv 실행,
+  (c) 파괴적 기본 명령 거부(shared/catalog_exec), (d) 전건 감사로그로 안전성을 확보한다.
+
 전용 DB(command_db)를 사용한다.
 """
 import sys
@@ -17,6 +23,7 @@ from mcp_caller import (  # noqa: E402
     get_caller, CallerContextMiddleware, load_overrides_sync, tool_description, build_wrapped,
 )
 from ssh_exec import run_ssh_as_user  # noqa: E402
+from catalog_exec import DEFAULT_DENY_CSV, build_catalog_argv, deny_set  # noqa: E402
 
 from mcp.server.fastmcp import FastMCP
 
@@ -31,12 +38,13 @@ _STATE = "command_whitelist_state"
 async def search_commands(query: str, top_k: int = 10, category: str | None = None) -> list[dict]:
     """하려는 작업을 설명하면 의미상 가까운 사내 시스템 커맨드를 찾아 준다(카탈로그 조회).
 
-    사용할 때: "무슨 커맨드로 X를 하지?"처럼 어떤 명령이 있는지 모를 때. 정확한 이름이 없어도
-      설명형으로 검색된다. 예: "작업이 언제 실행되는지 확인", "스케줄 등록".
-    쓰지 말 것: 실제 실행/조회(예: 본인 job 상태)는 get_scheduler_job_info 등 실행 툴을 쓴다.
-      이 툴은 '어떤 커맨드가 있는지'만 알려주고 실행하지 않는다.
+    사용할 때: "무슨 커맨드로 X를 하지?"처럼 어떤 명령이 있는지 모를 때, 그리고 사용자가
+      요청한 작업을 실제로 수행할 커맨드를 찾을 때. 정확한 이름이 없어도 설명형으로 검색된다.
+      예: "내 홈 스토리지 용량", "작업이 언제 실행되는지 확인".
 
-    후보를 찾으면 get_command_detail로 정확한 사용법을 확인한 뒤 사용자에게 안내한다.
+    이 툴 자체는 실행하지 않는다. 찾은 커맨드를 실제로 실행하려면 결과의 name을 그대로
+    run_command(name=...)에 넘긴다(카탈로그에 있는 커맨드는 전부 실행 가능하다).
+    정확한 사용법/인자가 필요하면 get_command_detail로 먼저 확인한다.
 
     Args:
         query: 하려는 작업 설명 또는 키워드. 예: "배치 재시작"
@@ -126,23 +134,56 @@ async def search_commands(query: str, top_k: int = 10, category: str | None = No
 async def get_command_detail(name: str) -> dict | None:
     """특정 커맨드의 상세 사용법(usage)을 정확히 반환한다.
 
-    사용할 때: search_commands로 후보를 찾은 뒤, 사용자에게 안내하기 전에 정확한 이름의
-      사용법/예시를 확인할 때. name은 반드시 search_commands 결과의 name을 그대로 쓴다.
+    사용할 때: search_commands로 후보를 찾은 뒤, 실행하거나 안내하기 전에 정확한 사용법/인자를
+      확인할 때. name은 반드시 search_commands 결과의 name을 그대로 쓴다.
 
     Args:
         name: command_catalog.name 값(추측 금지, 검색 결과의 정확한 이름)
     Returns:
-        name/description/usage/category. 없으면 null(그때는 search_commands로 다시 찾는다).
+        name/description/usage/category/exec_command. exec_command는 실제로 실행되는 커맨드
+        문자열이다(비어 있으면 name이 그대로 실행된다). 없으면 null(그때는 search_commands로
+        다시 찾는다).
     """
     pool = await get_pool(_DSN)
     row = await pool.fetchrow(
-        "SELECT name, description, usage, category FROM command_catalog WHERE name = $1",
+        "SELECT name, description, usage, category, exec_command FROM command_catalog WHERE name = $1",
         name,
     )
     return dict(row) if row else None
 
 
 # ------------------------------------------------------------------ 사용자 스코프 실행
+async def run_command(user_id: str, name: str, args: list[str] | None = None,
+                      host: str | None = None) -> dict:
+    """카탈로그(command_catalog)에 등록된 커맨드를 호출자 본인 권한으로 실행한다.
+
+    카탈로그의 exec_command(없으면 name)를 셸 없이 argv로 분해해 실행한다. host를 지정하지
+    않으면 로그인 서버(scheduler_login_host)에서 실행한다."""
+    pool = await get_pool(_DSN)
+    row = await pool.fetchrow(
+        "SELECT name, description, usage, category, exec_command FROM command_catalog "
+        "WHERE name = $1", name)
+    if row is None:
+        # 대소문자/앞뒤 공백 차이는 흡수한다(LLM이 검색 결과를 그대로 넘기지 못한 경우).
+        row = await pool.fetchrow(
+            "SELECT name, description, usage, category, exec_command FROM command_catalog "
+            "WHERE lower(name) = lower(btrim($1))", name)
+    if row is None:
+        raise ValueError(
+            f"커맨드 카탈로그에 '{name}'이(가) 없습니다. search_commands로 정확한 이름을 먼저 "
+            "찾은 뒤 그 name을 그대로 넘기세요.")
+
+    deny = deny_set(await get_config("catalog_exec_deny_commands", DEFAULT_DENY_CSV))
+    argv = build_catalog_argv(row["exec_command"], row["name"], args, user_id, deny)
+    target = (host or "").strip() or await get_config("scheduler_login_host", "login05")
+
+    result = await run_ssh_as_user(target, user_id, argv)
+    result["catalog"] = {
+        "name": row["name"], "usage": row["usage"], "category": row["category"],
+    }
+    return result
+
+
 async def get_scheduler_job_info(user_id: str) -> dict:
     """현재 사용자 '본인'의 스케줄러 job 상태를 조회한다.
     로그인 서버(scheduler_login_host)에 ssh(root) 후 `su - <user_id>`로 강등해
@@ -152,7 +193,24 @@ async def get_scheduler_job_info(user_id: str) -> dict:
     return await run_ssh_as_user(login_host, user_id, ["phd", "info", "-u", user_id])
 
 
-EXEC_WHITELIST = {
+# 실행 툴 목록. System MCP의 WHITELIST와 달리 여기 등록된 툴은 항상 실행 가능하다
+# (enabled/required_roles로 막지 않는다 - 화이트리스트 관리는 System MCP 전용 정책).
+EXEC_TOOLS = {
+    "run_command": {
+        "handler": run_command,
+        "description": (
+            "커맨드 카탈로그(사내 매뉴얼에서 등록된 커맨드 목록)에 있는 커맨드를 실제로 실행하고 "
+            "결과를 돌려준다. 카탈로그에 있는 커맨드는 전부 실행 가능하므로, 사용자가 어떤 정보를 "
+            "'확인해 달라'고 하면 search_commands로 맞는 커맨드를 찾아 그 name을 그대로 이 툴에 "
+            "넘겨 실행한다(사용법만 안내하고 끝내지 않는다). "
+            "name은 반드시 search_commands/get_command_detail 결과의 이름을 그대로 쓴다(추측 금지). "
+            "args에는 커맨드 뒤에 붙일 인자를 한 칸씩 나눠 넣는다(예: ['-l', '/home']). 인자가 "
+            "필요 없으면 생략한다. host를 지정하지 않으면 로그인 서버에서 실행되며, 사용자가 특정 "
+            "서버(예: hgpu4041)를 지목한 경우에만 그 서버 이름을 host에 넣는다. "
+            "실행은 항상 호출자 본인 계정 권한으로 이뤄진다(사용자 id는 지정할 수 없다)."
+        ),
+        "enabled": True, "required_roles": [], "user_scoped": True, "scope_param": "user_id",
+    },
     "get_scheduler_job_info": {
         "handler": get_scheduler_job_info,
         "description": (
@@ -165,6 +223,7 @@ EXEC_WHITELIST = {
     },
 }
 
+# 설명 오버라이드만 기동 시 1회 읽는다(enabled/required_roles는 더 이상 참조하지 않는다).
 _OVERRIDES = load_overrides_sync(_DSN, _STATE)
 
 
@@ -187,29 +246,20 @@ async def _log_execution(tool_name: str, params: dict, status: str, result):
     )
 
 
-async def _is_enabled(tool_name: str, default: bool) -> bool:
-    pool = await get_pool(_DSN)
-    row = await pool.fetchrow(f"SELECT enabled FROM {_STATE} WHERE tool_name = $1", tool_name)
-    if row is None:
-        await pool.execute(
-            f"INSERT INTO {_STATE} (tool_name, enabled) VALUES ($1, $2) "
-            "ON CONFLICT (tool_name) DO NOTHING", tool_name, default)
-        return default
-    return row["enabled"]
+async def _always_enabled(tool_name: str, default: bool) -> bool:
+    """Command MCP는 항목별 활성/비활성을 두지 않는다(화이트리스트 관리는 System MCP 전용)."""
+    return True
 
 
-async def _required_roles(tool_name: str, code_default: list) -> list:
-    pool = await get_pool(_DSN)
-    row = await pool.fetchrow(f"SELECT required_roles FROM {_STATE} WHERE tool_name = $1", tool_name)
-    if row and row["required_roles"] is not None:
-        return list(row["required_roles"])
-    return list(code_default or [])
+async def _no_required_roles(tool_name: str, code_default: list) -> list:
+    """역할 제한도 두지 않는다 - 실행은 항상 호출자 '본인' 권한으로만 이뤄진다."""
+    return []
 
 
-for _name, _entry in EXEC_WHITELIST.items():
+for _name, _entry in EXEC_TOOLS.items():
     mcp.add_tool(
-        build_wrapped(_name, _entry, is_enabled=_is_enabled,
-                      required_roles=_required_roles, log_execution=_log_execution),
+        build_wrapped(_name, _entry, is_enabled=_always_enabled,
+                      required_roles=_no_required_roles, log_execution=_log_execution),
         name=_name,
         description=tool_description(_name, _entry, _OVERRIDES),
     )

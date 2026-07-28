@@ -569,6 +569,43 @@ postgres(플랫폼 데이터)는 안 건드리고 Open WebUI 계정/대화만 �
 "내용/제목/페이지 체크박스가 뭔지 모르겠다"는 피드백에 번호 매긴 단계별 설명과, 현재 선택으로
 첫 번째 행이 실제로 어떻게 저장될지 실시간으로 보여주는 미리보기 박스를 추가함.
 
+## 47. 카탈로그 커맨드 전건 실행 허용 (완료) — Command MCP 화이트리스트 폐지
+
+#46의 안전 설계 질의에 대한 결정: **"Command MCP는 모두 실행 가능한 걸로 업로드한다. 매뉴얼
+db에서 찾은 커맨드도 모두 실행 가능해야 한다. 화이트리스트 관리는 오직 System MCP만."**
+제안했던 "카탈로그 항목별 실행 등록(argv_template) 버튼" 방식은 채택하지 않고, 카탈로그 등록
+자체를 승인으로 간주하는 방식으로 구현함.
+
+- `command_catalog`에 `exec_command` 열 추가(마이그레이션 command_db v5). 실제 실행할 커맨드
+  문자열이며, **비어 있으면 name을 그대로 실행**한다 — 기존에 올려둔 카탈로그도 추가 작업 없이
+  바로 실행 가능하다는 뜻(사용자 요구사항의 핵심). `{user_id}` 토큰은 호출자 계정으로 치환.
+- Command MCP에 `run_command(name, args?, host?)` 툴 추가. 카탈로그에서 이름으로 찾아
+  `shared/catalog_exec.build_catalog_argv()`로 argv를 만들고 기존 `run_ssh_as_user()`로 실행한다
+  (실행 경로는 System MCP와 동일 — ssh root → `su - <user_id>`). host 미지정 시 로그인 서버.
+  user_scoped=True라 user_id는 LLM 스키마에서 숨겨지고 호출자 신원에서 강제 주입된다.
+- Command MCP의 enabled/required_roles 검사를 제거(`_always_enabled`/`_no_required_roles`).
+  `EXEC_WHITELIST` → `EXEC_TOOLS`로 이름도 바꿔 "여긴 화이트리스트가 아니다"를 코드에 반영.
+  감사로그(job_logs)는 그대로 전건 기록. System MCP는 기존 화이트리스트 관리 그대로 유지.
+- 화이트리스트가 없어진 자리를 구조적 안전장치로 대체: (1) 항상 본인 권한 강등 실행,
+  (2) 셸 미사용 argv 실행(인젝션 불가, 대신 파이프/리다이렉션은 명시적 에러로 안내),
+  (3) /etc/hosts 등록 서버만, 타임아웃·출력 상한, (4) 파괴적 기본 명령 실행 시점 거부
+  (설정 `catalog_exec_deny_commands`, 기본값은 System MCP 커스텀 커맨드와 동일 목록 — 비우면
+  제한 없음), (5) 전건 감사로그. 엑셀 대량 업로드본이라 사람이 한 줄씩 검토 안 했을 수 있다는
+  #46의 위험은 (4)로만 남겨두고 실행 자체는 막지 않음.
+- 관리자 콘솔 커맨드 탭: "실행 커맨드" 입력칸 + 목록 열 + 엑셀 열 매핑(exec_command_column)
+  추가. 실행 커맨드 열을 매핑하지 않고 다시 업로드해도 기존 값이 지워지지 않게 upsert에
+  `COALESCE`를 넣음. 탭 설명도 "정보 제공용, 실행은 System MCP 담당" → "조회 및 실행"으로 정정.
+- 에이전트 지시문에 "커맨드 카탈로그 실행" 라우팅 추가 — 사용자가 상태 확인을 요청하면 사용법만
+  안내하지 말고 search_commands로 찾아 run_command로 실행해 결과로 답하도록 명시.
+  `agent_system_instruction`은 non-force 시드라 기존 배포 DB에 자동 반영되지 않음 →
+  `docs/NEXT-STEPS.md` 2번에 전문을 넣어두었으니 설정 탭에 붙여넣어야 함.
+- 확인: `run_command`의 MCP 스키마에 user_id가 노출되지 않고 name/args/host만 노출되는 것,
+  argv 빌더가 rm·/bin/rm·파이프·제어문자를 거부하고 `{user_id}` 치환이 되는 것을 실제로 실행해
+  검증함.
+
+주의: 새 툴이 에이전트에 보이려면 db-init(command_db v5) 후 command-mcp와 agent-server를
+재시작해야 한다.
+
 ---
 
 ## 다음 항목은 이어서 여기 아래에 추가

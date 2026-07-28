@@ -523,14 +523,14 @@ function VocPanel() {
 // ---------------------------------------------------------------- Commands
 function CommandsPanel() {
   const [items, setItems] = useState([]);
-  const [form, setForm] = useState({ name: "", description: "", usage: "", category: "" });
+  const [form, setForm] = useState({ name: "", description: "", usage: "", category: "", exec_command: "" });
   const [editingId, setEditingId] = useState(null);
   const [busy, setBusy] = useState(false);
   const [showBrowser, setShowBrowser] = useState(false);
 
   // 엑셀 미리보기 + 열 매핑 상태
   const [excel, setExcel] = useState(null); // {upload_id, filename, columns, sample_rows, total_rows}
-  const [map, setMap] = useState({ name_column: "", description_column: "", usage_column: "", category_column: "" });
+  const [map, setMap] = useState({ name_column: "", description_column: "", usage_column: "", category_column: "", exec_command_column: "" });
 
   const load = useCallback(async () => setItems(await api("/api/commands")), []);
   useEffect(() => { load(); }, [load]);
@@ -540,7 +540,7 @@ function CommandsPanel() {
     try {
       if (editingId) await api(`/api/commands/${editingId}`, { method: "PATCH", body: JSON.stringify(form) });
       else await api("/api/commands", { method: "POST", body: JSON.stringify(form) });
-      setForm({ name: "", description: "", usage: "", category: "" });
+      setForm({ name: "", description: "", usage: "", category: "", exec_command: "" });
       setEditingId(null);
       load();
     } catch (e) { alert(e.message); }
@@ -567,6 +567,7 @@ function CommandsPanel() {
         description_column: guess(["desc", "설명", "내용"]),
         usage_column: guess(["usage", "사용", "예시", "example"]),
         category_column: guess(["cat", "분류", "카테고리"]),
+        exec_command_column: guess(["exec", "실행", "명령어"]),
       });
     } catch (e) { alert("전처리 실패: " + e.message); }
     setBusy(false);
@@ -584,6 +585,7 @@ function CommandsPanel() {
           description_column: map.description_column,
           usage_column: map.usage_column || null,
           category_column: map.category_column || null,
+          exec_command_column: map.exec_command_column || null,
         }),
       });
       setExcel(null);
@@ -607,19 +609,29 @@ function CommandsPanel() {
     <div>
       <h2>커맨드 카탈로그</h2>
       <div className="subtitle">
-        Command MCP가 조회하는 시스템 활용 커맨드 목록 (정보 제공용, 실행은 System MCP 담당).
-        등록 시 의미 검색용 임베딩이 생성되어, 사용자가 설명형으로 물어도 적절한 커맨드를 찾습니다.
+        Command MCP가 조회 <strong>및 실행</strong>하는 시스템 활용 커맨드 목록입니다.
+        여기 등록된 커맨드는 별도 승인 없이 전부 실행 가능합니다(항목별 on/off 화이트리스트는
+        System MCP 탭에서만 관리). 실행은 항상 <strong>질문한 사용자 본인 계정 권한</strong>으로,
+        기본적으로 로그인 서버에서 이뤄집니다. 등록 시 의미 검색용 임베딩이 생성되어, 사용자가
+        설명형으로 물어도 적절한 커맨드를 찾습니다.
       </div>
 
       <div className="card">
         <div className="toolbar">
           <input placeholder="커맨드 이름" value={form.name} onChange={e => setForm({...form, name: e.target.value})} style={{width: 200}} />
+          <input placeholder="실행 커맨드 (비우면 이름을 그대로 실행)" value={form.exec_command || ""}
+                 onChange={e => setForm({...form, exec_command: e.target.value})}
+                 style={{width: 340, fontFamily: "var(--mono)"}} />
+        </div>
+        <div style={{fontSize: 11.5, color: "var(--muted)", marginTop: 6}}>
+          실행 커맨드는 셸 없이 그대로 실행됩니다(파이프 <code>|</code>·리다이렉션 <code>&gt;</code> 사용 불가).
+          <code>{"{user_id}"}</code>는 실행 시 질문한 사용자 계정으로 치환됩니다(예: <code>phd info -u {"{user_id}"}</code>).
         </div>
         <textarea placeholder="설명" value={form.description} onChange={e => setForm({...form, description: e.target.value})} rows={2} style={{width: "100%", marginTop: 8}} />
         <textarea placeholder="사용법(예시)" value={form.usage || ""} onChange={e => setForm({...form, usage: e.target.value})} rows={2} style={{width: "100%", marginTop: 8}} />
         <div className="toolbar" style={{marginTop: 8}}>
           <button className="primary" onClick={submit}>{editingId ? "수정 저장" : "등록"}</button>
-          {editingId && <button onClick={() => { setEditingId(null); setForm({ name: "", description: "", usage: "", category: "" }); }}>취소</button>}
+          {editingId && <button onClick={() => { setEditingId(null); setForm({ name: "", description: "", usage: "", category: "", exec_command: "" }); }}>취소</button>}
           <span style={{marginLeft: "auto", display: "flex", alignItems: "center", gap: 6}}>
             <input type="file" accept=".xlsx,.xls" disabled={busy}
                    onChange={e => { analyzeExcel(e.target.files[0]); e.target.value = ""; }} />
@@ -640,12 +652,17 @@ function CommandsPanel() {
       {excel && (
         <div className="card">
           <div style={{marginBottom: 8}}><strong>엑셀 열 매핑</strong> · {excel.filename} · 시트 {excel.sheet} · {excel.total_rows}행</div>
-          <div className="subtitle">각 항목에 대응하는 엑셀 열을 고르세요. 이름 기준으로 등록/갱신(upsert)됩니다.</div>
+          <div className="subtitle">
+            각 항목에 대응하는 엑셀 열을 고르세요. 이름 기준으로 등록/갱신(upsert)됩니다.
+            "실행 커맨드" 열을 지정하지 않으면 커맨드 이름이 그대로 실행됩니다(이름 열이 실제
+            커맨드면 매핑하지 않아도 됩니다).
+          </div>
           <div style={{display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12}}>
             {colSelect("name_column", "이름(name)", true)}
             {colSelect("description_column", "설명(description)", true)}
             {colSelect("usage_column", "사용법(usage)", false)}
             {colSelect("category_column", "카테고리(category)", false)}
+            {colSelect("exec_command_column", "실행 커맨드(exec_command)", false)}
           </div>
           {excel.sample_rows.length > 0 && (
             <table style={{marginBottom: 12}}>
@@ -667,11 +684,14 @@ function CommandsPanel() {
       )}
 
       <table>
-        <thead><tr><th>이름</th><th>설명</th><th>카테고리</th><th>검색</th><th>수정일</th><th></th></tr></thead>
+        <thead><tr><th>이름</th><th>실행 커맨드</th><th>설명</th><th>카테고리</th><th>검색</th><th>수정일</th><th></th></tr></thead>
         <tbody>
           {items.map(c => (
             <tr key={c.id}>
               <td style={{fontFamily: "var(--mono)"}}>{c.name}</td>
+              <td style={{fontFamily: "var(--mono)", fontSize: 12}}>
+                {c.exec_command || <span style={{color: "var(--muted)"}}>{c.name} (이름 그대로)</span>}
+              </td>
               <td>{c.description}</td>
               <td>{c.category || "-"}</td>
               <td style={{fontSize: 11.5, color: "var(--muted)"}}>{c.embedded ? "의미+키워드" : "키워드만"}</td>
@@ -682,7 +702,7 @@ function CommandsPanel() {
               </td>
             </tr>
           ))}
-          {items.length === 0 && <tr><td colSpan="6" className="empty">등록된 커맨드가 없습니다.</td></tr>}
+          {items.length === 0 && <tr><td colSpan="7" className="empty">등록된 커맨드가 없습니다.</td></tr>}
         </tbody>
       </table>
     </div>

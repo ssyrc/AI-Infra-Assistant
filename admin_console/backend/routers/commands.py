@@ -27,10 +27,14 @@ _DSN = "command_db_dsn"
 
 
 class CommandIn(BaseModel):
+    """exec_command: 실제 실행할 커맨드 문자열(비우면 name을 그대로 실행).
+    Command MCP의 run_command가 셸 없이 shlex로 분해해 argv로 실행한다.
+    `{user_id}` 토큰은 실행 시 호출자 본인 계정으로 치환된다(예: `phd info -u {user_id}`)."""
     name: str
     description: str
     usage: str | None = None
     category: str | None = None
+    exec_command: str | None = None
 
 
 async def _embed(text: str):
@@ -48,8 +52,8 @@ async def _embed(text: str):
 async def list_commands(admin: str = Depends(require_admin)):
     pool = await get_pool(_DSN)
     rows = await pool.fetch(
-        "SELECT id, name, description, usage, category, updated_at, (embedding IS NOT NULL) AS embedded "
-        "FROM command_catalog ORDER BY name"
+        "SELECT id, name, description, usage, category, exec_command, updated_at, "
+        "(embedding IS NOT NULL) AS embedded FROM command_catalog ORDER BY name"
     )
     return [dict(r) for r in rows]
 
@@ -61,10 +65,12 @@ async def create_command(body: CommandIn, admin: str = Depends(require_admin)):
     try:
         row_id = await pool.fetchval(
             """
-            INSERT INTO command_catalog (name, description, usage, category, embedding, embed_model, embed_dim)
-            VALUES ($1, $2, $3, $4, $5::vector, $6, $7) RETURNING id
+            INSERT INTO command_catalog (name, description, usage, category, exec_command,
+                                         embedding, embed_model, embed_dim)
+            VALUES ($1, $2, $3, $4, $5, $6::vector, $7, $8) RETURNING id
             """,
-            body.name, body.description, body.usage, body.category, emb, model, dim,
+            body.name, body.description, body.usage, body.category, body.exec_command,
+            emb, model, dim,
         )
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"등록 실패 (이름 중복 가능): {e}")
@@ -78,11 +84,12 @@ async def update_command(command_id: int, body: CommandIn, admin: str = Depends(
     row = await pool.fetchrow(
         """
         UPDATE command_catalog
-        SET name=$1, description=$2, usage=$3, category=$4,
-            embedding=$5::vector, embed_model=$6, embed_dim=$7, updated_at=now()
-        WHERE id=$8 RETURNING id
+        SET name=$1, description=$2, usage=$3, category=$4, exec_command=$5,
+            embedding=$6::vector, embed_model=$7, embed_dim=$8, updated_at=now()
+        WHERE id=$9 RETURNING id
         """,
-        body.name, body.description, body.usage, body.category, emb, model, dim, command_id,
+        body.name, body.description, body.usage, body.category, body.exec_command,
+        emb, model, dim, command_id,
     )
     if not row:
         raise HTTPException(404, "커맨드를 찾을 수 없습니다.")
@@ -106,7 +113,8 @@ async def preview_command_excel(
     drop_urls: bool = Form(False),
     admin: str = Depends(require_admin),
 ):
-    """엑셀 열 목록과 샘플 행을 반환한다. 어떤 열을 name/description/usage/category로 쓸지 선택하게 한다."""
+    """엑셀 열 목록과 샘플 행을 반환한다.
+    어떤 열을 name/description/usage/category/exec_command로 쓸지 선택하게 한다."""
     ext, content, filename = await read_upload_or_server_file(file, server_path, {".xlsx", ".xls"})
     options = {"strip_html": strip_html, "collapse_space": collapse_space, "drop_urls": drop_urls}
     upload_id = await create_upload_session(_DSN, admin, filename, ext, "command_catalog", content, options)
@@ -127,11 +135,14 @@ async def preview_command_excel(
 
 
 class CommandExcelCommitIn(BaseModel):
+    """exec_command_column: 실제 실행할 커맨드가 적힌 열(선택). 지정하지 않으면 커맨드 이름을
+    그대로 실행한다 - 이름 열에 실행 가능한 커맨드가 그대로 들어있는 카탈로그라면 매핑이 필요 없다."""
     upload_id: str
     name_column: str
     description_column: str
     usage_column: str | None = None
     category_column: str | None = None
+    exec_command_column: str | None = None
 
 
 @router.post("/excel/commit")
@@ -147,7 +158,7 @@ async def commit_command_excel(body: CommandExcelCommitIn, admin: str = Depends(
         for label, col in required.items():
             if col not in col_idx:
                 raise ValueError(f"{label} 열이 엑셀에 없습니다: {col}")
-        for col in (body.usage_column, body.category_column):
+        for col in (body.usage_column, body.category_column, body.exec_command_column):
             if col and col not in col_idx:
                 raise ValueError(f"존재하지 않는 열입니다: {col}")
 
@@ -165,7 +176,9 @@ async def commit_command_excel(body: CommandExcelCommitIn, admin: str = Depends(
                 continue
             usage = _cell(row, body.usage_column) or None
             category = _cell(row, body.category_column) or None
-            built.append((name.strip(), desc, usage, category))
+            exec_command = _cell(row, body.exec_command_column) or None
+            built.append((name.strip(), desc, usage, category,
+                          exec_command.strip() if exec_command else None))
         return built
 
     try:
@@ -182,20 +195,24 @@ async def commit_command_excel(body: CommandExcelCommitIn, admin: str = Depends(
     inserted = updated = 0
     async with pool.acquire() as conn:
         async with conn.transaction():
-            for name, desc, usage, category in items:
+            for name, desc, usage, category, exec_command in items:
                 emb, model, dim = await _embed(f"{name}\n{desc}")
                 res = await conn.fetchrow(
                     """
-                    INSERT INTO command_catalog (name, description, usage, category, embedding, embed_model, embed_dim)
-                    VALUES ($1, $2, $3, $4, $5::vector, $6, $7)
+                    INSERT INTO command_catalog (name, description, usage, category, exec_command,
+                                                 embedding, embed_model, embed_dim)
+                    VALUES ($1, $2, $3, $4, $5, $6::vector, $7, $8)
                     ON CONFLICT (name) DO UPDATE
                     SET description=EXCLUDED.description, usage=EXCLUDED.usage,
-                        category=EXCLUDED.category, embedding=EXCLUDED.embedding,
+                        category=EXCLUDED.category,
+                        -- 실행 커맨드 열을 매핑하지 않은 업로드가 기존 값을 지우지 않게 한다.
+                        exec_command=COALESCE(EXCLUDED.exec_command, command_catalog.exec_command),
+                        embedding=EXCLUDED.embedding,
                         embed_model=EXCLUDED.embed_model, embed_dim=EXCLUDED.embed_dim,
                         updated_at=now()
                     RETURNING (xmax = 0) AS inserted
                     """,
-                    name, desc, usage, category, emb, model, dim,
+                    name, desc, usage, category, exec_command, emb, model, dim,
                 )
                 if res["inserted"]:
                     inserted += 1

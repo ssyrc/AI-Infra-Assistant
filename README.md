@@ -18,7 +18,7 @@
               ▼               ▼               ▼               ▼          ┆ similar_voc
           Manual MCP     Command MCP       VOC MCP        System MCP     ┆ 후처리
           (하이브리드    (카탈로그검색+    (하이브리드    (리눅스 read-only         ┆
-           RAG 검색)      본인 job 실행)    이력 검색)      ssh 원격, 본인권한)      ▼
+           RAG 검색)      카탈로그 실행)    이력 검색)      ssh 원격, 본인권한)      ▼
               │               │               │               │      Service Hub MCP
           manual_db       command_db       voc_db          system_db   (외부 원격 MCP,
                                                   │                      우리 소유 아님)
@@ -39,7 +39,7 @@
 agent_server/    # FastAPI + ADK. OpenAI 호환(/v1/chat/completions) + agent/VOC API + 메모리 API
 mcp_servers/
   manual_mcp/    # 매뉴얼 하이브리드 RAG 검색
-  command_mcp/   # 커맨드 카탈로그 검색 + 본인 스케줄러 job 실행(user_scoped, ssh)
+  command_mcp/   # 커맨드 카탈로그 검색 + 카탈로그 커맨드 실행(user_scoped, ssh)
   voc_mcp/       # VOC 이력 하이브리드 검색
   system_mcp/    # 리눅스 read-only 명령을 호출자 권한으로 ssh 실행(whitelist.py) + 감사로그
 admin_console/   # backend(업로드·파싱·발행·버전·설정·로그 API) + frontend(단일 HTML React)
@@ -63,6 +63,11 @@ docs/NEXT-STEPS.md       # 지금 할 일
 - **user_scoped 강제**: 본인 자원 툴(스케줄러 job, 리눅스 명령)은 `user_id`를 LLM 스키마에서
   감추고 호출자 신원(`X-User-Id`)에서 강제 주입한다. 다른 id를 넣어도 본인으로 덮어쓰며, 신뢰된
   id가 없으면 실행 거부(fail-closed) — 남의 자원에 접근할 수 없다.
+- **실행 권한 정책(두 MCP가 다르다)**: **System MCP**만 항목별 화이트리스트(enabled/필요 역할/
+  분류)를 관리자 콘솔에서 관리한다. **Command MCP**는 화이트리스트를 두지 않고 **커맨드 카탈로그에
+  등록된 커맨드를 전부 실행 가능**하게 한다(`run_command`) — 카탈로그 등록 자체가 승인이다.
+  화이트리스트 대신 구조적 안전장치로 지킨다: 호출자 본인 권한 강등 실행, 셸 미사용 argv 실행,
+  파괴적 기본 명령 거부(설정 `catalog_exec_deny_commands`), 전건 감사로그.
 - **System MCP 원격 실행 안전성**: 등록된 read-only 명령만 타입 지정 파라미터(대상 `host` + 인자)로
   노출. 실행은 `host`(agent 호스트 `/etc/hosts`에 등록된 서버만)로 **ssh(root) → `su - <user>`**.
   원격 명령은 shlex 이중 인용, `user_id`는 계정명 정규식 검증으로 셸 주입 불가. `find -exec/-delete`

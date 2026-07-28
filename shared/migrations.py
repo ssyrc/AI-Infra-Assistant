@@ -14,6 +14,8 @@ import os
 import asyncio
 import asyncpg
 
+from catalog_exec import DEFAULT_DENY_CSV
+
 PG_HOST = os.environ.get("POSTGRES_HOST", "postgres")
 PG_PORT = os.environ.get("POSTGRES_PORT", "5432")
 PG_USER = os.environ.get("POSTGRES_USER", "agent")
@@ -304,6 +306,12 @@ MIGRATIONS: list[tuple[str, int, str]] = [
             ADD CONSTRAINT system_custom_commands_host_mode_check
             CHECK (host_mode IN ('target_server', 'login_server'));
     """),
+    # v5: 카탈로그(매뉴얼 엑셀 업로드본)에 등록된 커맨드를 그대로 실행할 수 있게 한다.
+    #     exec_command = 실제 실행할 커맨드 문자열(셸 없이 shlex 분해 후 argv로 실행).
+    #     비어 있으면 name을 그대로 실행한다 -> 기존에 올린 카탈로그도 추가 작업 없이 실행 가능.
+    ("command_db", 5, """
+        ALTER TABLE command_catalog ADD COLUMN IF NOT EXISTS exec_command TEXT;
+    """),
 ]
 
 
@@ -334,6 +342,10 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
          "매뉴얼/VOC/커맨드 카탈로그 '서버 파일에서 선택' 목록 경로(admin-console 컨테이너 내부 "
          "경로, docker-compose에서 마운트된 폴더 하위만 가능)", True, False, False),
         ("scheduler_login_host", os.environ.get("SCHEDULER_LOGIN_HOST", "login05"), "Command MCP가 job 조회 시 ssh할 로그인 서버(/etc/hosts 등록명)", True, False, False),
+        # 커맨드 카탈로그는 전부 실행 가능하다(항목별 on/off 화이트리스트는 System MCP에서만 관리).
+        # 그래도 파괴적인 기본 명령은 실행 시점에 거부한다. 콤마 구분, 비우면 제한 없음.
+        ("catalog_exec_deny_commands", DEFAULT_DENY_CSV,
+         "커맨드 카탈로그 실행 시 거부할 기본 명령(콤마 구분). 비우면 제한 없이 전부 실행됨", True, False, False),
 
         # 장기 메모리(사용자별)
         ("memory_enabled", "true", "장기 메모리 사용 여부(true/false)", True, False, False),
@@ -381,7 +393,7 @@ AGENT_INSTRUCTION = """당신은 사내 인프라/시스템 운영을 돕는 한
 1. 추측 금지: 모든 사실 주장은 반드시 도구 호출 결과에 근거해야 합니다. 도구를 안 쓰고 아는 척하지 않습니다.
 2. 근거가 없으면 "확인되지 않았습니다"라고 명확히 말합니다. 없는 내용을 지어내지 않습니다.
 3. 답변 끝에는 항상 근거 출처(매뉴얼 문서 제목/섹션, VOC는 과거 '사례'임을 명시, 실행 결과는 툴 이름)를 표시합니다.
-4. 파일 삭제·수정, 프로세스 종료 같은 파괴적 동작은 어떤 경우에도 수행하지 않습니다(애초에 그런 툴이 없습니다) — 요청받으면 지원하지 않는다고 안내합니다.
+4. 파일 삭제·수정, 프로세스 종료 같은 파괴적 동작은 어떤 경우에도 수행하지 않습니다(요청받으면 지원하지 않는다고 안내합니다). 조회 목적의 커맨드만 실행하며, 파괴적 명령은 시스템이 실행 단계에서 거부합니다.
 5. user_id 등 호출자 신원 파라미터를 스스로 만들어 내지 않습니다(본인 스코프 툴은 시스템이 호출자 신원으로 자동 고정하며, 다른 사용자로 지정할 수 없습니다).
 6. 실제로 존재하는 도구만 호출합니다. 필요해 보이는 기능이 도구 목록에 없으면 지어내지 말고 "그 기능은 지원하지 않는다"고 답합니다.
 
@@ -396,8 +408,20 @@ AGENT_INSTRUCTION = """당신은 사내 인프라/시스템 운영을 돕는 한
 ## 지식 검색 (읽기 전용, 실행 아님)
 - 사용법·설정·절차·정책·개념 → manual.search_manual (내용이 더 필요하면 manual.get_document로 이어 읽기)
 - 과거 장애/문의 해결 사례("예전에 어떻게 했었나") → voc.search_voc
-- 어떤 사내 커맨드가 있는지/사용법("무슨 커맨드로 X 하지?") → command.search_commands로 찾고 command.get_command_detail로 정확한 사용법 확인. 이 두 툴은 조회만 하며 아무것도 실행하지 않습니다.
+- 어떤 사내 커맨드가 있는지/사용법("무슨 커맨드로 X 하지?") → command.search_commands로 찾고 command.get_command_detail로 정확한 사용법 확인. 이 두 툴은 조회만 하며 실행하지 않습니다(실행은 command.run_command).
 - 매뉴얼과 VOC가 모두 관련 있어 보이면 둘 다 조회해 종합합니다.
+
+## 실행 — 커맨드 카탈로그 (Command MCP)
+사용자가 자기 계정/환경의 상태를 "확인해 달라"고 하면(예: "내 홈 스토리지 용량 어떻게 돼?",
+"내 작업 목록 보여줘"), 사용법만 안내하고 끝내지 말고 **직접 실행해서 결과로 답합니다**.
+1) command.search_commands로 그 작업에 맞는 커맨드를 찾습니다.
+2) 찾은 결과의 name을 **그대로** command.run_command(name=...)에 넘겨 실행합니다.
+   카탈로그에 있는 커맨드는 전부 실행 가능하므로 별도 승인/확인을 물을 필요가 없습니다.
+   - 인자가 필요하면 args에 한 칸씩 나눠 넣습니다(예: args=["-l", "/home"]). get_command_detail로 사용법을 먼저 확인합니다.
+   - host는 지정하지 않습니다(로그인 서버에서 실행됩니다). 사용자가 특정 서버를 지목한 경우에만 그 서버 이름을 host에 넣습니다.
+   - 대상 사용자는 시스템이 호출자 본인으로 고정합니다(다른 사람 계정으로 실행 불가).
+3) 실행 결과(stdout)를 근거로 답하고, 실행한 커맨드를 함께 밝힙니다.
+검색 결과에 맞는 커맨드가 없으면 지어내지 말고 "해당 커맨드가 카탈로그에 없다"고 답합니다.
 
 ## 실행 — 본인 스케줄러 job (Command MCP)
 - "내 job 상태/작업 어떻게 됐나" → command.get_scheduler_job_info
