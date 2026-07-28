@@ -1,34 +1,18 @@
 # 지금 할 일
 
-이번 변경 요약: **커맨드 카탈로그(매뉴얼 엑셀로 올린 커맨드)를 에이전트가 직접 실행**할 수 있게
-`command.run_command` 툴을 추가했습니다. Command MCP는 화이트리스트를 두지 않고(카탈로그 등록
-자체가 승인), **화이트리스트 관리는 System MCP에서만** 합니다.
-
-## 지금 당장 (배포 호스트 202.20.183.30에서 순서대로)
-
-### 1) 코드 받기 + 마이그레이션 + 재시작
+## 1. 배포 (202.20.183.30)
 
 ```bash
 cd /home/yrc/AI-Infra-Assistant
-git fetch origin main && git pull origin main
-git log -1 --oneline
-
+git pull origin main
 docker compose -f docker-compose.dev.yml run --rm db-init
+docker compose -f docker-compose.dev.yml restart command-mcp agent-server admin-console system-mcp
 ```
-`db-init` 출력에 `command_db: applied v5`(카탈로그 실행 커맨드 열)가 보여야 합니다.
-**system_db v6가 아직 안 찍혔다면 그것도 이번에 적용됩니다** — 3번의 "disabled by admin" 문제가
-여기서 같이 풀립니다(에러가 나면 전체 출력을 보내주세요).
+`db-init` 출력에 `command_db: applied v5`, `system_db: applied v6` 확인. 에러 나면 전체 출력 전달.
 
-```bash
-docker compose -f docker-compose.dev.yml restart command-mcp admin-console agent-server system-mcp
-```
-(새 툴이 에이전트에 노출되려면 command-mcp와 agent-server를 반드시 재시작해야 합니다.)
+## 2. 에이전트 지시문 교체
 
-### 2) 에이전트 지시문 교체 (콘솔에서 직접 붙여넣기)
-
-`agent_system_instruction`은 기존 DB 값을 덮어쓰지 않는 시드라서 **자동 반영되지 않습니다**.
-관리자 콘솔 → 설정 → `agent_system_instruction`에 아래 전문을 붙여넣고 저장한 뒤,
-`agent-server`를 재시작하세요(hot_reload=false).
+관리자 콘솔 → 설정 → `agent_system_instruction`에 아래 전문 붙여넣고 저장 → `agent-server` 재시작.
 
 <!-- AGENT_INSTRUCTION_BEGIN -->
 ```
@@ -89,51 +73,24 @@ docker compose -f docker-compose.dev.yml restart command-mcp admin-console agent
 ```
 <!-- AGENT_INSTRUCTION_END -->
 
-### 3) System MCP "disabled by admin" 재확인
+## 3. System MCP 확인
 
-1번의 `db-init`을 돌린 뒤, 관리자 콘솔 System MCP 탭에서 `disk_free`를 껐다 켜고 저장 →
-"System MCP 재시작" → 다시 질문했을 때 실행 로그에 `success`로 찍히는지 확인하세요.
-(원인 추정: `host_mode` 컬럼이 없는 상태에서 콘솔의 PATCH가 서버 에러로 실패해 토글이 DB에
-반영되지 않았음. 그래도 `blocked`면
-`docker compose -f docker-compose.dev.yml logs db-init --tail 80`을 보내주세요.)
+콘솔 System MCP 탭에서 `disk_free` 껐다 켜고 저장 → "System MCP 재시작" → 질문 후 실행 로그가
+`success`인지 확인. 여전히 `blocked`면
+`docker compose -f docker-compose.dev.yml logs db-init --tail 80` 전달.
 
-### 4) 동작 확인
+## 4. 동작 확인
 
-Open WebUI에서 일반 사용자 계정으로:
+Open WebUI 일반 사용자 계정으로 "내 홈 스토리지 용량 어떻게 돼?" → 결과가 나오는지,
+콘솔 실행 로그에 `run_command` 행이 남는지 확인. 카탈로그에 `myquota`가 없으면 5번 먼저.
 
-- "내 홈 스토리지 용량 어떻게 돼?"
-  → 에이전트가 `search_commands`로 `myquota`를 찾고 → `run_command(name="myquota")`로
-  로그인 서버(202.20.185.100)에서 **본인 계정 권한으로** 실행 → 결과로 답해야 합니다.
-- 관리자 콘솔 → System MCP 탭 → 실행 로그에 `run_command` 행이 남는지 확인
-  (params에 실행한 커맨드 이름/인자, requested_by에 사용자 id).
+## 5. 커맨드 탭 "실행 커맨드" (필요할 때만)
 
-카탈로그에 `myquota`가 없다면 커맨드 탭에서 먼저 등록하세요(아래 5번).
+- 이름이 곧 실행할 커맨드면 비워둔다(이름을 그대로 실행).
+- 이름이 설명형이거나 인자가 고정으로 필요할 때만 입력: `myquota`, `phd info -u {user_id}`.
+- 엑셀 업로드에도 "실행 커맨드" 열 매핑 추가됨(매핑 안 해도 기존 값 유지).
+- 파이프/리다이렉션(`|`, `>`)은 실행 불가.
+- 파괴적 명령(`rm`, `dd`, `chmod` 등)은 차단됨 — 풀려면 설정 `catalog_exec_deny_commands`를 비운다.
 
-### 5) 카탈로그에 "실행 커맨드" 채우기 (필요할 때만)
-
-- **이름 열이 곧 실행할 커맨드면 아무것도 안 해도 됩니다** — `exec_command`가 비어 있으면
-  커맨드 이름을 그대로 실행합니다. 기존에 올린 카탈로그도 그대로 실행됩니다.
-- 이름이 한글 설명형이거나(`홈 용량 확인`) 인자가 고정으로 필요하면, 커맨드 탭의
-  **"실행 커맨드"** 칸에 실제 커맨드를 넣으세요(예: `myquota`, `phd info -u {user_id}`).
-  `{user_id}`는 실행 시 질문한 사용자 계정으로 치환됩니다.
-- 엑셀 일괄 업로드에도 **"실행 커맨드(exec_command)"** 열 매핑이 추가됐습니다. 매핑하지 않고
-  다시 업로드해도 기존에 채워둔 실행 커맨드는 지워지지 않습니다.
-
-## 알아둘 점 (설계 결정 사항)
-
-- **Command MCP에는 실행 허용 화이트리스트가 없습니다.** 카탈로그에 있으면 전부 실행됩니다.
-  대신 이 안전장치는 그대로 유지됩니다:
-  1. 항상 **호출자 본인 계정으로 강등** 실행(`ssh root → su - <user_id>`). root 실행 경로 없음.
-  2. **셸을 쓰지 않습니다**(argv 그대로 실행) → 인자에 셸 메타문자가 있어도 인젝션 불가.
-     그래서 파이프/리다이렉션(`|`, `>`)이 들어간 커맨드는 등록해도 실행되지 않고 에러로 안내됩니다.
-  3. `/etc/hosts`에 등록된 서버로만 접속 가능, 타임아웃·출력 상한 적용.
-  4. **파괴적 기본 명령은 실행 단계에서 거부**됩니다(`rm`, `dd`, `mkfs`, `chmod`, `kill`, `sudo` 등).
-     설정 탭의 `catalog_exec_deny_commands`에서 목록을 조정할 수 있고, **비우면 제한이 사라집니다**.
-     엑셀 대량 업로드본은 사람이 한 줄씩 검토하지 않았을 수 있어 기본값 유지를 권장합니다.
-  5. 모든 실행은 `job_logs`에 남습니다(누가/무엇을/결과).
-- **System MCP는 기존대로** 항목별 on/off·필요 역할·분류(로그인 서버 실행 / 해당 서버 실행)를
-  관리자 콘솔에서 관리합니다.
-- `run_command`는 `host`를 지정하지 않으면 로그인 서버에서 실행합니다. 사용자가 특정 서버를
-  지목한 경우에만 에이전트가 그 서버 이름을 넣습니다(지시문에 명시).
-
-완료된 내역/원인 분석은 `docs/RUN-LOG.md` 참고.
+---
+변경 내역은 `docs/RUN-LOG.md` 참고.
