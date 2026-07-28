@@ -499,6 +499,22 @@ curl은 정상(`"AI Infra Assistant"` 응답), open-webui 로그엔 `host.docker
 **해결 확인**: Open WebUI Connections에 OpenAI API 키를 등록 안 해서(연결 자체는 있었지만 키
 필드가 비어 있었던 듯) 모델 목록이 안 뜬 것 — 키를 등록하니 "AI Infra Assistant" 정상 표시됨.
 
+## 42. sqlite3 CLI가 open-webui 이미지에 없음 (완료)
+
+이메일 변경 커맨드로 안내한 `sqlite3` 바이너리가 이미지에 없어서 실패
+(`exec: "sqlite3": executable file not found in $PATH`). 이미 들어있는 python3 표준 라이브러리
+`sqlite3` 모듈로 대체(`docs/NEXT-STEPS.md` 1번) — 별도 패키지 설치 없이 동일 작업 가능.
+
+## 43. API 키 등록 후에도 admin만 모델이 보이고 채팅 시 "Model not found", 일반 사용자는 모델 자체가 안 보임 (조치 중)
+
+API 키를 Open WebUI 관리자 패널(Admin Panel → Settings → Connections, 인스턴스 전체 적용)이
+아니라 개인 계정 설정(우측 상단 프로필 → 설정 → 연결, "Direct Connections" — 그 계정에서만
+보이는 개인용 연결)에 등록했을 가능성이 높다고 보고 안내함. "admin이 키 하나만 등록하면 전체
+사용자에게 default로 떠야 한다"는 요구사항과도 정확히 일치하는 설명(개인 연결은 원천적으로
+그 계정에만 적용되는 게 Open WebUI의 정상 동작이라 그쪽에 등록했다면 여러 사용자에게 안 보이는
+게 당연함). `docs/NEXT-STEPS.md` 2번에 관리자 패널 경로로 다시 등록하는 절차 안내 — 그래도
+안 되면 브라우저 콘솔 로그 요청함.
+
 ## 34. 에이전트가 "슈퍼컴" 관련 질문에 호스트를 안 밝히면 되묻기만 함 (커맨드 안내함)
 
 `disk_free(user_id, host)`가 host를 필수로 받는데, LLM이 실제 로그인 서버 이름을 모르니
