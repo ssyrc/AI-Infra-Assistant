@@ -347,6 +347,10 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
         ("catalog_exec_deny_commands", DEFAULT_DENY_CSV,
          "커맨드 카탈로그 실행 시 거부할 기본 명령(콤마 구분). 비우면 제한 없이 전부 실행됨", True, False, False),
 
+        # 도구 호출/결과를 답변에 접히는 블록으로 표시(사용자가 "생각 과정 보이게" 요청).
+        ("show_tool_activity", "true",
+         "에이전트가 호출한 도구와 그 결과를 답변에 접히는 블록으로 표시(true/false)", True, False, False),
+
         # 장기 메모리(사용자별)
         ("memory_enabled", "true", "장기 메모리 사용 여부(true/false)", True, False, False),
         ("memory_recent_turns", "8", "프롬프트에 주입할 최근 대화 턴 수", True, False, False),

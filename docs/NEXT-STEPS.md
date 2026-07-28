@@ -1,8 +1,8 @@
 # 지금 할 일
 
-**[WSL]** 인터넷 되는 로컬 · **[서버]** 202.20.183.30 · **[웹]** 콘솔 `http://202.20.183.30:8501`
+**[WSL]** 로컬 · **[서버]** 202.20.183.30 · **[웹]** 콘솔 `http://202.20.183.30:8501`
 
-## 1. [WSL] — 답변 중복 수정이 들어있다. 이걸 안 하면 계속 두 번씩 나온다.
+## 1. [WSL]
 
 ```bash
 git -C /home/yrc/AI-Infra-Assistant fetch origin main
@@ -15,48 +15,22 @@ rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
+docker compose -f docker-compose.dev.yml run --rm db-init
 bash scripts/restart-mounted.sh
 ```
 
-## 3. [웹] Open WebUI에서 아무거나 질문 — 답변이 한 번만 나오는지 확인
+## 3. [웹] 설정 탭 — 이 값들 확인/수정 후 저장
 
-두 번 나오면 [서버]에서 아래 실행하고 출력 전달:
-```bash
-docker compose -f docker-compose.dev.yml logs agent-server --tail 30
-docker compose -f docker-compose.dev.yml ps agent-server
-```
+| key | 값 |
+|---|---|
+| `rerank_provider` | `vllm` |
+| `rerank_base_url` | `http://75.23.32.41:8020/v1` |
+| `vllm_embed_base_url` | `http://75.23.32.41:8010/v1` |
+| `vllm_embed_model` | `bge-m3` |
 
-## 4. [웹] myquota 실패 원인 — 실행 로그 원문 전달
+(curl 결과로 확정됨: 리랭커는 vLLM 형식이고 정상 동작. `tei`로 돼 있으면 리랭킹이 꺼진 채로 돈다.)
 
-콘솔 → **System MCP** 탭 → 실행 로그에서 `run_command` 행을 찾아
-**result 칸 전체**를 그대로 복사해 전달 (stderr에 진짜 원인이 들어 있다).
-
-그리고 [서버]에서 같은 커맨드를 직접 실행한 결과도 함께:
-```bash
-ssh root@202.20.185.100 "su - yr9.choi -c myquota"
-```
-직접 실행도 실패하면 우리 코드 문제가 아니다(계정/환경). 성공하면 우리 실행 경로 문제다.
-
-## 5. [서버] 리랭커 종류 확정 (RAG 오답 원인 후보)
-
-```bash
-curl -s -X POST http://75.23.32.41:8020/v1/rerank -H 'Content-Type: application/json' \
-  -d '{"model":"bge-reranker-v2-m3","query":"gpu","documents":["gpu 노드","cpu 노드"]}'
-curl -s -X POST http://75.23.32.41:8020/rerank -H 'Content-Type: application/json' \
-  -d '{"query":"gpu","texts":["gpu 노드","cpu 노드"]}'
-```
-- 첫 번째가 성공 → 설정: `rerank_provider=vllm`, `rerank_base_url=http://75.23.32.41:8020/v1`
-- 두 번째가 성공 → 설정: `rerank_provider=tei`, `rerank_base_url=http://75.23.32.41:8020`
-
-## 6. [웹] 매뉴얼 탭 — 검색 테스트
-
-`gpu 노드 접근하려면` 입력 후 검색. 화면 위 3줄(검색 방식 / 임베딩 / 리랭커) 그대로 전달.
-
-## 7. [웹] 설정 탭 — `agent_system_instruction` 아래 전문으로 교체 후 저장 → [서버] 재시작
-
-```bash
-docker compose -f docker-compose.dev.yml restart agent-server
-```
+## 4. [웹] 설정 탭 — `agent_system_instruction` 아래 전문으로 교체 후 저장
 
 ```
 당신은 사내 인프라/시스템 운영을 돕는 한국어 어시스턴트(AI Infra Assistant)입니다.
@@ -107,5 +81,26 @@ docker compose -f docker-compose.dev.yml restart agent-server
 - 절차 안내가 필요할 때만 번호 목록을 씁니다.
 ```
 
+## 5. [서버]
+
+```bash
+docker compose -f docker-compose.dev.yml restart agent-server
+```
+
+## 6. [웹] 매뉴얼 탭 — 검색 테스트
+
+`gpu 노드 접근하려면` 입력 → 검색. 위 3줄(검색 방식 / 임베딩 / 리랭커) 확인.
+- 리랭커가 빨간색이면 3번 설정이 아직 안 맞는 것.
+- "임베딩 없는 청크" 경고가 있으면 **"현재 설정으로 다시 임베딩"** 클릭.
+
+## 7. [웹] Open WebUI `http://202.20.183.30:8502` — yr9.choi 계정으로 확인
+
+"내 홈스토리지 용량 어떻게 돼?" 질문 후:
+- 답변이 **한 번만** 나오는지
+- **"도구 호출 · run_command"** 접힌 블록이 보이는지 → 펼쳐서 **도구 결과 블록의 내용을 그대로 전달**
+  (여기에 커맨드가 왜 실패했는지 stderr 원문이 들어 있다)
+
+도구 호출 블록이 아예 안 보이면 에이전트가 툴을 호출조차 안 한 것이니 그렇게 알려달라.
+
 ---
-변경 내역은 `docs/RUN-LOG.md` 참고.
+`docs/RUN-LOG.md` 기동·배포 절차 · `docs/HISTORY.md` 원인분석 이력

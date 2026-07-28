@@ -213,6 +213,25 @@ def _event_text(event) -> str:
     return "".join(p.text or "" for p in event.content.parts)
 
 
+def _tool_activity_md(event) -> str:
+    """도구 호출/결과를 Open WebUI에서 '접히는 블록'으로 보여준다.
+
+    사용자가 답변 본문에 진행 상황이 섞이는 건 싫어하지만 무슨 도구가 어떤 결과를 냈는지는
+    보고 싶어 한다. LLM에게 말로 설명시키지 않고(지시문은 중계 금지), 시스템이 실제 이벤트를
+    <details>로 감싸 내보낸다 - 평소엔 접혀 있고 눌러야 펼쳐진다.
+    """
+    out = []
+    for fc in (event.get_function_calls() or []):
+        args = json.dumps(fc.args or {}, ensure_ascii=False, default=str)[:400]
+        out.append(f"\n<details>\n<summary>도구 호출 · {fc.name}</summary>\n\n"
+                   f"```json\n{args}\n```\n\n</details>\n")
+    for fr in (event.get_function_responses() or []):
+        resp = json.dumps(fr.response, ensure_ascii=False, default=str)[:1200]
+        out.append(f"\n<details>\n<summary>도구 결과 · {fr.name}</summary>\n\n"
+                   f"```json\n{resp}\n```\n\n</details>\n")
+    return "".join(out)
+
+
 class _StreamDedup:
     """ADK 스트리밍 이벤트를 '사용자에게 새로 보낼 증가분'으로 바꾼다.
 
@@ -303,6 +322,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     # 대화 이력은 이미 messages에 있으므로 최근 턴은 주입하지 않고, 증류된 장기기억만 주입한다.
     conv = chat_id or _auto_conv(user_id)
     mem_enabled = _mem_on(await get_config("memory_enabled", "true"))
+    show_tools = _mem_on(await get_config("show_tool_activity", "true"))
     extra_instruction = await _longterm_memory_block(user_id, conv, last_text) if mem_enabled else None
 
     # 요청 단위로 에이전트를 만들어 호출자 헤더를 MCP에 전달한다.
@@ -347,6 +367,10 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                     if await request.is_disconnected():
                         print("[agent] 클라이언트 연결 종료, 스트리밍 중단")
                         break
+                    if show_tools:
+                        activity = _tool_activity_md(event)
+                        if activity:
+                            yield _sse(request_id, model_name, activity)
                     delta = dedup.feed(event)
                     if delta:
                         yield _sse(request_id, model_name, delta)
@@ -477,6 +501,7 @@ async def agent_query(body: AgentQueryIn, request: Request):
     model_name = await _display_model_name()
 
     mem_enabled = body.use_memory and _mem_on(await get_config("memory_enabled", "true"))
+    show_tools = _mem_on(await get_config("show_tool_activity", "true"))
     # conversation_id가 없으면 시간(일 단위)으로 자동 부여 -> 같은 날 같은 사용자는 이어짐.
     conv = (body.conversation_id or "").strip() or (_auto_conv(user_id) if mem_enabled else None)
     history, extra_instruction = ([], None)
@@ -518,6 +543,10 @@ async def agent_query(body: AgentQueryIn, request: Request):
                                                     run_config=STREAMING_RUN_CONFIG):
                     if await request.is_disconnected():
                         break
+                    if show_tools:
+                        activity = _tool_activity_md(event)
+                        if activity:
+                            yield _sse(request_id, model_name, activity)
                     delta = dedup.feed(event)
                     if delta:
                         yield _sse(request_id, model_name, delta)
