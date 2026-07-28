@@ -1,29 +1,15 @@
 # 커맨드 실행 flow
   - 202.20.185.100 서버 /etc/hosts 에 모든 서버 등록되어 있음 (ex) 202.20.185.100  sec1 (로그인 서버로 자동 routing하는 gate 서버)
   - agent는 root로 실행되고 있음
-  - 커맨드를 실행해야 하면, ssh 202.20.185.100 실행 (root 권한)
+  - 아래 2번 분류의 커맨드를 실행해야 하면, ssh 202.20.185.100 실행 (root 권한)
+  - 아래 1번 분류의 커맨드를 실행해야 하면, ssh '특정 서버' (/etc/hosts 에서 grep 해서 접속)
   - 이후 ***user id로 권한 변경*** (제일 중요!!!!, 무슨 일이 있어도 root권한으로 실행 하면 안됨), 커맨드 실행, 결과 return
 
-# ssh 키 등록 완료!
-[root@24-gp19 ~]# ssh-copy-id -i ~/.ssh/id_ed25519.pub root@202.20.185.100
-/usr/bin/ssh-copy-id: INFO: Source of key(s) to be installed: "/root/.ssh/id_ed25519.pub"
-/usr/bin/ssh-copy-id: INFO: attempting to log in with the new key(s), to filter out any that are already installed
-/usr/bin/ssh-copy-id: INFO: 1 key(s) remain to be installed -- if you are prompted now it is to install the new keys
-
-Number of key(s) added: 1
-
-Now try logging into the machine, with:   "ssh 'root@202.20.185.100'"
-and check to make sure that only the key(s) you wanted were added.
-
-[root@24-gp19 ~]#
-[root@24-gp19 ~]#
-[root@24-gp19 ~]# ssh -i /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/secrets/id_ed25519 root@202.20.185.100 whoami
-root
+# 커맨드 분류
+1. 특정 '서버'에서 실행되어야 하는 것: gpu status, disk, system info 등 해당하는 서버의 특징을 반환해야 하는 command
+2. 특정 '서버'에서 실행되는 것이 아닌, 시스템 점검 및 인프라 활용에 관련된 질문: list_dir, find_files, read_file_head, 그리고 Command MCP 에 등록된 것들
 
 
-
-# 관리자 콘솔
- - 설정 탭에 이 아래 걸 설정하려고 하는데 없어. 그리고, login07 로 직접 가지 말고 routing 서버인 202.20.185.100 으로 ssh 해야해. 이후 user id 로 권한 변경해서 커맨드 실행해야해. 
-
-설정 탭 — 로그인 서버 이름 반영 + 에이전트가 안 되묻게 지시문 추가
-scheduler_login_host = login07 저장 (Command MCP의 job 조회용, hot_reload라 재시작 불필요).
+# MCP 역할
+- Command MCP 는 커맨드 2번 분류만 넣을거야. 그런데 설명보면 이렇게 되어 있네. '실행은 system mcp 담당'. command mcp는 실행하는 역할은 수행 안해?
+- system mcp 에 등록하는 건 커맨드 분류 상관 없이 넣을거야. 이걸 '필요 역할' 카테고리처럼, '분류' 로 지정할 수 있게 하자. '로그인 서버 실행', '해당 서버 실행' 으로. 관리자용 콘솔 웹에 system mcp 탭을 변경해줘.
