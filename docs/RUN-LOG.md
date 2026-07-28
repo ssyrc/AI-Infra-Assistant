@@ -496,6 +496,9 @@ curl은 정상(`"AI Infra Assistant"` 응답), open-webui 로그엔 `host.docker
 `docs/NEXT-STEPS.md` 1번에 `env | grep OPENAI` 확인 커맨드 + Admin Panel Connections/Models
 수동 확인·추가 절차 정리함.
 
+**해결 확인**: Open WebUI Connections에 OpenAI API 키를 등록 안 해서(연결 자체는 있었지만 키
+필드가 비어 있었던 듯) 모델 목록이 안 뜬 것 — 키를 등록하니 "AI Infra Assistant" 정상 표시됨.
+
 ## 34. 에이전트가 "슈퍼컴" 관련 질문에 호스트를 안 밝히면 되묻기만 함 (커맨드 안내함)
 
 `disk_free(user_id, host)`가 host를 필수로 받는데, LLM이 실제 로그인 서버 이름을 모르니
