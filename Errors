@@ -17,4 +17,20 @@
 
 # openwebui
 - 관리자 이메일 주소 변경 법 알려줘
-- 관리자 계정, 사용자 계정에서 AI Infra Assistant가 안보여. 관리자 콘솔 설정 탭에는 url 잘 등록되어 있어.
+- 관리자 계정, 사용자 계정에서 AI Infra Assistant가 안보여. curl 은 잘되는데 에러 떠있어
+
+
+[root@24-gp19 AI-Infra-Assistant]# curl http://202.20.183.30:8500/v1/models
+{"object":"list","data":[{"id":"AI Infra Assistant","object":"model"}]}
+
+[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml logs open-webui --tail 80
+open-webui-1  | 2026-07-28 07:21:30.484 | ERROR    | open_webui.routers.ollama:send_get_request:98 - Connection error: Cannot connect to host host.docker.internal:11434 ssl:default [Temporary failure in name resolution] - {}
+open-webui-1  | 2026-07-28 07:21:30.487 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 75.11.29.7:47348 - "GET /api/models HTTP/1.1" 200 - {}
+open-webui-1  | 2026-07-28 07:21:30.544 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 75.11.29.7:47348 - "GET /api/v1/configs/banners HTTP/1.1" 200 - {}
+open-webui-1  | 2026-07-28 07:21:30.605 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 75.11.29.7:47348 - "GET /api/v1/tools/ HTTP/1.1" 200 - {}
+open-webui-1  | 2026-07-28 07:21:30.838 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 75.11.29.7:38012 - "GET /api/v1/users/user/settings HTTP/1.1" 200 - {}
+open-webui-1  | 2026-07-28 07:21:37.303 | ERROR    | open_webui.routers.ollama:send_get_request:98 - Connection error: Cannot connect to host host.docker.internal:11434 ssl:default [Temporary failure in name resolution] - {}
+open-webui-1  | 2026-07-28 07:21:37.304 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 75.11.29.7:47314 - "GET /ollama/api/version HTTP/1.1" 500 - {}
+open-webui-1  | 2026-07-28 07:21:38.816 | ERROR    | open_webui.routers.ollama:send_get_request:98 - Connection error: Cannot connect to host host.docker.internal:11434 ssl:default [Temporary failure in name resolution] - {}
+open-webui-1  | 2026-07-28 07:21:38.817 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 75.11.29.7:47348 - "GET /ollama/api/version HTTP/1.1" 500 - {}
+
