@@ -523,6 +523,15 @@ admin_console의 "Open WebUI 연동" 설정(`openwebui_admin_api_key`)에 넣은
 동일) — 두 화면이 이름이 비슷해 혼동한 것으로 보임. `docs/NEXT-STEPS.md`에 두 기능을 표로
 명확히 구분해서 정리함.
 
+## 44-보충. Connections 등록 후에도 일반 사용자에게 모델 자체가 안 보임 (원인 확정, 조치 안내)
+
+Connections(#41/#43)는 정상 등록했는데도 "user" 계정에 모델이 전혀 안 보이고 default도 없음.
+이건 Connections와 별개로 **Open WebUI 각 모델 항목의 "공개 범위(Visibility)"** 설정 때문 —
+Open WebUI 커뮤니티에 다수 보고된 알려진 동작으로, 모델을 admin/특정 그룹에만 보이게 기본
+설정해두고 명시적으로 "Public"으로 바꿔야 일반 사용자에게 보인다. Admin Panel → Settings →
+Models에서 해당 모델을 Public으로 바꾸도록 안내함(`docs/NEXT-STEPS.md` 1번).
+Sources: https://github.com/open-webui/open-webui/discussions/9058 , https://github.com/open-webui/open-webui/discussions/4468 , https://docs.openwebui.com/features/authentication-access/rbac/permissions/
+
 ## 44. Open WebUI 데이터(계정 DB) 초기화 요청 (완료, 커맨드 제공)
 
 이메일 DB를 이상하게 만든 뒤 아예 초기화 요청. `open_webui_dev_data` 명명 볼륨만 지우면
