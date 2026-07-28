@@ -284,6 +284,23 @@ LLM의 실사용 메모리(약 73GiB)가 `--gpu-memory-utilization 0.85`의 이�
 - 리랭커(bge-reranker-v2-m3)는 이미 충분히 작아 계획 변경 없음.
 - 커맨드는 `docs/NEXT-STEPS.md` 1번 참고.
 
+## 22. LLM/임베딩(bge-m3)/리랭커 전부 기동 확인 (완료)
+
+`curl http://75.23.32.41:8000|8010|8020/v1/models` 전부 정상 응답 확인. hgpu4041 배포 완료.
+
+## 23. 설정 탭 재구성 + 모델명 hot-reload 버그 수정 + Arena 모델 제거 (완료)
+
+- 설정 탭: LLM/임베딩/리랭커 url+model+파라미터가 그룹별로 흩어져 있던 걸 각각 하나의 섹션으로
+  재구성(`admin_console/frontend/index.html`의 `grouped` 정의).
+- agent-server 버그: `/v1/models`·`/health`·채팅 응답의 `"model"` 필드가 컨테이너 기동 시점에
+  고정된 `state["model_name"]`만 참조해서, `vllm_llm_model`이 hot_reload=true인데도 설정 탭에서
+  바꾼 값이 Open WebUI 모델 목록에 반영 안 되는 버그였음(실제 채팅 라우팅은 `build_agent()`가
+  매 요청 새로 설정을 읽어서 원래도 정상 동작 — 표시 이름만 stale했음). 매 요청
+  `get_config()`로 새로 읽는 `_display_model_name()` 헬퍼로 교체.
+- 같은 김에 mock-vllm이 아닌 실제 백엔드면 Open WebUI에 노출되는 모델명을 "AI Infra Assistant"로
+  브랜딩(mock일 때는 기존처럼 실제 모델명 노출, 개발 중 구분 가능).
+- open-webui에 `ENABLE_EVALUATION_ARENA_MODELS=false` 추가해 안 쓰는 Arena 비교 모델 제거.
+
 ## 20. 매뉴얼 엑셀 열 선택 UI 이해 어려움 (완료)
 
 "내용/제목/페이지 체크박스가 뭔지 모르겠다"는 피드백에 번호 매긴 단계별 설명과, 현재 선택으로
