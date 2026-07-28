@@ -1,9 +1,12 @@
-# llm, embed, reranker
-llm 띄우고 나니까 embed랑 reranker 가 안 떠. CUDA busy 에러 떠. 모델 사이즈가 너무 큰가?
-embed, reranker 띄우니까 똑같아. CUDA busy 에러야.
+# llm, embed, reranker 다 잘 뜸
+[root@24-gp19 AI-Infra-Assistant]# curl http://75.23.32.41:8000/v1/models
+{"object":"list","data":[{"id":"qwen3-235b-a22b","object":"model","created":1785200628,"owned_by":"vllm","root":"/workspace/models/Qwen3-235B-A22B-Instruct-2507-FP8","parent":null,"max_model_len":32768,"permission":[{"id":"modelperm-deb9b2b3aa5e4ff594a54c1717601dfa","object":"model_permission","created":1785200628,"allow_create_engine":false,"allow_sampling":true,"allow_logprobs":true,"allow_search_indices":false,"allow_view":true,"allow_fine_tuning":false,"organization":"*","group":null,"is_blocking":false}]}]}
 
-# embed gpu util 0.08 로 했는데도 에러
-(EngineCore_0 pid=180) torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 48.00 MiB. GPU 0 has a total capacity of 79.21 GiB of which 33.44 MiB is free. Including non-PyTorch memory, this process has 0 bytes memory in use. Of the allocated memory 7.35 GiB is allocated by PyTorch, and 1.41 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[root@24-gp19 AI-Infra-Assistant]# curl http://75.23.32.41:8010/v1/models
+{"object":"list","data":[{"id":"bge-m3","object":"model","created":1785200628,"owned_by":"vllm","root":"/workspace/models/bge-m3","parent":null,"max_model_len":8192,"permission":[{"id":"modelperm-7358fc73ff6740c5968b9770c7e46b9b","object":"model_permission","created":1785200628,"allow_create_engine":false,"allow_sampling":true,"allow_logprobs":true,"allow_search_indices":false,"allow_view":true,"allow_fine_tuning":false,"organization":"*","group":null,"is_blocking":false}]}]}
+
+[root@24-gp19 AI-Infra-Assistant]# curl http://75.23.32.41:8020/v1/models
+{"object":"list","data":[{"id":"bge-reranker-v2-m3","object":"model","created":1785200629,"owned_by":"vllm","root":"/workspace/models/bge-reranker-v2-m3","parent":null,"max_model_len":8192,"permission":[{"id":"modelperm-4e9eb3ac927149558497a82854a92ab4","object":"model_permission","created":1785200629,"allow_create_engine":false,"allow_sampling":true,"allow_logprobs":true,"allow_search_indices":false,"allow_view":true,"allow_fine_tuning":false,"organization":"*","group":null,"is_blocking":false}]}]}[
 
 
 # 관리자 콘솔 변경 필요 사항들
