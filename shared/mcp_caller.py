@@ -50,8 +50,10 @@ class CallerContextMiddleware:
         await self.app(scope, receive, send)
 
 
-def load_overrides_sync(dsn_key: str, state_table: str) -> dict:
-    """기동 시 1회, 대상 DB의 상태 테이블에서 설명/역할 오버라이드를 읽는다.
+def load_overrides_sync(dsn_key: str, state_table: str, extra_columns: tuple[str, ...] = ()) -> dict:
+    """기동 시 1회, 대상 DB의 상태 테이블에서 설명/역할(+extra_columns) 오버라이드를 읽는다.
+    extra_columns는 System MCP의 host_mode처럼 스키마(LLM 노출 파라미터)에 영향을 줘서
+    기동 시에만 반영되면 되는 컬럼을 위한 것 — Command MCP처럼 안 쓰면 기존과 동일하다.
     공용 풀(get_pool)을 쓰면 임시 이벤트루프에 풀이 묶여 런타임에서 못 쓰므로 전용 연결을 쓴다."""
     async def _run() -> dict:
         config_dsn = os.environ.get("CONFIG_DB_DSN")
@@ -65,10 +67,10 @@ def load_overrides_sync(dsn_key: str, state_table: str) -> dict:
             await conn.close()
         if not dsn:
             return {}
+        cols = ", ".join(["tool_name", "description_override", "required_roles", *extra_columns])
         c2 = await asyncpg.connect(dsn)
         try:
-            rows = await c2.fetch(
-                f"SELECT tool_name, description_override, required_roles FROM {state_table}")
+            rows = await c2.fetch(f"SELECT {cols} FROM {state_table}")
         finally:
             await c2.close()
         return {r["tool_name"]: dict(r) for r in rows}
@@ -86,17 +88,22 @@ def tool_description(name: str, entry: dict, overrides: dict) -> str:
     return (ov.get("description_override") or "").strip() or entry["description"]
 
 
-def build_wrapped(name: str, entry: dict, *, is_enabled, required_roles, log_execution):
+def build_wrapped(name: str, entry: dict, *, is_enabled, required_roles, log_execution,
+                  host_mode: str | None = None, login_host=None):
     """화이트리스트 항목에 권한 검사·감사로그·user_id 강제 주입을 덧씌운 async 함수를 만든다.
 
     is_enabled(name, default_bool) -> bool
     required_roles(name, code_default_list) -> list
     log_execution(name, params_dict, status_str, result) -> None
+    host_mode: "login_server"면 host 파라미터를 user_id처럼 LLM 스키마에서 숨기고
+      login_host()가 돌려주는 값으로 강제 주입한다(기동 시 1회 결정 — 스키마에 영향을 주므로).
+    login_host: () -> awaitable[str]. host_mode="login_server"일 때만 필요.
     """
     handler = entry["handler"]
     orig_sig = inspect.signature(handler)
     user_scoped = bool(entry.get("user_scoped", False))
     scope_param = entry.get("scope_param", "user_id")
+    hide_host = host_mode == "login_server" and "host" in orig_sig.parameters
 
     @functools.wraps(handler)
     async def wrapped(*args, **kwargs):
@@ -110,6 +117,9 @@ def build_wrapped(name: str, entry: dict, *, is_enabled, required_roles, log_exe
             # LLM이 위치/키워드로 넣었을 수 있는 값을 무시하고 본인 id로 고정한다.
             args = ()
             kwargs[scope_param] = uid
+
+        if hide_host:
+            kwargs["host"] = await login_host()
 
         try:
             bound = orig_sig.bind(*args, **kwargs)
@@ -140,11 +150,17 @@ def build_wrapped(name: str, entry: dict, *, is_enabled, required_roles, log_exe
             await log_execution(name, params, "error", {"error": str(e)})
             raise
 
-    # user_scoped 주입 파라미터는 LLM 입력 스키마(시그니처+어노테이션)에서 제거한다.
+    # 강제 주입되는 파라미터(user_scoped의 scope_param, login_server 모드의 host)는
+    # LLM 입력 스키마(시그니처+어노테이션)에서 제거한다.
+    hidden_params = set()
     if user_scoped:
-        reduced = [p for pn, p in orig_sig.parameters.items() if pn != scope_param]
+        hidden_params.add(scope_param)
+    if hide_host:
+        hidden_params.add("host")
+    if hidden_params:
+        reduced = [p for pn, p in orig_sig.parameters.items() if pn not in hidden_params]
         wrapped.__signature__ = orig_sig.replace(parameters=reduced)
         wrapped.__annotations__ = {
-            k: v for k, v in getattr(handler, "__annotations__", {}).items() if k != scope_param
+            k: v for k, v in getattr(handler, "__annotations__", {}).items() if k not in hidden_params
         }
     return wrapped

@@ -14,6 +14,7 @@ import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../shared"))
 from db import get_pool  # noqa: E402
+from config_store import get_config  # noqa: E402
 from mcp_caller import (  # noqa: E402
     get_caller, CallerContextMiddleware, load_overrides_sync, tool_description, build_wrapped,
 )
@@ -26,11 +27,24 @@ mcp = FastMCP("system-mcp", stateless_http=True, host="0.0.0.0")
 
 _DSN = "system_db_dsn"
 _STATE = "system_whitelist_state"
-_OVERRIDES = load_overrides_sync(_DSN, _STATE)
+# host_mode는 required_roles/enabled와 달리 LLM 스키마(host 파라미터 노출 여부)에 영향을 줘서
+# 기동 시 1회만 반영한다(설명 오버라이드와 동일한 제약 — 변경 후 System MCP 재시작 필요).
+_OVERRIDES = load_overrides_sync(_DSN, _STATE, extra_columns=("host_mode",))
 
 # 코드 내장 화이트리스트 + 관리자 콘솔에서 등록한 커맨드(system_custom_commands)를 병합한다.
 # 콘솔 등록 커맨드도 기동 시 1회만 반영된다(추가/수정 후 System MCP 재시작 필요).
 WHITELIST = {**_CODE_WHITELIST, **load_custom_whitelist_sync(_DSN)}
+
+# 코드 내장 항목의 host_mode는 관리자 콘솔에서 바꾼 값(system_whitelist_state)이 있으면 그걸 따른다.
+# 커스텀 커맨드는 자기 테이블(system_custom_commands)의 host_mode를 이미 갖고 있어 그대로 둔다.
+for _name in _CODE_WHITELIST:
+    _ov = _OVERRIDES.get(_name) or {}
+    if _ov.get("host_mode"):
+        WHITELIST[_name] = {**WHITELIST[_name], "host_mode": _ov["host_mode"]}
+
+
+async def _login_host() -> str:
+    return await get_config("scheduler_login_host", "login05")
 
 
 async def _log_execution(tool_name: str, params: dict, status: str, result):
@@ -77,7 +91,9 @@ async def _required_roles(tool_name: str, code_default: list) -> list:
 for _name, _entry in WHITELIST.items():
     mcp.add_tool(
         build_wrapped(_name, _entry, is_enabled=_is_enabled,
-                      required_roles=_required_roles, log_execution=_log_execution),
+                      required_roles=_required_roles, log_execution=_log_execution,
+                      host_mode=_entry.get("host_mode", "target_server"),
+                      login_host=_login_host),
         name=_name,
         description=tool_description(_name, _entry, _OVERRIDES),
     )

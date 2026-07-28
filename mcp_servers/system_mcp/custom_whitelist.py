@@ -52,6 +52,7 @@ def _build_entry(row: dict) -> dict:
         "required_roles": list(row.get("required_roles") or []),
         "user_scoped": True,
         "scope_param": "user_id",
+        "host_mode": row.get("host_mode") or "target_server",
     }
 
 
@@ -71,8 +72,8 @@ def load_custom_whitelist_sync(dsn_key: str = "system_db_dsn") -> dict:
         c2 = await asyncpg.connect(dsn)
         try:
             rows = await c2.fetch(
-                "SELECT tool_name, description, argv_template, params, required_roles, enabled "
-                "FROM system_custom_commands"
+                "SELECT tool_name, description, argv_template, params, required_roles, enabled, "
+                "host_mode FROM system_custom_commands"
             )
         finally:
             await c2.close()
