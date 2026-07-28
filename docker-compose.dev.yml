@@ -79,12 +79,20 @@ services:
     image: ${REGISTRY_DOCKERHUB:-docker.io}/postgres:16-alpine
     environment:
       PGPASSWORD: *pgpass
+    # mock으로 되돌리는 조건이 두 겹이다(둘 다 만족해야 덮어쓴다):
+    #  1) updated_by='bootstrap'  - 관리자가 콘솔에서 한 번이라도 저장한 값은 절대 안 건드린다.
+    #  2) vllm_llm_base_url이 아직 'CHANGE-ME' 자리표시자 - 즉 .env에 실제 vLLM 주소를 넣어
+    #     기동한 환경(실서버)에서는 DB를 새로 만들어도 mock으로 되돌아가지 않는다.
+    # 이 두 번째 조건이 없으면, postgres 볼륨이 새로 만들어진 순간 .env의 실제 주소가
+    # 시드되자마자 mock으로 덮여서 "설정이 통째로 초기화된" 것처럼 보인다(RUN-LOG #48).
+    # redis_url만 예외로 항상 비운다 - dev compose에는 redis 컨테이너 자체가 없다.
     entrypoint: >
       sh -c "psql -h postgres -U agent -d platform_config -c \"
-        UPDATE platform_settings SET value='http://mock-vllm:8000/v1' WHERE key IN ('vllm_llm_base_url','vllm_embed_base_url') AND updated_by='bootstrap';
-        UPDATE platform_settings SET value='mock-llm' WHERE key='vllm_llm_model' AND updated_by='bootstrap';
-        UPDATE platform_settings SET value='mock-embed' WHERE key='vllm_embed_model' AND updated_by='bootstrap';
-        UPDATE platform_settings SET value='' WHERE key IN ('redis_url','rerank_base_url') AND updated_by='bootstrap';\""
+        UPDATE platform_settings SET value='http://mock-vllm:8000/v1' WHERE key IN ('vllm_llm_base_url','vllm_embed_base_url') AND updated_by='bootstrap' AND (SELECT value FROM platform_settings WHERE key='vllm_llm_base_url') LIKE '%CHANGE-ME%';
+        UPDATE platform_settings SET value='mock-llm' WHERE key='vllm_llm_model' AND updated_by='bootstrap' AND (SELECT value FROM platform_settings WHERE key='vllm_llm_base_url') = 'http://mock-vllm:8000/v1';
+        UPDATE platform_settings SET value='mock-embed' WHERE key='vllm_embed_model' AND updated_by='bootstrap' AND (SELECT value FROM platform_settings WHERE key='vllm_llm_base_url') = 'http://mock-vllm:8000/v1';
+        UPDATE platform_settings SET value='' WHERE key='rerank_base_url' AND updated_by='bootstrap' AND (SELECT value FROM platform_settings WHERE key='vllm_llm_base_url') = 'http://mock-vllm:8000/v1';
+        UPDATE platform_settings SET value='' WHERE key='redis_url' AND updated_by='bootstrap';\""
     depends_on:
       db-init: { condition: service_completed_successfully }
     restart: "no"

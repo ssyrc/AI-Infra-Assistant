@@ -2,6 +2,27 @@
 
 이번 변경은 **코드만** 바뀜(requirements 변경 없음) → 이미지 재빌드 불필요.
 
+## 0. 초기화된 설정 복구 (관리자 콘솔 설정 탭)
+
+먼저 실제 서빙 이름 확인:
+```bash
+curl -s http://75.23.32.41:8000/v1/models; curl -s http://75.23.32.41:8010/v1/models; curl -s http://75.23.32.41:8020/v1/models
+```
+콘솔 설정 탭에 입력 후 저장(한 번 저장하면 `dev-config`가 다시 못 덮어씀):
+
+| key | 값 |
+|---|---|
+| `vllm_llm_base_url` | `http://75.23.32.41:8000/v1` |
+| `vllm_llm_model` | `qwen3-235b-a22b` (위 curl 결과의 id) |
+| `vllm_embed_base_url` | `http://75.23.32.41:8010/v1` |
+| `vllm_embed_model` | `bge-m3` (위 curl 결과의 id) |
+| `rerank_provider` | `vllm` |
+| `rerank_base_url` | `http://75.23.32.41:8020/v1` |
+| `rerank_model` | `bge-reranker-v2-m3` |
+| `scheduler_login_host` | `login07` |
+
+저장 후 `agent-server` 재시작. Open WebUI 연결(Connections)·모델 Visibility도 초기화됐으면 재등록.
+
 ## 1. 코드 반영 (WSL → rsync → 폐쇄망)
 
 WSL(인터넷 O):

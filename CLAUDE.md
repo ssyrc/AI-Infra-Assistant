@@ -75,6 +75,30 @@ docker compose -f docker-compose.dev.yml up -d --no-build
   미러에 어떤 버전이 있는지는 `bash scripts/debug-now.sh <pkg>==<ver>`로 확인.
 - 내부 미러도 프록시(`202.20.187.241:3128`) 경유 필수.
 
+## 2-2. 운영 설정값 (관리자 콘솔 설정 탭)
+
+설정이 날아갔을 때 이 값으로 복구한다. 실제 서빙 중인 이름은
+`curl http://75.23.32.41:8000|8010|8020/v1/models`로 확인하는 게 가장 확실하다.
+
+| key | 값 |
+|---|---|
+| `vllm_llm_base_url` | `http://75.23.32.41:8000/v1` |
+| `vllm_llm_model` | `qwen3-235b-a22b` (`--served-model-name`으로 준 이름) |
+| `vllm_embed_base_url` | `http://75.23.32.41:8010/v1` |
+| `vllm_embed_model` | `bge-m3` |
+| `rerank_provider` | `vllm` (vLLM으로 리랭커를 띄웠을 때. TEI면 `tei`) |
+| `rerank_base_url` | `http://75.23.32.41:8020/v1` (`tei`면 `/v1` 없이) |
+| `rerank_model` | `bge-reranker-v2-m3` |
+| `scheduler_login_host` | `login07` |
+| `agent_system_instruction` | `docs/NEXT-STEPS.md`의 전문 |
+
+- **왜 초기화되나**: `docker-compose.dev.yml`의 `dev-config` 서비스가 `up` 할 때마다 vLLM 주소를
+  mock으로 되돌린다. 콘솔에서 저장한 값(`updated_by`가 관리자 계정)과 `.env`에 실제 주소를 넣은
+  환경은 건드리지 않도록 이중 가드를 걸어뒀다(RUN-LOG #28, #48). 그래도 **postgres 볼륨이
+  삭제되면**(`docker compose down -v`) 설정·매뉴얼·VOC가 전부 사라진다 — `down -v`는 쓰지 말 것.
+- 실서버의 `.env`에 `VLLM_LLM_BASE_URL`/`VLLM_EMBED_BASE_URL`/`RERANK_*`/`SCHEDULER_LOGIN_HOST`를
+  실제 값으로 넣어두면 DB를 새로 만들어도 시드 단계에서 올바른 값이 들어간다.
+
 ## 3. 절대 규칙
 
 - **커맨드는 어떤 경우에도 root로 실행하지 않는다.** 모든 실행은

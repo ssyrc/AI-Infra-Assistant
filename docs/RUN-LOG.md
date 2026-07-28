@@ -606,6 +606,30 @@ db에서 찾은 커맨드도 모두 실행 가능해야 한다. 화이트리스�
 주의: 새 툴이 에이전트에 보이려면 db-init(command_db v5) 후 command-mcp와 agent-server를
 재시작해야 한다.
 
+## 48. 콘솔 설정(vLLM 주소 등)이 통째로 초기화됨 — dev-config의 mock 되돌리기 (조치)
+
+증상: `vllm_llm_base_url` 등 설정 탭 값이 전부 초기값/mock으로 돌아감.
+
+원인: `docker-compose.dev.yml`의 `dev-config` 서비스가 `docker compose up` 할 때마다
+vLLM 주소/모델명·`rerank_base_url`·`redis_url`을 mock 값으로 UPDATE한다. #28에서
+`AND updated_by='bootstrap'` 가드를 넣어 "콘솔에서 저장한 값"은 지켜지게 했지만, 그 가드는
+**platform_config DB가 새로 만들어지는 경우를 못 막는다** — 시드 직후에는 모든 행이
+`updated_by='bootstrap'`이라, `.env`에 실제 vLLM 주소를 넣어뒀더라도 시드되자마자 mock으로
+덮인다(설정이 통째로 초기화된 것처럼 보임). `db-init` 자체는 force=False 키의 value를 건드리지
+않으므로 범인이 아님.
+
+조치: mock 되돌리기 조건을 이중으로 바꿈 — `updated_by='bootstrap'` **그리고**
+`vllm_llm_base_url`이 아직 `CHANGE-ME` 자리표시자일 때만 mock으로 덮는다(모델명/리랭커는
+base_url이 실제로 mock일 때만). `.env`에 실제 주소가 들어간 실서버는 DB를 새로 만들어도
+mock으로 안 돌아간다. `redis_url`만 예외로 항상 비운다(dev compose에 redis 컨테이너가 없음).
+
+복구값은 `CLAUDE.md` 2-2절과 `docs/NEXT-STEPS.md` 0번에 표로 기록함(RUN-LOG #12/#21/#22 기준:
+LLM `qwen3-235b-a22b` :8000, 임베딩 `bge-m3` :8010, 리랭커 `bge-reranker-v2-m3` :8020,
+로그인 서버 `login07`). 실제 서빙 이름은 `/v1/models` curl로 확인하도록 안내.
+
+주의: postgres 볼륨이 삭제되면(`docker compose down -v`) 설정뿐 아니라 매뉴얼/VOC/커맨드
+카탈로그까지 전부 사라진다 — #44에서 경고했던 그대로, `down -v`는 쓰지 않는다.
+
 ---
 
 ## 다음 항목은 이어서 여기 아래에 추가
