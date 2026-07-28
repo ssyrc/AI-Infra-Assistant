@@ -29,6 +29,12 @@ import asyncio
 HOSTS_FILE = os.environ.get("HOSTS_FILE", "/etc/hosts")
 SSH_ROOT_USER = os.environ.get("SSH_ROOT_USER", "root")
 SSH_KEY = os.environ.get("SSH_KEY", "")
+# 컨테이너는 자주 재생성돼 known_hosts가 남지 않는다. 컨테이너 안 경로를 명시해 두면
+# 매번 새로 만들어져도 문제가 없고, 호스트의 known_hosts와 충돌하지도 않는다.
+SSH_KNOWN_HOSTS = os.environ.get("SSH_KNOWN_HOSTS", "/root/.ssh/known_hosts_agent")
+# accept-new: 처음 보는 호스트는 자동 등록, 등록된 키와 '다르면' 거부(기본).
+# 게이트 서버 키가 바뀌어 계속 막히면 .env에 SSH_STRICT_HOST_KEY=no 로 완화할 수 있다.
+SSH_STRICT_HOST_KEY = os.environ.get("SSH_STRICT_HOST_KEY", "accept-new")
 try:
     SSH_CONNECT_TIMEOUT = int(os.environ.get("SSH_CONNECT_TIMEOUT", "8"))
 except ValueError:
@@ -102,7 +108,8 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
         "ssh",
         "-o", "BatchMode=yes",
         "-o", "PasswordAuthentication=no",
-        "-o", "StrictHostKeyChecking=accept-new",
+        "-o", f"StrictHostKeyChecking={SSH_STRICT_HOST_KEY}",
+        "-o", f"UserKnownHostsFile={SSH_KNOWN_HOSTS}",
         "-o", f"ConnectTimeout={SSH_CONNECT_TIMEOUT}",
     ]
     # SSH_KEY 경로가 '파일'일 때만 -i로 넘긴다. compose가 없는 경로를 bind mount하면 도커가
@@ -148,8 +155,13 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
     }
     # 실패 원인을 에이전트가 엉뚱하게 해석하지 않도록, 흔한 두 가지는 명시적으로 알려준다.
     low = result["stderr"].lower()
-    if proc.returncode == 255 and ("permission denied" in low or "publickey" in low
-                                   or "host key verification" in low):
+    if proc.returncode == 255 and "host key verification" in low:
+        result["error"] = (
+            f"'{host}'의 ssh 호스트 키 확인에 실패해 커맨드가 실행되지 않았습니다"
+            f"(인증서/계정 문제가 아님). known_hosts({SSH_KNOWN_HOSTS})에 다른 키가 등록돼 "
+            f"있거나 StrictHostKeyChecking={SSH_STRICT_HOST_KEY} 설정이 막고 있습니다. "
+            "컨테이너에서 해당 호스트 키를 지우거나(.env에 SSH_STRICT_HOST_KEY=no) 재시도하세요.")
+    elif proc.returncode == 255 and ("permission denied" in low or "publickey" in low):
         detail = ""
         if not SSH_KEY:
             detail = "SSH_KEY가 설정되지 않았습니다."

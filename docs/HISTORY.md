@@ -934,6 +934,35 @@ Open WebUI는 스트림 본문의 `<think>...</think>` 영역을 그렇게 렌�
   않음`) — 커맨드가 왜 안 되는지 사용자가 바로 확인할 수 있다.
 - 도구 호출 2회 + 응답 2회 + partial 답변 시나리오로 출력 형태와 메모리 저장 내용을 검증했다.
 
+## 61. 커맨드 실행 실패의 진짜 원인은 Host key verification (정정)
+
+#57에서 "compose가 없는 경로를 마운트해 빈 디렉토리가 됐을 것"이라고 추정했으나 **틀렸다.**
+사용자가 확인한 컨테이너 안 키는 `-rw------- 1 root root 399 /root/.ssh/id_ed25519` — 정상
+개인키 파일이었다(즉 `.env`에 SSH_KEY_PATH가 이미 제대로 잡혀 있었다). 실제 에러는
+**`Host key verification failed.`** 였다.
+
+다만 사용자가 실행한 테스트 명령에는 우리 코드가 쓰는 옵션이 빠져 있었다
+(`StrictHostKeyChecking=accept-new` 없음) — BatchMode에서는 호스트 키를 물어볼 수 없어 기본값
+`ask`가 곧바로 실패한다. 그래서 그 테스트만으로는 우리 실행 경로도 같은 이유로 실패하는지
+확정되지 않는다. `docs/NEXT-STEPS.md` 2번에 **우리 코드와 동일한 옵션**으로 실행하는 명령을 넣어
+비교하도록 했다.
+
+그와 별개로 호스트 키 문제가 실제로 우리 경로를 막을 수 있는 구멍이 있어 코드를 손봤다.
+컨테이너에는 known_hosts가 없고 재생성될 때마다 초기화되는데, 이미지/홈에 남은 항목과 충돌하면
+`accept-new`로도 거부된다(accept-new는 '처음 보는 호스트'만 허용하고 '키가 바뀐 경우'는 막는다).
+- `SSH_KNOWN_HOSTS`(기본 `/root/.ssh/known_hosts_agent`)를 명시해 호스트 쪽 known_hosts와 섞이지
+  않는 컨테이너 전용 파일을 쓰게 했다.
+- `SSH_STRICT_HOST_KEY`(기본 `accept-new`)를 환경변수로 뺐다. 게이트 서버 키가 바뀌어 계속 막히면
+  `.env`에 `SSH_STRICT_HOST_KEY=no`만 넣고 컨테이너를 재생성하면 된다(compose의 command-mcp·
+  system-mcp에 배선).
+- stderr에 `host key verification`이 있으면 `error` 필드에 "호스트 키 확인 실패라 커맨드가 실행되지
+  않았음(인증/계정 문제 아님) + 어떻게 푸는지"를 명시하도록 분기를 분리했다. 기존 publickey
+  분기와 섞여 있어 원인이 뭉뚱그려졌던 것을 나눴다.
+
+또한 사용자가 `.env`에 `SSH_KEY_PATH=/root/.ssh/id_rsa`를 추가했는데, 게이트 서버에 등록된 키는
+컨테이너에 이미 마운트돼 있던 ed25519다. 이 줄은 오히려 동작하던 키를 바꿔 버리므로 제거하도록
+NEXT-STEPS 1번에 넣었다.
+
 ---
 
 ## 다음 항목은 이어서 여기 아래에 추가

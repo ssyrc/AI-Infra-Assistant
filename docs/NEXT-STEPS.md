@@ -2,19 +2,31 @@
 
 **[WSL]** 로컬 · **[서버]** 202.20.183.30 · **[웹]** 콘솔 `http://202.20.183.30:8501`
 
-## 1. [서버] ssh 키 확인 — 커맨드 실행이 안 되는 원인
+## 1. [서버] .env 되돌리기 — 방금 추가한 줄이 오히려 문제가 된다
+
+컨테이너 안 키(`/root/.ssh/id_ed25519`, 399바이트)는 **정상 파일**이었다. 게이트 서버에 등록된
+키가 그것이므로 `id_rsa`로 바꾸면 안 된다.
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker compose -f docker-compose.dev.yml exec command-mcp ls -l /root/.ssh/id_ed25519
-```
-**`d`로 시작(디렉토리)하거나 없으면 그게 원인.** 실제 키 경로를 `.env`에 넣는다:
-```bash
-ls -l /root/.ssh/id_*
-echo 'SSH_KEY_PATH=/root/.ssh/id_rsa' >> .env    # 위에서 확인한 실제 파일로
+sed -i '/^SSH_KEY_PATH=\/root\/.ssh\/id_rsa$/d' .env
+grep SSH_KEY_PATH .env        # id_ed25519를 가리키거나 아예 없어야 한다
 ```
 
-## 2. [WSL] 코드 반영
+## 2. [서버] 진짜 원인 확인 — 우리 코드가 쓰는 옵션 그대로 실행
+
+```bash
+docker compose -f docker-compose.dev.yml exec command-mcp \
+  ssh -o BatchMode=yes -o PasswordAuthentication=no \
+      -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_agent \
+      -i /root/.ssh/id_ed25519 root@202.20.185.100 "su - yr9.choi -c myquota"
+```
+(아까 실행한 명령에는 이 옵션들이 빠져 있어서 `Host key verification failed`가 난 것 —
+BatchMode에서 호스트 키 확인을 물어볼 수 없어 그냥 실패한다. 위 명령이 진짜 우리 경로다.)
+
+성공하면 3번으로. 여전히 실패하면 출력 전달.
+
+## 3. [WSL] 코드 반영
 
 ```bash
 git -C /home/yrc/AI-Infra-Assistant fetch origin main
@@ -23,23 +35,14 @@ rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
   yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
 ```
 
-## 3. [서버] 재기동 + ssh 확인
+## 4. [서버] 재기동
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
 docker compose -f docker-compose.dev.yml run --rm db-init
 docker compose -f docker-compose.dev.yml up -d
-docker compose -f docker-compose.dev.yml exec command-mcp \
-  ssh -o BatchMode=yes root@202.20.185.100 "su - yr9.choi -c myquota"
 ```
-마지막 줄이 성공해야 에이전트에서도 된다. 실패하면 출력 전달.
-
-## 4. [웹] 매뉴얼 탭 — 검색 테스트 (RAG 원인 확정용)
-
-`gpu 노드 접근` 입력 → 검색. **결과 표 상위 5건이 실제 GPU 문서인지** 확인하고
-화면 위 3줄(검색 방식 / 임베딩 / 리랭커)과 함께 전달.
-- 상위에 GPU 문서가 제대로 나오면 → 검색은 정상, LLM이 지어낸 것(5번으로 해결)
-- 엉뚱한 문서가 나오면 → 검색 문제, 그 화면 그대로 보내주면 이어서 잡는다
+2번이 계속 실패했다면 `.env`에 `SSH_STRICT_HOST_KEY=no` 를 넣고 위 `up -d`를 다시 실행한다.
 
 ## 5. [웹] 설정 탭 — `agent_system_instruction` 아래 전문으로 교체 후 저장
 
@@ -102,9 +105,13 @@ docker compose -f docker-compose.dev.yml restart agent-server
 
 ## 7. [웹] Open WebUI `http://202.20.183.30:8502` — yr9.choi 계정
 
-- "gpu 노드 접근하려면?" → 매뉴얼에 있는 내용만 나오는지(bsub 같은 일반 LSF 문법이 나오면 실패)
-- "내 홈스토리지 용량 어떻게 돼?" → 답변이 1회만 나오는지, 답변 **전에** 진행 상황이
-  한 줄씩 바뀌며 보이는지(`· run_command — myquota` → `· run_command → 완료`) 확인
+- "내 홈스토리지 용량 어떻게 돼?" → 답변 **전에** 진행 상황이 한 줄씩 바뀌며 보이고
+  (`· run_command — myquota` → `· run_command → 완료`), 답변은 **한 번만** 나와야 한다.
+- "gpu 노드 접근하려면?" → `bsub` 같은 일반 LSF 문법이 나오면 실패(매뉴얼 내용만 나와야 함).
+
+## 8. [웹] 매뉴얼 탭 — 검색 테스트
+
+`gpu 노드 접근` 검색 → 상위 5건이 실제 GPU 문서인지, 위 3줄(검색 방식/임베딩/리랭커) 전달.
 
 ---
 `docs/RUN-LOG.md` 기동·배포 절차 · `docs/HISTORY.md` 원인분석 이력

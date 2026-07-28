@@ -124,6 +124,8 @@ services:
       HOSTS_FILE: /etc/hosts.targets
       SSH_KEY: /root/.ssh/id_ed25519
       SSH_ROOT_USER: root
+      # 호스트 키가 계속 막으면 .env에 SSH_STRICT_HOST_KEY=no 를 넣고 컨테이너를 재생성한다.
+      SSH_STRICT_HOST_KEY: ${SSH_STRICT_HOST_KEY:-accept-new}
     volumes:
       - ./mcp_servers:/app/mcp_servers:ro
       - ./shared:/app/shared:ro
@@ -152,6 +154,8 @@ services:
       HOSTS_FILE: /etc/hosts.targets
       SSH_KEY: /root/.ssh/id_ed25519
       SSH_ROOT_USER: root
+      # 호스트 키가 계속 막으면 .env에 SSH_STRICT_HOST_KEY=no 를 넣고 컨테이너를 재생성한다.
+      SSH_STRICT_HOST_KEY: ${SSH_STRICT_HOST_KEY:-accept-new}
       SSH_CONNECT_TIMEOUT: "8"
     volumes:
       - ./mcp_servers:/app/mcp_servers:ro
