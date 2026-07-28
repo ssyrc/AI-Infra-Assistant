@@ -358,6 +358,37 @@ Sources: https://github.com/open-webui/open-webui (v0.6.5 태그, backend/open_w
 이용해 각 UPDATE에 `AND updated_by='bootstrap'` 조건을 추가 — 한 번이라도 손댄 값은 이후
 dev-config가 다시 실행돼도 안 건드림.
 
+## 29. 채팅 응답이 스트리밍 안 되고 한 번에 나오는 문제 (완료)
+
+`agent_server/main.py`의 SSE 스트리밍 핸들러가 `runner.run_async()`를 `run_config` 없이
+호출하고 있었음 — ADK의 기본 `RunConfig.streaming_mode`는 `NONE`이라, LLM 응답을 다 모은 뒤
+이벤트 1~2개로만 내보낸다(SSE로 델타를 보내는 코드 자체는 맞았지만, 애초에 델타 단위 이벤트가
+안 왔던 것). `google.adk.agents.run_config.RunConfig(streaming_mode=StreamingMode.SSE)`를
+3개 스트리밍 엔드포인트(`/v1/chat/completions`, `/v1/agent/query`, `/v1/voc/query`)의
+`event_stream()` 내부 `run_async` 호출에 추가. 논스트리밍 분기(최종 응답만 쓰는 코드)는
+그대로 둠. `pip install google-adk==1.22.1`로 로컬에서 `RunConfig`/`StreamingMode`/
+`Runner.run_async` 시그니처 직접 확인 후 작업(추측 아님).
+
+## 30. 동기화 버튼 405 재발 — admin-console 실제 재시작 여부 확인 필요 (조치 중)
+
+이전 라운드에서 admin-console 재시작을 안내했는데도 같은 405가 반복됨. `docs/NEXT-STEPS.md`
+2번에 `docker compose ps`/`logs`/직접 curl로 admin-console이 정말 새 코드로 떴는지 확인하는
+커맨드 추가 — 재현되면 로그를 받아서 진단 이어감.
+
+## 31. mock 전환 테스트 시 `mock-llm`이라는 잘못된 호스트명 사용 (사용자 확인 필요)
+
+`vllm_llm_base_url`을 `http://mock-llm:8000`으로 바꿔 테스트했는데, 실제 mock 컨테이너 이름은
+`mock-vllm`이라 그 호스트가 존재하지 않음 — 오타로 보임. 브랜딩 로직(`MOCK_LLM_BASE_MARKER =
+"mock-vllm"`)이 그대로인지, 아니면 넓혀야 하는지는 실제 정상 케이스(올바른 호스트명)로 재확인
+필요.
+
+## 32. 매뉴얼 등록 후 RAG 검색 안 됨 — 발행(publish) 여부 확인 필요 (조치 중)
+
+"슈퍼컴 계정 신청 방법"을 못 찾음. `mcp_servers/manual_mcp/server.py`의 검색 쿼리가 전부
+`status='published'`만 대상으로 하므로(초안은 검토 전이라 의도적으로 제외), 등록만 하고
+발행을 안 했으면 검색에 안 잡히는 게 정상 동작. 사용자에게 발행 여부 확인 요청함 — 이미
+발행됐는데도 안 나오면 임베딩/쿼리 경로를 더 봐야 함.
+
 ## 20. 매뉴얼 엑셀 열 선택 UI 이해 어려움 (완료)
 
 "내용/제목/페이지 체크박스가 뭔지 모르겠다"는 피드백에 번호 매긴 단계별 설명과, 현재 선택으로
