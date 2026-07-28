@@ -14,7 +14,7 @@ from auth import require_admin
 from config_store import get_config
 from db import get_pool, embed_text, vector_literal
 from cleaning import clean_text, clean_options_from_dict
-from spreadsheet import read_excel_meta, load_excel_rows
+from spreadsheet import TABLE_EXTS, read_table_meta, load_table_rows
 from uploads import (
     create_upload_session, get_upload_session,
     delete_upload_session, load_options,
@@ -110,22 +110,22 @@ async def preview_command_excel(
     drop_urls: bool = Form(False),
     admin: str = Depends(require_admin),
 ):
-    """엑셀 열 목록과 샘플 행을 반환한다.
+    """엑셀/CSV 열 목록과 샘플 행을 반환한다.
     어떤 열을 name/description/exec_command로 쓸지 선택하게 한다."""
-    ext, content, filename = await read_upload_or_server_file(file, server_path, {".xlsx", ".xls"})
+    ext, content, filename = await read_upload_or_server_file(file, server_path, TABLE_EXTS)
     options = {"strip_html": strip_html, "collapse_space": collapse_space, "drop_urls": drop_urls}
     upload_id = await create_upload_session(_DSN, admin, filename, ext, "command_catalog", content, options)
     session = await get_upload_session(_DSN, upload_id, admin, "command_catalog")
 
     try:
-        sheet, header, sample, total = await run_in_threadpool(read_excel_meta, session["saved_path"])
+        sheet, header, sample, total = await run_in_threadpool(read_table_meta, session["saved_path"])
     except Exception as e:  # noqa: BLE001
         await delete_upload_session(_DSN, upload_id)
-        raise HTTPException(422, f"엑셀을 읽을 수 없습니다: {e}")
+        raise HTTPException(422, f"파일을 읽을 수 없습니다: {e}")
 
     if not header:
         await delete_upload_session(_DSN, upload_id)
-        raise HTTPException(422, "빈 엑셀 파일입니다.")
+        raise HTTPException(422, "빈 파일입니다(헤더 행이 없습니다).")
 
     return {"upload_id": upload_id, "filename": filename, "sheet": sheet,
             "columns": header, "sample_rows": sample, "total_rows": total, "options": options}
@@ -148,11 +148,11 @@ async def commit_command_excel(body: CommandExcelCommitIn, admin: str = Depends(
     opts = clean_options_from_dict(load_options(session))
 
     def _build(path: str):
-        header, col_idx, rows = load_excel_rows(path)
+        header, col_idx, rows = load_table_rows(path)
         required = {"이름(name)": body.name_column, "설명(description)": body.description_column}
         for label, col in required.items():
             if col not in col_idx:
-                raise ValueError(f"{label} 열이 엑셀에 없습니다: {col}")
+                raise ValueError(f"{label} 열이 파일에 없습니다: {col}")
         for col in (body.exec_command_column,):
             if col and col not in col_idx:
                 raise ValueError(f"존재하지 않는 열입니다: {col}")

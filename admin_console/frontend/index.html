@@ -139,10 +139,11 @@ function ManualsPanel() {
   };
 
   const extOf = (f) => (f ? f.name.slice(f.name.lastIndexOf(".")).toLowerCase() : "");
-  const isExcel = (f) => [".xlsx", ".xls"].includes(extOf(f));
+  const isExcel = (f) => [".xlsx", ".xls", ".csv"].includes(extOf(f));
   const fileKind = (f) => {
     const e = extOf(f);
     if ([".xlsx", ".xls"].includes(e)) return "엑셀 (열 선택)";
+    if (e === ".csv") return "CSV (열 선택)";
     if (e === ".pptx") return "PPT (슬라이드 단위)";
     if ([".docx", ".pdf"].includes(e)) return "문서 (섹션 단위)";
     if ([".txt", ".md"].includes(e)) return "텍스트 (문단 단위)";
@@ -218,7 +219,7 @@ function ManualsPanel() {
       });
       resetPreviews(); setTitle(""); setFile(null);
       await load();
-      alert("엑셀 등록 완료. 목록에서 확인 후 발행하세요.");
+      alert("등록 완료. 목록에서 확인 후 발행하세요.");
     } catch (e) { alert("등록 실패: " + e.message); }
     setBusy(false);
   };
@@ -260,14 +261,14 @@ function ManualsPanel() {
     <div>
       <h2>매뉴얼 관리</h2>
       <div className="subtitle">
-        PPT·Word·PDF·txt는 파일 형식에 맞춰 자동 분할되고, 엑셀은 열을 골라 등록합니다.
+        PPT·Word·PDF·txt는 파일 형식에 맞춰 자동 분할되고, 엑셀·CSV는 열을 골라 등록합니다.
         업로드 시 HTML·불필요한 문자는 자동으로 정제됩니다. 같은 제목으로 재업로드하면 새 버전이 생깁니다.
       </div>
 
       <div className="card">
         <div className="toolbar">
           <input placeholder="문서 제목 (버전 그룹핑 키)" value={title} onChange={e => setTitle(e.target.value)} style={{width: 260}} />
-          <input type="file" accept=".xlsx,.xls,.docx,.pptx,.pdf,.txt,.md"
+          <input type="file" accept=".xlsx,.xls,.csv,.docx,.pptx,.pdf,.txt,.md"
                  onChange={e => pickFile(e.target.files[0])} />
           <button onClick={() => setShowBrowser(true)}>서버 파일에서 선택</button>
           {file && <span className="badge" style={{borderColor: "var(--muted)", color: "var(--muted)"}}>
@@ -311,9 +312,9 @@ function ManualsPanel() {
       {/* 엑셀 열 선택 */}
       {excelPreview && (
         <div className="card">
-          <div style={{marginBottom: 8}}><strong>엑셀 열 선택</strong> · {excelPreview.filename} · 시트 {excelPreview.sheet} · {excelPreview.total_rows}행</div>
+          <div style={{marginBottom: 8}}><strong>열 선택</strong> · {excelPreview.filename} · {excelPreview.sheet} · {excelPreview.total_rows}행</div>
           <div className="subtitle">
-            엑셀 행 하나가 검색 청크(chunk) 하나가 됩니다. 아래 표에서 열마다 3가지를 고르세요(전부 선택 사항, 필요한 것만 체크):<br/>
+            행 하나가 검색 청크(chunk) 하나가 됩니다. 아래 표에서 열마다 3가지를 고르세요(전부 선택 사항, 필요한 것만 체크):<br/>
             ① <strong>내용</strong>(체크박스, 여러 개 가능) — 청크 본문에 넣을 열. 체크한 열들이 전부 <code>열이름: 값</code> 줄로 이어붙습니다.<br/>
             ② <strong>제목</strong>(라디오, 최대 1개) — 청크의 소제목으로 쓸 열(예: section, ppt_title).<br/>
             ③ <strong>페이지/순번</strong>(라디오, 최대 1개) — 숫자인 열(예: slide_index)이면 청크의 p번호로 저장.<br/>
@@ -586,7 +587,7 @@ function CommandsPanel() {
       });
       setExcel(null);
       await load();
-      alert(`엑셀 반영 완료 · 신규 ${data.inserted}건, 갱신 ${data.updated}건`);
+      alert(`반영 완료 · 신규 ${data.inserted}건, 갱신 ${data.updated}건`);
     } catch (e) { alert("등록 실패: " + e.message); }
     setBusy(false);
   };
@@ -635,10 +636,10 @@ function CommandsPanel() {
           <button className="primary" onClick={submit}>{editingId ? "수정 저장" : "등록"}</button>
           {editingId && <button onClick={() => { setEditingId(null); setForm({ name: "", description: "", exec_command: "" }); }}>취소</button>}
           <span style={{marginLeft: "auto", display: "flex", alignItems: "center", gap: 6}}>
-            <input type="file" accept=".xlsx,.xls" disabled={busy}
+            <input type="file" accept=".xlsx,.xls,.csv" disabled={busy}
                    onChange={e => { analyzeExcel(e.target.files[0]); e.target.value = ""; }} />
             <button disabled={busy} onClick={() => setShowBrowser(true)}>서버 파일에서 선택</button>
-            <span style={{fontSize: 11.5, color: "var(--muted)"}}>엑셀 일괄 업로드 (열 매핑)</span>
+            <span style={{fontSize: 11.5, color: "var(--muted)"}}>엑셀·CSV 일괄 업로드 (열 매핑)</span>
           </span>
         </div>
       </div>
@@ -653,7 +654,7 @@ function CommandsPanel() {
       {/* 엑셀 열 매핑 */}
       {excel && (
         <div className="card">
-          <div style={{marginBottom: 8}}><strong>엑셀 열 매핑</strong> · {excel.filename} · 시트 {excel.sheet} · {excel.total_rows}행</div>
+          <div style={{marginBottom: 8}}><strong>열 매핑</strong> · {excel.filename} · {excel.sheet} · {excel.total_rows}행</div>
           <div className="subtitle">
             각 항목에 대응하는 엑셀 열을 고르세요. 이름 기준으로 등록/갱신(upsert)됩니다.
             "실행 커맨드" 열을 지정하지 않으면 커맨드 이름이 그대로 실행됩니다(이름 열이 실제

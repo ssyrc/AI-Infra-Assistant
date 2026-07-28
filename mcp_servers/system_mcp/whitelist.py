@@ -103,10 +103,12 @@ WHITELIST = {
                                     "검색한다(find, 읽기 전용). '이 경로 밑에 로그 파일 어디 있나' 같은 "
                                     "질문에 사용. 수정·삭제·실행은 못 한다."), **_LOGIN_SERVER},
     "disk_free": {"handler": disk_free, "example_command": "df -h",
-                  "description": ("지정 서버(host)의 파일시스템별 디스크 여유/사용 용량을 조회한다"
-                                   "(df -h). '디스크 꽉 찼나/여유 공간 얼마나 되나'를 확인할 때 사용. "
-                                   "개인 홈 스토리지 할당량처럼 특정 서버를 안 밝힌 질문이면 로그인 "
-                                   "서버 이름으로 조회한다."), **_COMMON},
+                  "description": ("지정 서버(host)의 '파일시스템 전체' 디스크 여유/사용 용량을 "
+                                   "조회한다(df -h). 특정 서버의 디스크가 꽉 찼는지 확인할 때만 "
+                                   "사용한다. **개인 계정의 홈 스토리지 할당량(quota)을 묻는 "
+                                   "질문에는 쓰지 않는다** — df는 서버 전체 용량이라 개인 할당량과 "
+                                   "무관하다. 그런 질문은 커맨드 카탈로그에서 할당량 조회 커맨드를 "
+                                   "찾아 command.run_command로 실행한다."), **_COMMON},
     "disk_usage": {"handler": disk_usage, "example_command": "du -h --max-depth=<n> <path>",
                    "description": ("지정 서버(host)에서 특정 경로가 디스크를 얼마나 쓰는지 조회한다"
                                     "(du -h). '이 디렉토리가 용량을 얼마나 차지하나'를 확인할 때 사용. "
