@@ -1,7 +1,7 @@
 next steps 에는 정확히 내가 당장 해야 할 커맨드들만 있어야 해. 매번 에러를 읽고 업데이트해. 
 RUN-LOG.md 파일에는 작업 내용 전체가 아니라, agent 를 서버에 띄우고 실행, 셋업하는 과정만 담아.
 
-1. 지금 manual db 가 제대로 임베딩이 안된건지, db가 이상해진건지, gpu 사용법을 물었더니 cpu 사용법을 알려줘. 그리고 command 실행이 전혀 안되고 있어. 
+1. 지금 manual db 가 제대로 임베딩이 안된건지, db가 이상해진건지, gpu 사용법을 물었더니 cpu 사용법을 알려줘. 
 
 [root@24-gp19 AI-Infra-Assistant]# curl -s http://75.23.32.41:8010/v1/models
 {"object":"list","data":[{"id":"bge-m3","object":"model","created":1785240910,"owned_by":"vllm","root":"/workspace/models/bge-m3","parent":null,"max_model_len":8192,"permission":[{"id":"modelperm-a4d7a5091f6542abb95218a5cd81f0e9","object":"model_permission","created":1785240910,"allow_create_engine":false,"allow_sampling":true,"allow_logprobs":true,"allow_search_indices":false,"allow_view":true,"allow_fine_tuning":false,"organization":"*","group":null,"is_blocking":false}]}]}[root@24-gp19 AI-Infra-Assistant]#
@@ -16,6 +16,9 @@ RUN-LOG.md 파일에는 작업 내용 전체가 아니라, agent 를 서버에 �
 >   -d '{"query":"gpu","texts":["gpu 노드","cpu 노드"]}'
 {"error":{"message":"[{'type': 'missing', 'loc': ('body', 'documents'), 'msg': 'Field required', 'input': {'query': 'gpu', 'texts': ['gpu 노드', 'cpu 노드']}}]","type":"Bad Request","param":null,"code":400}}
 
+
+그리고 이런 command 실행이 전혀 안되고 있어. 직접 서버에서 실행하면 된다고
+ssh root@202.20.185.100 "su - yr9.choi -c myquota"
 
 2. 답변이 두번씩 생성되고 있어. 심각한 성능이니까 절대 수정해. 
 3. 중간에 생각하는 과정은 웹 상에서 보이게 해줘
