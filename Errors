@@ -15,8 +15,18 @@
 - system mcp 에 등록하는 건 커맨드 분류 상관 없이 넣을거야. 이걸 '필요 역할' 카테고리처럼, '분류' 로 지정할 수 있게 하자. '로그인 서버 실행', '해당 서버 실행' 으로. 관리자용 콘솔 웹에 system mcp 탭을 변경해줘.
 
 
-# openwebui
-- 이메일 변경 에러
+# openwebui 용 이메일 변경 에러
 [root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml exec open-webui \
 >   sqlite3 /app/backend/data/webui.db "SELECT id, name, email, role FROM user;"
 OCI runtime exec failed: exec failed: unable to start container process: exec: "sqlite3": executable file not found in $PATH: unknown
+
+
+# openwebui
+- 모델 안 보임
+[root@24-gp19 AI-Infra-Assistant]# curl http://202.20.183.30:8500/v1/models
+{"object":"list","data":[{"id":"AI Infra Assistant","object":"model"}]}[
+
+- admin api key 등록 완료
+  하지만, admin 에서는 AI Infra Assistant가 보이지만 채팅을 보내면 에러 Model not found
+  user id 로 접속하면 Ai infra assistant가 보이지 않음. 
+- 사용자의 모든 api key 를 일일이 콘솔 창에 지정할 수는 없음. admin 용 api key 하나만 등록하면, 모든 사용자가 접속했을 때 model이 default로 떠야 함
