@@ -10,5 +10,6 @@
 
 
 # 관리자 콘솔 변경 필요 사항들
-1. VoC 이력 관리
-  - 재빌드를 했는데도, 내가 기존에 얘기했던 파일 형식 말고 다르게 정제된 엑셀 파일을 넣으니까 이런 에러가 떴어. 기존 형식과 다르면 자동으로 인지해서 행, 열 뽑아내게 해줘. 내가 넣은 엑셀은 1행이 Question, Answer 이고, 2행부터 쭉 정제된 데이터가 있어. 가져오기 실패: {"detail":"지원하지 않는 형식입니다. 지원: .xlsx"}
+1. 설정 탭
+  - 지금은 url, 모델/임베딩 다 따로 구역이 있는데, (1) llm_base  (2) 임베딩  (3) reranker 구역으로 나누어서 관련 url, model name, parameter 등 각각 지정하게 해줘.
+  - 너가 알려준대로 설정 탭에 저장하고 openwebui 새로고침해도 모델 리스트에 아무것도 안 떠. mock-llm, arena model 이라고만 떠있고 arena model은 에러 발생해. arena model은 삭제해줘. llm, 임베딩, reranker가 mock-llm 이 아닌 실제 ip로 지정되면 AI Infra Assistant 라고 뜨면 좋겠어.
