@@ -105,8 +105,14 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
         "-o", "StrictHostKeyChecking=accept-new",
         "-o", f"ConnectTimeout={SSH_CONNECT_TIMEOUT}",
     ]
-    if SSH_KEY:
+    # SSH_KEY 경로가 '파일'일 때만 -i로 넘긴다. compose가 없는 경로를 bind mount하면 도커가
+    # 그 자리에 '빈 디렉토리'를 만들어 버리는데, 그걸 -i로 주면 ssh가 무조건 인증 실패한다
+    # (서버에서 직접 ssh하면 되는데 에이전트로만 안 되는 전형적인 원인).
+    if SSH_KEY and os.path.isfile(SSH_KEY):
         ssh_argv += ["-i", SSH_KEY]
+    elif SSH_KEY:
+        print(f"[ssh_exec] SSH_KEY가 파일이 아니라 무시합니다: {SSH_KEY} "
+              "(docker가 빈 디렉토리를 만든 상태일 수 있음 - .env의 SSH_KEY_PATH 확인)")
     ssh_argv += [f"{SSH_ROOT_USER}@{ip}", remote_cmd]
 
     try:
@@ -140,10 +146,22 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
         "stdout": _clip(out),
         "stderr": _clip(err),
     }
-    # "계정이 서버에 없음"을 권한 문제로 오해하지 않도록 원인을 명시해 준다.
-    # (su가 실패하면 커맨드 자체는 실행되지도 않는데, 에이전트가 "권한 거부"로 답해버린다.)
+    # 실패 원인을 에이전트가 엉뚱하게 해석하지 않도록, 흔한 두 가지는 명시적으로 알려준다.
     low = result["stderr"].lower()
-    if proc.returncode != 0 and any(m in low for m in _NO_SUCH_USER):
+    if proc.returncode == 255 and ("permission denied" in low or "publickey" in low
+                                   or "host key verification" in low):
+        detail = ""
+        if not SSH_KEY:
+            detail = "SSH_KEY가 설정되지 않았습니다."
+        elif not os.path.isfile(SSH_KEY):
+            detail = (f"SSH_KEY 경로가 파일이 아닙니다({SSH_KEY}). compose가 없는 경로를 마운트해 "
+                      "빈 디렉토리가 생긴 상태일 수 있습니다 - .env의 SSH_KEY_PATH를 실제 개인키 "
+                      "파일로 지정하세요.")
+        else:
+            detail = f"마운트된 키({SSH_KEY})가 대상 서버에 등록돼 있지 않을 수 있습니다."
+        result["error"] = (f"'{host}'에 ssh 인증이 실패해 커맨드가 실행되지 않았습니다"
+                           f"(사용자 권한 문제가 아님). {detail}")
+    elif proc.returncode != 0 and any(m in low for m in _NO_SUCH_USER):
         result["error"] = (
             f"서버 '{host}'에 '{user}' 계정이 없어 실행하지 못했습니다(권한 문제가 아님). "
             "Open WebUI 계정 이메일의 '@' 앞부분이 서버 계정명과 같아야 합니다.")
