@@ -22,3 +22,6 @@ Q5: cpu 사용법 알려줘
 
 Q6: 계정 신청은 어떻게 해? 방화벽은 뭐 신청해야해?
 A6: [오류가 발생했습니다: litellm.ContextWindowExceededError: litellm.BadRequestError: ContextWindowExceededError: OpenAIException - Error code: 400 - {'error': {'message': "This model's maximum context length is 32768 tokens. However, your request has 35252 input tokens. Please reduce the length of the input messages. None", 'type': 'BadRequestError', 'param': None, 'code': 400}}]
+
+
+추가로, 설정 탭에서 지정한 voc_intake_guide는 운영팀 문의가 필요할 때 무조건 안내하게 해줘. 지금은 '문제가 지속되면 운영팀에 접수하시기 바랍니다.' 라고만 나오네
