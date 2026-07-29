@@ -31,9 +31,11 @@ async def search_manual(query: str, top_k: int = 5) -> list[dict]:
         query: 자연어 질문 또는 핵심 키워드. 예: "배치 스케줄 등록 방법"
         top_k: 반환할 최대 문단 수(기본 5). 폭넓게 보려면 8~10.
     Returns:
-        문단 리스트. 각 항목에 title, section_title, page_no, chunk_text, manual_file_id,
-        reference_path가 있다. reference_path는 이 문서가 실제로 있는 위치(포탈 경로)이므로,
-        문서를 참고하라고 안내할 때는 문서 제목만 말하지 말고 이 경로를 그대로 적는다.
+        문단 리스트. 각 항목에 doc_title(이 문단이 나온 원본 가이드 문서 이름),
+        section_title, page_no, chunk_text, manual_file_id, 그리고 **reference**가 있다.
+        reference는 그 문서를 찾아갈 수 있는 **전체 경로**(메뉴 경로 + 문서 이름)이므로,
+        "문서를 참고하세요"라고 안내할 때는 이 값을 **그대로** 적는다(직접 조합하지 않는다).
+        reference가 비어 있으면 경로를 지어내지 말고 doc_title만 말한다.
         더 넓은 맥락이 필요하면 manual_file_id로 get_document을 호출한다.
     """
     _mode, results = await search_manual_chunks(query, top_k, with_neighbors=True)
@@ -72,7 +74,7 @@ async def get_document(manual_file_id: int, offset: int = 0, limit: int = 20,
     )
     rows = await pool.fetch(
         """
-        SELECT c.seq, c.section_title, c.page_no, c.chunk_text
+        SELECT c.seq, c.doc_title, c.section_title, c.page_no, c.chunk_text
         FROM manual_chunks c
         JOIN manual_files f ON f.id = c.manual_file_id
         WHERE c.manual_file_id = $1 AND f.status = 'published'

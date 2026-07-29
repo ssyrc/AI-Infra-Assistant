@@ -362,6 +362,25 @@ MIGRATIONS: list[tuple[str, int, str]] = [
     ("manual_db", 7, """
         ALTER TABLE manual_files ADD COLUMN IF NOT EXISTS reference_path TEXT;
     """),
+    # doc_title = 이 청크가 나온 '원본 문서' 이름(PPT 파일명 등).
+    #   매뉴얼 한 건에 여러 가이드 문서가 섞여 올라오는 경우가 있다. 예를 들어 '활용 가이드'
+    #   메뉴 하나를 등록하면 그 안에 GPU 서버 활용 가이드, 계정 신청 가이드 …가 다 들어 있다.
+    #   manual_files.title은 메뉴 이름("활용 가이드")이고, 개별 문서 이름은 행마다 다르므로
+    #   청크 단위로 들고 있어야 한다. 답변에서 문서 위치를 안내할 때
+    #   reference_path(메뉴까지) + doc_title(문서 이름)로 전체 경로가 완성된다.
+    #   검색에도 쓰이도록 tsv에 포함한다("GPU 서버 활용 가이드" 같은 질의가 제목으로 잡힌다).
+    ("manual_db", 8, """
+        ALTER TABLE manual_chunks ADD COLUMN IF NOT EXISTS doc_title TEXT;
+        ALTER TABLE manual_chunks DROP COLUMN IF EXISTS tsv;
+        ALTER TABLE manual_chunks ADD COLUMN tsv tsvector
+            GENERATED ALWAYS AS (
+                to_tsvector('simple',
+                    coalesce(doc_title, '') || ' ' ||
+                    coalesce(section_title, '') || ' ' || coalesce(chunk_text, ''))
+            ) STORED;
+        CREATE INDEX IF NOT EXISTS manual_chunks_tsv_idx ON manual_chunks USING gin (tsv);
+        CREATE INDEX IF NOT EXISTS manual_chunks_doc_title_idx ON manual_chunks (doc_title);
+    """),
 ]
 
 
@@ -541,11 +560,19 @@ AGENT_INSTRUCTION = """당신은 사내 인프라/시스템 운영을 돕는 한
    **번호가 이어지는 단계를 건너뛰지 않습니다**(1→2→4처럼 중간이 비면 안 됩니다).
 
 ## "그 문서를 보라"고 안내할 때는 찾아갈 수 있게 적습니다
-검색 결과에 reference_path(문서가 실제로 있는 위치)가 있으면, 문서 제목만 말하지 말고
-**그 경로를 그대로 적습니다.** 사용자는 제목만으로 문서를 찾지 못합니다.
+매뉴얼 검색 결과의 **reference** 값이 그 문서를 찾아가는 전체 경로입니다.
+문서 이름만 말하지 말고 **reference를 그대로 옮겨 적습니다.** 사용자는 이름만으로 못 찾습니다.
 - 예: "GPU 서버 활용 가이드 문서를 참고하세요"(X)
       "슈퍼컴 Portal > USEFUL INFO. > 활용 가이드 > GPU 서버 활용 가이드 를 참고하세요"(O)
-- reference_path가 비어 있으면 경로를 지어내지 말고 문서 제목만 말합니다.
+- reference는 이미 완성된 문자열입니다. 조각을 직접 이어 붙이거나 순서를 바꾸지 마세요.
+- reference가 비어 있으면 경로를 지어내지 말고 doc_title(문서 이름)만 말합니다.
+
+## 여러 가이드 문서가 함께 검색될 수 있습니다
+한 메뉴에 여러 문서가 들어 있어서, 결과마다 doc_title(원본 문서 이름)이 다를 수 있습니다.
+- **doc_title이 다른 내용을 하나의 절차처럼 이어 붙이지 않습니다.** 계정 신청 가이드의 3단계
+  뒤에 GPU 가이드의 4단계를 붙이면 존재하지 않는 절차가 됩니다.
+- 한 답변에서 여러 문서를 인용해야 하면 **문서별로 나눠서** 쓰고, 각각의 reference를 답니다.
+- 질문이 특정 문서에 대한 것이면 그 doc_title의 결과만 씁니다.
 
 ## 과거 사례(VOC) 활용
 증상·오류·장애처럼 선례가 있을 법한 질문이거나 매뉴얼만으로 답이 부족하면 VOC 검색 도구도 봅니다.

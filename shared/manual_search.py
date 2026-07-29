@@ -19,10 +19,26 @@ _DSN = "manual_db_dsn"
 
 
 def with_context(c: dict) -> str:
-    """리랭커·임베딩에 넘길 텍스트에 문서·섹션 제목을 앞에 붙인다(Contextual retrieval).
-    청크 본문만 보면 무엇에 대한 문서인지 알 수 없어 관련도 판단이 흐려진다."""
-    head = " > ".join(x for x in (c.get("title"), c.get("section_title")) if x)
+    """리랭커에 넘길 텍스트에 '등록 제목 > 원본 문서 이름 > 섹션 제목'을 앞에 붙인다
+    (Contextual retrieval).
+
+    청크 본문만 보면 무엇에 대한 문서인지 알 수 없어 관련도 판단이 흐려진다.
+    한 번에 여러 가이드 문서를 올린 경우(활용 가이드 메뉴 전체 등) 등록 제목만으로는
+    문서가 구분되지 않으므로 doc_title까지 넣는다 - 관리자 콘솔의 임베딩 입력과 같은 형태다.
+    """
+    head = " > ".join(x for x in (c.get("title"), c.get("doc_title"),
+                                  c.get("section_title")) if x)
     return f"{head}\n{c['chunk_text']}" if head else c["chunk_text"]
+
+
+def full_reference(c: dict) -> str | None:
+    """이 청크를 찾아갈 수 있는 전체 경로. reference_path(메뉴까지) + doc_title(문서 이름).
+
+    관리자는 매뉴얼 탭에 메뉴 경로까지만 넣는다("… > 활용 가이드"). 그 메뉴 안에 어떤 문서가
+    있는지는 행마다 다르므로(doc_title), 둘을 여기서 이어 붙여 답변에 그대로 쓸 수 있게 한다.
+    """
+    parts = [x for x in (c.get("reference_path"), c.get("doc_title")) if x]
+    return " > ".join(parts) if parts else None
 
 
 async def _candidates(pool, query: str, candidate_k: int) -> tuple[str, list[dict]]:
@@ -39,7 +55,7 @@ async def _candidates(pool, query: str, candidate_k: int) -> tuple[str, list[dic
     if vec is None:
         rows = await pool.fetch(
             """
-            SELECT c.id, c.seq, c.manual_file_id, c.section_title, c.page_no, c.chunk_text,
+            SELECT c.id, c.seq, c.manual_file_id, c.doc_title, c.section_title, c.page_no, c.chunk_text,
                    f.title, f.filename, f.version, f.reference_path,
                    ts_rank(c.tsv, to_tsquery('simple', $1)) AS score
             FROM manual_chunks c JOIN manual_files f ON f.id = c.manual_file_id
@@ -87,7 +103,7 @@ async def _candidates(pool, query: str, candidate_k: int) -> tuple[str, list[dic
                 FULL OUTER JOIN keyword_search k ON v.id = k.id
                 FULL OUTER JOIN trgm_search t ON COALESCE(v.id, k.id) = t.id
             )
-            SELECT c.id, c.seq, c.manual_file_id, c.section_title, c.page_no, c.chunk_text,
+            SELECT c.id, c.seq, c.manual_file_id, c.doc_title, c.section_title, c.page_no, c.chunk_text,
                    f.title, f.filename, f.version, f.reference_path,
                    fused.rrf_score AS score, fused.vrrf, fused.krrf, fused.trrf
             FROM fused
@@ -121,7 +137,7 @@ async def _candidates(pool, query: str, candidate_k: int) -> tuple[str, list[dic
                    COALESCE(1.0/(60+v.rank),0) + COALESCE(1.0/(60+k.rank),0) AS rrf_score
             FROM vector_search v FULL OUTER JOIN keyword_search k ON v.id = k.id
         )
-        SELECT c.id, c.seq, c.manual_file_id, c.section_title, c.page_no, c.chunk_text,
+        SELECT c.id, c.seq, c.manual_file_id, c.doc_title, c.section_title, c.page_no, c.chunk_text,
                f.title, f.filename, f.version, f.reference_path,
                fused.rrf_score AS score, fused.vrrf, fused.krrf, fused.trrf
         FROM fused
@@ -148,7 +164,7 @@ async def _attach_neighbors(pool, results: list[dict], window: int) -> list[dict
                      for r in results for d in range(-window, window + 1)})
     rows = await pool.fetch(
         """
-        SELECT c.manual_file_id, c.seq, c.page_no, c.section_title, c.chunk_text
+        SELECT c.manual_file_id, c.seq, c.page_no, c.doc_title, c.section_title, c.chunk_text
         FROM manual_chunks c JOIN manual_files f ON f.id = c.manual_file_id
         WHERE f.status = 'published'
           AND (c.manual_file_id, c.seq) IN (SELECT * FROM unnest($1::int[], $2::int[]))
@@ -163,6 +179,11 @@ async def _attach_neighbors(pool, results: list[dict], window: int) -> list[dict
         for d in range(-window, window + 1):
             nb = by_key.get((fid, seq + d))
             if not nb:
+                continue
+            # 한 번에 여러 문서를 올린 경우(활용 가이드 메뉴 전체 등) seq는 파일 전체에서
+            # 이어지므로, 이웃이 '다른 원본 문서'의 첫/마지막 장일 수 있다. 그걸 이어 붙이면
+            # 서로 상관없는 두 가이드가 한 근거로 섞인다 - 문서 경계를 넘지 않는다.
+            if nb.get("doc_title") != item.get("doc_title"):
                 continue
             parts.append(nb["chunk_text"])
             if nb["page_no"] is not None:
@@ -209,4 +230,9 @@ async def search_manual_chunks(query: str, top_k: int = 5, *,
         except (TypeError, ValueError):
             window = 1
         picked = await _attach_neighbors(pool, picked, max(0, min(window, 3)))
+
+    # 메뉴 경로 + 문서 이름을 미리 이어 둔다. LLM이 두 필드를 직접 조합하게 두면
+    # 빠뜨리거나 순서를 바꾸기 쉬우므로, 답변에 그대로 옮겨 적을 문자열을 만들어 준다.
+    for item in picked:
+        item["reference"] = full_reference(item)
     return mode, picked

@@ -129,6 +129,7 @@ function ManualsPanel() {
   const [contentCols, setContentCols] = useState([]);
   const [titleCol, setTitleCol] = useState("");
   const [pageCol, setPageCol] = useState("");
+  const [docCol, setDocCol] = useState("");   // 행마다의 원본 문서 이름(ppt_title 등)
 
   const [embStatus, setEmbStatus] = useState(null);
   const [reembedBusy, setReembedBusy] = useState(false);
@@ -191,7 +192,7 @@ function ManualsPanel() {
     return "";
   };
 
-  const resetPreviews = () => { setDocPreview(null); setExcelPreview(null); setContentCols([]); setTitleCol(""); setPageCol(""); };
+  const resetPreviews = () => { setDocPreview(null); setExcelPreview(null); setContentCols([]); setTitleCol(""); setPageCol(""); setDocCol(""); };
 
   const appendFile = (fd, f) => { if (f.serverPath) fd.append("server_path", f.serverPath); else fd.append("file", f); };
 
@@ -216,7 +217,11 @@ function ManualsPanel() {
         fd.append("drop_urls", opts.drop_urls);
         const r = await fetch("/api/manuals/excel/preview", { method: "POST", body: fd });
         if (!r.ok) throw new Error(await r.text());
-        setExcelPreview(await r.json());
+        const prev = await r.json();
+        setExcelPreview(prev);
+        // 사내 추출 포맷은 원본 PPT 이름을 ppt_title 열에 담는다 - 있으면 자동으로 잡아 준다.
+        const auto = (prev.columns || []).find(c => /^(ppt_?title|문서명|자료명|document_?title)$/i.test(String(c).trim()));
+        if (auto) setDocCol(auto);
       } else {
         const fd = new FormData();
         appendFile(fd, file);
@@ -255,7 +260,7 @@ function ManualsPanel() {
         body: JSON.stringify({
           upload_id: excelPreview.upload_id, title,
           content_columns: contentCols, title_column: titleCol || null,
-          page_no_column: pageCol || null,
+          page_no_column: pageCol || null, doc_title_column: docCol || null,
         }),
       });
       resetPreviews(); setTitle(""); setFile(null);
@@ -437,16 +442,19 @@ function ManualsPanel() {
           <div className="subtitle">
             행 하나가 검색 청크(chunk) 하나가 됩니다. 아래 표에서 열마다 3가지를 고르세요(전부 선택 사항, 필요한 것만 체크):<br/>
             ① <strong>내용</strong>(체크박스, 여러 개 가능) — 청크 본문에 넣을 열. 체크한 열들이 전부 <code>열이름: 값</code> 줄로 이어붙습니다.<br/>
-            ② <strong>제목</strong>(라디오, 최대 1개) — 청크의 소제목으로 쓸 열(예: section, ppt_title).<br/>
-            ③ <strong>페이지/순번</strong>(라디오, 최대 1개) — 숫자인 열(예: slide_index)이면 청크의 p번호로 저장.<br/>
+            ② <strong>문서명</strong>(라디오, 최대 1개) — 행마다의 <strong>원본 가이드 문서 이름</strong>이 든 열(예: <code>ppt_title</code>).
+            메뉴 하나에 여러 문서가 섞여 있을 때 필수입니다. 답변에서 "문서 위치 + 이 이름"으로 안내됩니다. <code>ppt_title</code>이 있으면 자동으로 잡힙니다.<br/>
+            ③ <strong>제목</strong>(라디오, 최대 1개) — 청크의 소제목으로 쓸 열(예: section).<br/>
+            ④ <strong>페이지/순번</strong>(라디오, 최대 1개) — 숫자인 열(예: slide_index)이면 청크의 p번호로 저장.<br/>
             뭘 체크해야 할지 모르겠으면 일단 텍스트/설명이 들어있는 열만 "내용"에 체크해도 충분합니다 — 아래 미리보기로 결과를 바로 확인할 수 있습니다.
           </div>
           <table style={{marginBottom: 12}}>
-            <thead><tr><th>① 내용</th><th>② 제목</th><th>③ 페이지/순번</th><th>열 이름</th><th>샘플 값</th></tr></thead>
+            <thead><tr><th>① 내용</th><th>② 문서명</th><th>③ 제목</th><th>④ 페이지/순번</th><th>열 이름</th><th>샘플 값</th></tr></thead>
             <tbody>
               {excelPreview.columns.map((col, i) => (
                 <tr key={col + i}>
                   <td><input type="checkbox" checked={contentCols.includes(col)} onChange={() => toggleContentCol(col)} /></td>
+                  <td><input type="radio" name="dc" checked={docCol === col} onChange={() => setDocCol(col)} /></td>
                   <td><input type="radio" name="tc" checked={titleCol === col} onChange={() => setTitleCol(col)} /></td>
                   <td><input type="radio" name="pc" checked={pageCol === col} onChange={() => setPageCol(col)} /></td>
                   <td style={{fontFamily: "var(--mono)"}}>{col}</td>
@@ -461,6 +469,8 @@ function ManualsPanel() {
                 미리보기 — 첫 번째 행이 이렇게 저장됩니다:
               </div>
               <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 4}}>
+                문서명: {docCol ? (excelPreview.sample_rows[0][excelPreview.columns.indexOf(docCol)] || "(비어있음)") : "(없음)"}
+                {" · "}
                 제목: {titleCol ? (excelPreview.sample_rows[0][excelPreview.columns.indexOf(titleCol)] || "(비어있음)") : "(없음)"}
                 {" · "}
                 페이지: {pageCol ? (excelPreview.sample_rows[0][excelPreview.columns.indexOf(pageCol)] || "(비어있음)") : "(없음)"}
@@ -472,6 +482,7 @@ function ManualsPanel() {
           )}
           <div className="row-actions">
             <button className="primary" disabled={busy || contentCols.length === 0} onClick={commitExcel}>선택한 열로 등록</button>
+            {docCol && <button onClick={() => setDocCol("")}>문서명 열 해제</button>}
             {titleCol && <button onClick={() => setTitleCol("")}>제목 열 해제</button>}
             {pageCol && <button onClick={() => setPageCol("")}>페이지 열 해제</button>}
             <button onClick={resetPreviews}>취소</button>

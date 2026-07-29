@@ -32,13 +32,17 @@ router = APIRouter(prefix="/api/manuals", tags=["manuals"])
 _DSN = "manual_db_dsn"
 
 
-def _embed_input(doc_title: str | None, section_title: str | None, chunk_text: str) -> str:
-    """임베딩할 텍스트에 '문서 제목 > 섹션 제목'을 앞에 붙인다(Contextual retrieval).
+def _embed_input(menu_title: str | None, doc_title: str | None,
+                 section_title: str | None, chunk_text: str) -> str:
+    """임베딩할 텍스트에 '등록 제목 > 원본 문서 이름 > 섹션 제목'을 앞에 붙인다
+    (Contextual retrieval).
 
     청크 본문만 임베딩하면 "이게 무엇에 대한 문서인지"가 벡터에 안 들어간다. 특히 엑셀/CSV처럼
     한 행이 한 청크인 경우 본문이 짧아 문맥이 거의 없어서, 제목을 붙이면 검색 정확도가 크게 는다.
+    한 번에 여러 가이드 문서를 올리면(활용 가이드 메뉴 전체 등) 등록 제목만으로는 문서가
+    구분되지 않으므로 원본 문서 이름(doc_title)까지 넣는다.
     (본문 자체는 그대로 저장하고, 임베딩 입력에만 붙인다.)"""
-    head = " > ".join(x for x in (doc_title, section_title) if x)
+    head = " > ".join(x for x in (menu_title, doc_title, section_title) if x)
     return f"{head}\n{chunk_text}" if head else chunk_text
 
 
@@ -86,7 +90,7 @@ async def get_manual(manual_id: int, admin: str = Depends(require_admin)):
     if not file_row:
         raise HTTPException(404, "문서를 찾을 수 없습니다.")
     chunks = await pool.fetch(
-        "SELECT id, seq, section_title, page_no, chunk_text, (embedding IS NOT NULL) AS embedded "
+        "SELECT id, seq, doc_title, section_title, page_no, chunk_text, (embedding IS NOT NULL) AS embedded "
         "FROM manual_chunks WHERE manual_file_id = $1 ORDER BY seq",
         manual_id,
     )
@@ -109,7 +113,9 @@ async def list_versions(manual_id: int, admin: str = Depends(require_admin)):
 
 async def _insert_draft(title: str, filename: str, source_type: str, uploaded_by: str,
                         chunks: list) -> dict:
-    """청크 리스트를 새 draft 버전으로 저장하는 공통 헬퍼. chunks는 (section_title, page_no, text) 튜플."""
+    """청크 리스트를 새 draft 버전으로 저장하는 공통 헬퍼.
+    chunks는 (doc_title, section_title, page_no, text) 튜플이다.
+    doc_title은 한 번에 여러 문서를 올릴 때의 '원본 문서 이름'으로, 없으면 None."""
     pool = await get_pool(_DSN)
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -124,13 +130,14 @@ async def _insert_draft(title: str, filename: str, source_type: str, uploaded_by
                 """,
                 title, filename, source_type, uploaded_by, next_version,
             )
-            for seq, (section_title, page_no, text) in enumerate(chunks):
+            for seq, (doc_title, section_title, page_no, text) in enumerate(chunks):
                 await conn.execute(
                     """
-                    INSERT INTO manual_chunks (manual_file_id, seq, section_title, page_no, chunk_text)
-                    VALUES ($1, $2, $3, $4, $5)
+                    INSERT INTO manual_chunks
+                        (manual_file_id, seq, doc_title, section_title, page_no, chunk_text)
+                    VALUES ($1, $2, $3, $4, $5, $6)
                     """,
-                    file_id, seq, section_title, page_no, text,
+                    file_id, seq, doc_title, section_title, page_no, text,
                 )
     return {"manual_file_id": file_id, "version": next_version, "chunk_count": len(chunks)}
 
@@ -199,7 +206,7 @@ async def commit_document(body: DocCommitIn, uploaded_by: str = Depends(require_
 
     if not parsed:
         raise HTTPException(422, "문서에서 추출된 내용이 없습니다.")
-    chunks = [(c.section_title, c.page_no, c.chunk_text) for c in parsed]
+    chunks = [(None, c.section_title, c.page_no, c.chunk_text) for c in parsed]
     return await _insert_draft(body.title, session["filename"], "document", uploaded_by, chunks)
 
 
@@ -242,6 +249,10 @@ class ExcelCommitIn(BaseModel):
     content_columns: list[str] = Field(min_length=1)
     title_column: str | None = None
     page_no_column: str | None = None
+    # 한 파일에 여러 가이드 문서가 섞여 있을 때, 행마다의 '원본 문서 이름'이 든 열.
+    # (사내 표준 추출 포맷에서는 ppt_title) 지정하면 청크마다 저장돼 답변에서
+    # "메뉴 경로 > 문서 이름"으로 안내된다.
+    doc_title_column: str | None = None
 
 
 @router.post("/excel/commit")
@@ -255,6 +266,9 @@ async def commit_excel(body: ExcelCommitIn, uploaded_by: str = Depends(require_a
         header, col_idx, rows = load_table_rows(path)
         for c in body.content_columns:
             if c not in col_idx:
+                raise ValueError(f"존재하지 않는 컬럼입니다: {c}")
+        for c in (body.title_column, body.page_no_column, body.doc_title_column):
+            if c and c not in col_idx:
                 raise ValueError(f"존재하지 않는 컬럼입니다: {c}")
 
         built = []
@@ -274,6 +288,10 @@ async def commit_excel(body: ExcelCommitIn, uploaded_by: str = Depends(require_a
             if body.title_column and body.title_column in col_idx:
                 tv = row[col_idx[body.title_column]]
                 section_title = clean_text(str(tv), opts) if tv is not None else None
+            doc_title = None
+            if body.doc_title_column and body.doc_title_column in col_idx:
+                dv = row[col_idx[body.doc_title_column]]
+                doc_title = clean_text(str(dv), opts) if dv is not None else None
             page_no = None
             if body.page_no_column and body.page_no_column in col_idx:
                 pv = row[col_idx[body.page_no_column]]
@@ -281,7 +299,7 @@ async def commit_excel(body: ExcelCommitIn, uploaded_by: str = Depends(require_a
                     page_no = int(pv) if pv is not None else None
                 except (TypeError, ValueError):
                     page_no = None
-            built.append((section_title or None, page_no, content))
+            built.append((doc_title or None, section_title or None, page_no, content))
         return built
 
     try:
@@ -360,14 +378,15 @@ async def publish_manual(manual_id: int, admin: str = Depends(require_admin)):
         embed_dim = 1024
 
     unembedded = await pool.fetch(
-        "SELECT id, section_title, chunk_text FROM manual_chunks "
+        "SELECT id, doc_title, section_title, chunk_text FROM manual_chunks "
         "WHERE manual_file_id = $1 AND embedding IS NULL",
         manual_id,
     )
     embedded_count = 0
     for c in unembedded:
         try:
-            vec = await embed_text(_embed_input(file_row["title"], c["section_title"], c["chunk_text"]))
+            vec = await embed_text(_embed_input(
+                file_row["title"], c["doc_title"], c["section_title"], c["chunk_text"]))
         except Exception as e:  # noqa: BLE001
             raise HTTPException(
                 503,
@@ -476,7 +495,7 @@ async def reembed(limit: int = 300, admin: str = Depends(require_admin)):
     model, dim = await _embed_settings()
     pool = await get_pool(_DSN)
     rows = await pool.fetch(
-        f"SELECT c.id, c.section_title, c.chunk_text, f.title FROM manual_chunks c "
+        f"SELECT c.id, c.doc_title, c.section_title, c.chunk_text, f.title FROM manual_chunks c "
         f"JOIN manual_files f ON f.id = c.manual_file_id WHERE {_stale_where()} "
         "ORDER BY c.id LIMIT $3",
         model, dim, max(1, min(int(limit), 1000)),
@@ -484,7 +503,8 @@ async def reembed(limit: int = 300, admin: str = Depends(require_admin)):
     done = 0
     for c in rows:
         try:
-            vec = await embed_text(_embed_input(c["title"], c["section_title"], c["chunk_text"]))
+            vec = await embed_text(_embed_input(
+                c["title"], c["doc_title"], c["section_title"], c["chunk_text"]))
         except Exception as e:  # noqa: BLE001
             raise HTTPException(503, f"임베딩 서버 오류로 중단했습니다({done}개 완료). 원인: {e}")
         if len(vec) != dim:
