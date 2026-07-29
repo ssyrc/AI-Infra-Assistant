@@ -30,6 +30,16 @@ router = APIRouter(prefix="/api/manuals", tags=["manuals"])
 _DSN = "manual_db_dsn"
 
 
+def _embed_input(doc_title: str | None, section_title: str | None, chunk_text: str) -> str:
+    """임베딩할 텍스트에 '문서 제목 > 섹션 제목'을 앞에 붙인다(Contextual retrieval).
+
+    청크 본문만 임베딩하면 "이게 무엇에 대한 문서인지"가 벡터에 안 들어간다. 특히 엑셀/CSV처럼
+    한 행이 한 청크인 경우 본문이 짧아 문맥이 거의 없어서, 제목을 붙이면 검색 정확도가 크게 는다.
+    (본문 자체는 그대로 저장하고, 임베딩 입력에만 붙인다.)"""
+    head = " > ".join(x for x in (doc_title, section_title) if x)
+    return f"{head}\n{chunk_text}" if head else chunk_text
+
+
 @router.get("")
 async def list_manuals(admin: str = Depends(require_admin)):
     pool = await get_pool(_DSN)
@@ -324,13 +334,14 @@ async def publish_manual(manual_id: int, admin: str = Depends(require_admin)):
         embed_dim = 1024
 
     unembedded = await pool.fetch(
-        "SELECT id, chunk_text FROM manual_chunks WHERE manual_file_id = $1 AND embedding IS NULL",
+        "SELECT id, section_title, chunk_text FROM manual_chunks "
+        "WHERE manual_file_id = $1 AND embedding IS NULL",
         manual_id,
     )
     embedded_count = 0
     for c in unembedded:
         try:
-            vec = await embed_text(c["chunk_text"])
+            vec = await embed_text(_embed_input(file_row["title"], c["section_title"], c["chunk_text"]))
         except Exception as e:  # noqa: BLE001
             raise HTTPException(
                 503,
@@ -439,13 +450,15 @@ async def reembed(limit: int = 300, admin: str = Depends(require_admin)):
     model, dim = await _embed_settings()
     pool = await get_pool(_DSN)
     rows = await pool.fetch(
-        f"SELECT id, chunk_text FROM manual_chunks WHERE {_stale_where()} ORDER BY id LIMIT $3",
+        f"SELECT c.id, c.section_title, c.chunk_text, f.title FROM manual_chunks c "
+        f"JOIN manual_files f ON f.id = c.manual_file_id WHERE {_stale_where()} "
+        "ORDER BY c.id LIMIT $3",
         model, dim, max(1, min(int(limit), 1000)),
     )
     done = 0
     for c in rows:
         try:
-            vec = await embed_text(c["chunk_text"])
+            vec = await embed_text(_embed_input(c["title"], c["section_title"], c["chunk_text"]))
         except Exception as e:  # noqa: BLE001
             raise HTTPException(503, f"임베딩 서버 오류로 중단했습니다({done}개 완료). 원인: {e}")
         if len(vec) != dim:

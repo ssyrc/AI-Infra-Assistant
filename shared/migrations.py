@@ -321,6 +321,34 @@ MIGRATIONS: list[tuple[str, int, str]] = [
         );
         CREATE INDEX IF NOT EXISTS voc_upload_sessions_expires_idx ON upload_sessions (expires_at);
     """),
+    # --- 한국어 검색 강화 -------------------------------------------------------
+    # 'simple' tsvector는 공백 토큰화만 해서 한국어에서 매칭이 거의 안 된다("접근하려면" != "접근").
+    # 형태소 분석기는 폐쇄망 오프라인 설치가 번거로우므로, Postgres 기본 contrib인 pg_trgm의
+    # 문자 3-gram을 세 번째 검색 축으로 추가한다. 확장이 없는 환경에서도 죽지 않도록
+    # 코드가 pg_extension을 먼저 확인하고 없으면 이 축을 건너뛴다.
+    # 또한 tsvector에 섹션 제목을 포함시켜(Contextual retrieval) 제목 키워드로도 잡히게 한다.
+    ("manual_db", 6, """
+        CREATE EXTENSION IF NOT EXISTS pg_trgm;
+        CREATE INDEX IF NOT EXISTS manual_chunks_trgm_idx
+            ON manual_chunks USING gin (chunk_text gin_trgm_ops);
+        ALTER TABLE manual_chunks DROP COLUMN IF EXISTS tsv;
+        ALTER TABLE manual_chunks ADD COLUMN tsv tsvector
+            GENERATED ALWAYS AS (
+                to_tsvector('simple',
+                    coalesce(section_title, '') || ' ' || coalesce(chunk_text, ''))
+            ) STORED;
+        CREATE INDEX IF NOT EXISTS manual_chunks_tsv_idx ON manual_chunks USING gin (tsv);
+    """),
+    ("voc_db", 6, """
+        CREATE EXTENSION IF NOT EXISTS pg_trgm;
+        CREATE INDEX IF NOT EXISTS voc_records_trgm_idx
+            ON voc_records USING gin ((question || ' ' || answer) gin_trgm_ops);
+    """),
+    ("command_db", 6, """
+        CREATE EXTENSION IF NOT EXISTS pg_trgm;
+        CREATE INDEX IF NOT EXISTS command_catalog_trgm_idx
+            ON command_catalog USING gin ((name || ' ' || description) gin_trgm_ops);
+    """),
     # v5: 카탈로그(매뉴얼 엑셀 업로드본)에 등록된 커맨드를 그대로 실행할 수 있게 한다.
     #     exec_command = 실제 실행할 커맨드 문자열(셸 없이 shlex 분해 후 argv로 실행).
     #     비어 있으면 name을 그대로 실행한다 -> 기존에 올린 카탈로그도 추가 작업 없이 실행 가능.
@@ -349,6 +377,9 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
         ("rerank_timeout_seconds", "5", "리랭커 타임아웃(초). 초과 시 RRF 결과로 fallback", True, False, False),
         # 검색 결과 검증: 리랭커 점수가 이 값 미만이면 질문과 무관한 문서로 보고 버린다.
         # 0으로 두면 필터 없음. 올릴수록 "확인되지 않습니다"가 늘고, 내릴수록 엉뚱한 근거가 섞인다.
+        # 상위 결과가 사실상 같은 문장으로 채워지는 걸 막는다(1이면 중복 제거 안 함).
+        ("dedup_similarity", "0.85",
+         "검색 결과 중복 제거 기준(3-gram 자카드 유사도, 1이면 비활성)", True, False, False),
         ("rerank_min_score", "0.05",
          "검색 결과로 채택할 최소 리랭커 관련도 점수(0~1, 0이면 필터 없음)", True, False, False),
         ("embed_cache_ttl_seconds", "86400", "쿼리 임베딩 캐시 TTL(초)", True, False, False),

@@ -8,6 +8,8 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../shared"))
 from db import get_pool, embed_text, vector_literal, rerank, clamp_top_k, clamp_candidates  # noqa: E402
 from pii import mask_record  # noqa: E402
+from config_store import get_config  # noqa: E402
+from retrieval import ts_or_query, expand_query, has_trgm, mmr_dedup  # noqa: E402
 
 from mcp.server.fastmcp import FastMCP
 
@@ -82,19 +84,70 @@ async def search_voc(
     except Exception as e:  # noqa: BLE001
         print(f"[voc-mcp] 임베딩 실패, 키워드 검색으로 fallback: {type(e).__name__}: {e}")
 
+    variants = expand_query(query)
+    ts_query = ts_or_query(" ".join(variants)) or ts_or_query(query) or "''"
+    use_trgm = await has_trgm(pool, "voc_db_dsn")
+
     if vec is None:
         rows = await pool.fetch(
             """
             SELECT id, question, answer, department, resolved, created_at,
-                   ts_rank(tsv, plainto_tsquery('simple', $1)) AS score
+                   ts_rank(tsv, to_tsquery('simple', $1)) AS score
             FROM voc_records
             WHERE ($2::text IS NULL OR department = $2)
               AND ($3::boolean IS FALSE OR resolved = true)
-              AND tsv @@ plainto_tsquery('simple', $1)
+              AND tsv @@ to_tsquery('simple', $1)
             ORDER BY score DESC
             LIMIT $4
             """,
-            query, department, resolved_only, candidate_k,
+            ts_query, department, resolved_only, candidate_k,
+        )
+    elif use_trgm:
+        # 3축 RRF: 벡터(의미) + 키워드(정확 일치) + 3-gram(한국어 부분 일치)
+        rows = await pool.fetch(
+            """
+            WITH vector_search AS (
+                SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> $1::vector) AS rank
+                FROM voc_records
+                WHERE ($2::text IS NULL OR department = $2)
+                  AND ($3::boolean IS FALSE OR resolved = true)
+                  AND embedding IS NOT NULL
+                ORDER BY embedding <=> $1::vector LIMIT 50
+            ),
+            keyword_search AS (
+                SELECT id, ROW_NUMBER() OVER (
+                    ORDER BY ts_rank(tsv, to_tsquery('simple', $4)) DESC) AS rank
+                FROM voc_records
+                WHERE ($2::text IS NULL OR department = $2)
+                  AND ($3::boolean IS FALSE OR resolved = true)
+                  AND tsv @@ to_tsquery('simple', $4)
+                LIMIT 50
+            ),
+            trgm_search AS (
+                SELECT id, ROW_NUMBER() OVER (
+                    ORDER BY similarity(question || ' ' || answer, $5) DESC) AS rank
+                FROM voc_records
+                WHERE ($2::text IS NULL OR department = $2)
+                  AND ($3::boolean IS FALSE OR resolved = true)
+                  AND (question || ' ' || answer) % $5
+                LIMIT 50
+            ),
+            fused AS (
+                SELECT COALESCE(v.id, k.id, t.id) AS id,
+                       COALESCE(1.0/(60+v.rank),0) + COALESCE(1.0/(60+k.rank),0)
+                       + COALESCE(1.0/(60+t.rank),0) AS rrf_score
+                FROM vector_search v
+                FULL OUTER JOIN keyword_search k ON v.id = k.id
+                FULL OUTER JOIN trgm_search t ON COALESCE(v.id, k.id) = t.id
+            )
+            SELECT r.id, r.question, r.answer, r.department, r.resolved, r.created_at,
+                   fused.rrf_score AS score
+            FROM fused
+            JOIN voc_records r ON r.id = fused.id
+            ORDER BY fused.rrf_score DESC
+            LIMIT $6
+            """,
+            vector_literal(vec), department, resolved_only, ts_query, query, candidate_k,
         )
     else:
         rows = await pool.fetch(
@@ -110,12 +163,12 @@ async def search_voc(
             ),
             keyword_search AS (
                 SELECT id, ROW_NUMBER() OVER (
-                    ORDER BY ts_rank(tsv, plainto_tsquery('simple', $4)) DESC
+                    ORDER BY ts_rank(tsv, to_tsquery('simple', $4)) DESC
                 ) AS rank
                 FROM voc_records
                 WHERE ($2::text IS NULL OR department = $2)
                   AND ($3::boolean IS FALSE OR resolved = true)
-                  AND tsv @@ plainto_tsquery('simple', $4)
+                  AND tsv @@ to_tsquery('simple', $4)
                 LIMIT 50
             ),
             fused AS (
@@ -131,7 +184,7 @@ async def search_voc(
             ORDER BY fused.rrf_score DESC
             LIMIT $5
             """,
-            vector_literal(vec), department, resolved_only, query, candidate_k,
+            vector_literal(vec), department, resolved_only, ts_query, candidate_k,
         )
 
     candidates = [dict(r) for r in rows]
@@ -139,7 +192,7 @@ async def search_voc(
         return []
 
     docs = [f"{c['question']}\n{c['answer']}" for c in candidates]
-    ranked = await rerank(query, docs, top_k)
+    ranked = await rerank(query, docs, top_k * 2)   # MMR로 걸러질 것을 감안해 여유 있게
     result = []
     for idx, rr_score in ranked:
         item = candidates[idx]
@@ -148,7 +201,13 @@ async def search_voc(
         item = mask_record(item, ("question", "answer", "department"))
         item["rerank_score"] = rr_score
         result.append(item)
-    return result
+
+    # 사실상 같은 사례가 상위를 다 차지하지 않게 중복 제거(VOC는 유사 문의가 반복 등록된다).
+    try:
+        threshold = float(await get_config("dedup_similarity", "0.85"))
+    except (TypeError, ValueError):
+        threshold = 0.85
+    return mmr_dedup(result, lambda c: f"{c['question']} {c['answer']}", top_k, threshold)
 
 
 if __name__ == "__main__":

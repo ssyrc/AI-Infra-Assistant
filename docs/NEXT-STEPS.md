@@ -28,7 +28,9 @@ rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker compose -f docker-compose.dev.yml run --rm db-init    # voc_db v5 확인
+docker compose -f docker-compose.dev.yml run --rm db-init
+# manual_db v6 / voc_db v6 / command_db v6(pg_trgm) 적용 확인.
+# 'extension "pg_trgm" is not available' 에러가 나면 그 출력을 전달할 것.
 docker compose -f docker-compose.dev.yml up -d
 ```
 
@@ -167,14 +169,20 @@ docker compose -f docker-compose.dev.yml restart agent-server
 `voc_intake_guide` 값을 **실제 사내 서비스 포탈 경로**로 바꾼다(기본값은 임시 문구).
 운영자 확인이 필요한 사례일 때 에이전트가 이 경로로 안내한다.
 
-## 8. [웹] VOC 탭 — 아무 엑셀이나 올려서 확인
+## 8. [웹] 매뉴얼 탭 — 재임베딩 (RAG 개선 적용에 필요)
+
+임베딩 입력에 문서·섹션 제목을 붙이도록 바뀌어서(문맥 주입), **기존 문서는 다시 임베딩해야**
+개선이 적용된다. 매뉴얼 탭 상단 **"현재 설정으로 다시 임베딩"** 클릭.
+(경고 배너가 없으면 안 눌러도 되지만, 검색 품질을 위해 한 번 돌리는 걸 권장.)
+
+## 9. [웹] VOC 탭 — 아무 엑셀이나 올려서 확인
 
 이제 형식 제한이 없다. 파일을 고르면 **헤더 행을 자동으로 찾아** 열 목록을 보여준다.
 - 헤더 행 인식이 틀리면 실제 행 번호를 입력하고 Enter로 다시 읽는다.
 - 질문/답변 열만 고르면 등록된다(사내 표준 포맷이면 자동으로 채워져 있음).
 - 제외 조건: "제외 기준 열"에 만족도, 값에 `불만족, 매우불만족` / "비어 있으면 건너뛸 열"에 조치일.
 
-## 9. [웹] VOC 답변 확인 — Open WebUI
+## 10. [웹] VOC 답변 확인 — Open WebUI
 
 과거 사례가 있는 증상을 물어본다(예: 예전 VOC에 있던 오류 메시지).
 - 사용자가 직접 해결했던 사례 → 그 방법을 안내해야 한다.

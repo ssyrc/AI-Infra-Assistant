@@ -24,6 +24,7 @@ from mcp_caller import (  # noqa: E402
 )
 from ssh_exec import run_ssh_as_user  # noqa: E402
 from catalog_exec import DEFAULT_DENY_CSV, build_catalog_argv, deny_set  # noqa: E402
+from retrieval import ts_or_query, expand_query, has_trgm, mmr_dedup  # noqa: E402
 
 from mcp.server.fastmcp import FastMCP
 
@@ -63,19 +64,55 @@ async def search_commands(query: str, top_k: int = 10) -> list[dict]:
     except Exception as e:  # noqa: BLE001
         print(f"[command-mcp] 임베딩 실패, 키워드 검색으로 fallback: {type(e).__name__}: {e}")
 
+    variants = expand_query(query)
+    ts_query = ts_or_query(" ".join(variants)) or ts_or_query(query) or "''"
+    use_trgm = await has_trgm(pool, _DSN)
+
     if vec is None:
         rows = await pool.fetch(
             """
             SELECT id, name, description, exec_command,
-                   ts_rank(tsv, plainto_tsquery('simple', $1)) AS score
+                   ts_rank(tsv, to_tsquery('simple', $1)) AS score
             FROM command_catalog
-            WHERE tsv @@ plainto_tsquery('simple', $1)
-               OR name ILIKE '%' || $1 || '%'
-               OR description ILIKE '%' || $1 || '%'
+            WHERE tsv @@ to_tsquery('simple', $1)
+               OR name ILIKE '%' || $2 || '%'
+               OR description ILIKE '%' || $2 || '%'
             ORDER BY score DESC
-            LIMIT $2
+            LIMIT $3
             """,
-            query, candidate_k,
+            ts_query, query, candidate_k,
+        )
+    elif use_trgm:
+        rows = await pool.fetch(
+            """
+            WITH vector_search AS (
+                SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> $1::vector) AS rank
+                FROM command_catalog WHERE embedding IS NOT NULL
+                ORDER BY embedding <=> $1::vector LIMIT 50
+            ),
+            keyword_search AS (
+                SELECT id, ROW_NUMBER() OVER (
+                    ORDER BY ts_rank(tsv, to_tsquery('simple', $2)) DESC) AS rank
+                FROM command_catalog WHERE tsv @@ to_tsquery('simple', $2) LIMIT 50
+            ),
+            trgm_search AS (
+                SELECT id, ROW_NUMBER() OVER (
+                    ORDER BY similarity(name || ' ' || description, $3) DESC) AS rank
+                FROM command_catalog WHERE (name || ' ' || description) % $3 LIMIT 50
+            ),
+            fused AS (
+                SELECT COALESCE(v.id, k.id, t.id) AS id,
+                       COALESCE(1.0/(60+v.rank),0) + COALESCE(1.0/(60+k.rank),0)
+                       + COALESCE(1.0/(60+t.rank),0) AS rrf_score
+                FROM vector_search v
+                FULL OUTER JOIN keyword_search k ON v.id = k.id
+                FULL OUTER JOIN trgm_search t ON COALESCE(v.id, k.id) = t.id
+            )
+            SELECT c.id, c.name, c.description, c.exec_command, fused.rrf_score AS score
+            FROM fused JOIN command_catalog c ON c.id = fused.id
+            ORDER BY fused.rrf_score DESC LIMIT $4
+            """,
+            vector_literal(vec), ts_query, query, candidate_k,
         )
     else:
         rows = await pool.fetch(
@@ -89,10 +126,10 @@ async def search_commands(query: str, top_k: int = 10) -> list[dict]:
             ),
             keyword_search AS (
                 SELECT id, ROW_NUMBER() OVER (
-                    ORDER BY ts_rank(tsv, plainto_tsquery('simple', $2)) DESC
+                    ORDER BY ts_rank(tsv, to_tsquery('simple', $2)) DESC
                 ) AS rank
                 FROM command_catalog
-                WHERE tsv @@ plainto_tsquery('simple', $2)
+                WHERE tsv @@ to_tsquery('simple', $2)
                 LIMIT 50
             ),
             fused AS (
@@ -108,7 +145,7 @@ async def search_commands(query: str, top_k: int = 10) -> list[dict]:
             ORDER BY fused.rrf_score DESC
             LIMIT $3
             """,
-            vector_literal(vec), query, candidate_k,
+            vector_literal(vec), ts_query, candidate_k,
         )
 
     candidates = [dict(r) for r in rows]
@@ -116,7 +153,7 @@ async def search_commands(query: str, top_k: int = 10) -> list[dict]:
         return []
 
     docs = [f"{c['name']}\n{c['description']}" for c in candidates]
-    ranked = await rerank(query, docs, top_k)
+    ranked = await rerank(query, docs, top_k * 2)
     result = []
     for idx, rr_score in ranked:
         item = candidates[idx]
@@ -124,7 +161,7 @@ async def search_commands(query: str, top_k: int = 10) -> list[dict]:
         item["command"] = (item.pop("exec_command", None) or item["name"])
         item["rerank_score"] = rr_score
         result.append(item)
-    return result
+    return mmr_dedup(result, lambda c: f"{c['name']} {c['description']}", top_k, 0.9)
 
 
 @mcp.tool()

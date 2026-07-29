@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from cleaning import clean_text, CleanOptions
 
 MAX_CHUNK_CHARS = 1500
+# 조각 경계에서 문장이 잘려 근거가 반쪽만 남는 걸 막기 위해 앞 조각의 꼬리를 다음 조각에 겹쳐 준다.
+CHUNK_OVERLAP_CHARS = 200
 
 _converter = None
 
@@ -214,7 +216,12 @@ def _split_by_headers(markdown: str) -> list[tuple[str | None, str]]:
     return sections
 
 
-def _split_long_text(text: str, max_chars: int) -> list[str]:
+def _split_long_text(text: str, max_chars: int,
+                    overlap: int = CHUNK_OVERLAP_CHARS) -> list[str]:
+    """긴 텍스트를 문단 경계로 자르되, 조각 사이를 overlap만큼 겹친다.
+
+    겹치지 않으면 경계에 걸친 문장이 어느 조각에서도 온전하지 않아, 그 부분이 근거로 필요할 때
+    반쪽짜리 문맥만 검색된다."""
     if len(text) <= max_chars:
         return [text]
     paragraphs = text.split("\n\n")
@@ -228,11 +235,21 @@ def _split_long_text(text: str, max_chars: int) -> list[str]:
     if buf:
         pieces.append(buf)
     # 여전히 너무 긴 조각은 하드 컷
-    final = []
+    cut = []
     for piece in pieces:
         while len(piece) > max_chars:
-            final.append(piece[:max_chars])
+            cut.append(piece[:max_chars])
             piece = piece[max_chars:]
         if piece:
-            final.append(piece)
+            cut.append(piece)
+    if overlap <= 0 or len(cut) < 2:
+        return cut
+    # 앞 조각의 끝 overlap 글자를 다음 조각 앞에 붙인다(문장 중간에서 끊기지 않게 공백 기준 보정).
+    final = [cut[0]]
+    for i in range(1, len(cut)):
+        tail = cut[i - 1][-overlap:]
+        sp = tail.find(" ")
+        if 0 <= sp < len(tail) - 1:
+            tail = tail[sp + 1:]
+        final.append(f"{tail}\n{cut[i]}")
     return final
