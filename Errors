@@ -10,3 +10,6 @@ Filesystem    Directory       Used(GB)   Limit(GB)       Files File limits
 gpfs.gpu1     yr9.choi          10,555           0   4,202,829           0
 
 
+3. 유저 권한으로 open-webui 에서 채팅 테스트 - 에러 디버깅 필요
+Q: 안녕
+A: [오류가 발생했습니다: 'Context variable not found: 사업부명.']
