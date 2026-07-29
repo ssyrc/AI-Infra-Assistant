@@ -213,40 +213,75 @@ def _event_text(event) -> str:
     return "".join(p.text or "" for p in event.content.parts)
 
 
-def _short_result(resp) -> str:
-    """도구 결과를 상태 줄에 넣을 한 조각으로 줄인다."""
+# 도구 이름을 그대로 보여주면 사용자에게 의미가 없고 내부 구현이 드러난다.
+# 이름의 성격(검색/실행/조회)만 보고 사람 말로 바꿔서, 무엇을 하는 중인지만 알린다.
+# 관리자가 콘솔에서 새 도구를 추가해도 규칙이 그대로 적용되도록 이름 매칭은 부분 문자열로 한다.
+_ACTION_RULES = (
+    ("manual",   "매뉴얼에서 {q} 찾는 중"),
+    ("document", "문서 내용 확인하는 중"),
+    ("voc",      "과거 사례에서 {q} 찾는 중"),
+    ("command",  "{q} 관련 커맨드 확인하는 중"),
+    ("job",      "작업 상태 확인하는 중"),
+    ("gpu",      "GPU 상태 확인하는 중"),
+    ("disk",     "저장공간 확인하는 중"),
+    ("file",     "파일 확인하는 중"),
+    ("dir",      "디렉토리 확인하는 중"),
+    ("system",   "시스템 정보 확인하는 중"),
+)
+
+
+def _first_text_arg(args: dict) -> str:
+    for v in (args or {}).values():
+        if isinstance(v, str) and v.strip():
+            return v.strip()[:40]
+    return ""
+
+
+def _action_phrase(name: str, args: dict) -> str:
+    """도구 호출을 사용자에게 보여줄 한 줄 문장으로 바꾼다(도구 이름은 노출하지 않는다)."""
+    low = (name or "").lower()
+    q = _first_text_arg(args)
+    quoted = f"'{q}'" if q else ""
+    if "run" in low or "exec" in low:
+        return f"{quoted} 실행하는 중" if q else "커맨드 실행하는 중"
+    for key, template in _ACTION_RULES:
+        if key in low:
+            return template.format(q=quoted).replace("  ", " ").strip()
+    if "search" in low or "find" in low:
+        return f"{quoted} 검색하는 중" if q else "검색하는 중"
+    return "확인하는 중"
+
+
+def _result_phrase(name: str, resp) -> str:
+    """도구 결과를 짧은 상태 문장으로 요약한다."""
     r = resp
     if isinstance(r, dict) and "result" in r and "exit_code" not in r and "stdout" not in r:
         r = r["result"]
+    if isinstance(r, list):
+        return f"{len(r)}건 찾음" if r else "찾은 내용 없음"
     if isinstance(r, dict):
         if r.get("error"):
-            return f"실패 — {str(r['error'])[:70]}"
+            return f"실패 — {str(r['error'])[:60]}"
         if "exit_code" in r:
-            return "완료" if r.get("exit_code") == 0 else f"실패(exit {r['exit_code']})"
-        return "완료"
-    if isinstance(r, list):
-        return f"{len(r)}건"
-    text = str(r)
-    return text[:70] + "…" if len(text) > 70 else (text or "완료")
+            return "완료" if r.get("exit_code") == 0 else f"실패(종료코드 {r['exit_code']})"
+        return "확인 완료"
+    if r is None:
+        return "찾은 내용 없음"
+    text = str(r).strip()
+    return (text[:50] + "…") if len(text) > 50 else (text or "완료")
 
 
 def _tool_status_lines(event) -> str:
-    """도구 호출/결과를 '진행 상태 한 줄'로 바꾼다.
+    """진행 상황을 사람이 읽는 한 줄로 만든다(도구 이름·인자 원문은 노출하지 않는다).
 
-    <think>로 감싸면 Open WebUI가 "생각 중"으로 접어버려 내용이 안 보인다. 그래서 펼쳐진
-    <details open> 블록에 한 줄씩 흘려보낸다 - 답변 전에 내용이 그대로 보이면서 갱신되고,
-    답변이 시작되면 블록이 닫힌다(답변 본문·장기 메모리에는 안 들어간다).
+    Open WebUI가 <details open> 블록 안의 내용을 답변 전에 그대로 보여주므로,
+    사용자는 "지금 무엇을 하는 중인지"만 알게 되고 내부 도구 구성은 드러나지 않는다.
     """
     lines = []
     for fc in (event.get_function_calls() or []):
-        arg = ""
-        for v in (fc.args or {}).values():
-            if isinstance(v, str) and v.strip():
-                arg = v.strip()[:60]
-                break
-        lines.append(f"· {fc.name}{f' — {arg}' if arg else ''}")
+        lines.append(f"· {_action_phrase(fc.name, fc.args)}")
     for fr in (event.get_function_responses() or []):
-        lines.append(f"· {fr.name} → {_short_result(fr.response)}")
+        lines.append(f"· {_result_phrase(fr.name, fr.response)}")
     return "\n".join(lines)
 
 

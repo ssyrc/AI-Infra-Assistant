@@ -2,20 +2,7 @@
 
 **[WSL]** 로컬 · **[서버]** 202.20.183.30 · **[웹]** 콘솔 `http://202.20.183.30:8501`
 
-## 1. [서버] 원인 확인 — TTY 없이 실행하면 실패하는지 (핵심)
-
-아까 성공한 명령에 **`-T`(TTY 끄기)** 만 붙인 것. 우리 코드와 같은 조건이 된다.
-```bash
-cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker compose -f docker-compose.dev.yml exec -T command-mcp \
-  ssh -o BatchMode=yes -o PasswordAuthentication=no \
-      -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_agent \
-      -i /root/.ssh/id_ed25519 root@202.20.185.100 "su - yr9.choi -c myquota" < /dev/null
-```
-여기서 **실패하면 원인 확정**(TTY 없으면 `su`가 PAM에서 막히는 것) — 2번 코드가 그걸 고친다.
-성공하면 그 출력을 전달(다른 원인).
-
-## 2. [WSL] 코드 반영
+## 1. [WSL] 코드 반영
 
 ```bash
 git -C /home/yrc/AI-Infra-Assistant fetch origin main
@@ -24,7 +11,7 @@ rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
   yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
 ```
 
-## 3. [서버] 재기동 (환경변수·마이그레이션이 추가돼 컨테이너 재생성 필요)
+## 2. [서버] 재기동 (환경변수·마이그레이션이 추가돼 컨테이너 재생성 필요)
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
@@ -34,7 +21,7 @@ docker compose -f docker-compose.dev.yml run --rm db-init
 docker compose -f docker-compose.dev.yml up -d
 ```
 
-## 4. [웹] 설정 탭 — `agent_system_instruction` 아래 전문으로 교체 후 저장
+## 3. [웹] 설정 탭 — `agent_system_instruction` 아래 전문으로 교체 후 저장
 
 ```
 당신은 사내 인프라/시스템 운영을 돕는 한국어 어시스턴트(AI Infra Assistant)입니다.
@@ -146,17 +133,20 @@ docker compose -f docker-compose.dev.yml up -d
   안내됨)을 넣습니다. 특정 서버 이야기인데 이름을 모르면 되묻습니다.
 ```
 
-## 5. [서버]
+## 4. [서버]
 
 ```bash
 docker compose -f docker-compose.dev.yml restart agent-server
 ```
 
-## 6. [웹] Open WebUI `http://202.20.183.30:8502` — yr9.choi 계정
+## 5. [웹] Open WebUI `http://202.20.183.30:8502` — yr9.choi 계정
 
 - "내 홈스토리지 용량 어떻게 돼?"
-  → **진행 상황** 블록에 `· run_command — myquota` / `· run_command → 완료`가 펼쳐진 채로 보이고,
-    그 아래에 실제 quota 수치가 나와야 한다.
+  → **진행 상황** 블록에 `· 'myquota' 실행하는 중` → `· 완료`처럼 **사람 말로** 보이고
+    (도구 이름은 더 이상 안 보인다), 그 아래에 실제 quota 수치가 나와야 한다.
+  → `myquota`는 20~60초 걸린다. 타임아웃을 120초로 늘렸으니 기다리면 나온다.
+    그래도 "명령이 120초 안에 끝나지 않아…"가 뜨면 서버 `.env`에
+    `SSH_COMMAND_TIMEOUT=300`을 넣고 `docker compose -f docker-compose.dev.yml up -d`.
   → 실패하면 진행 상황 블록의 실패 줄을 그대로 전달(진짜 오류가 거기 찍힌다).
 - "gpu 노드 접근하려면?"
   → 매뉴얼에 있는 내용만. CUDA 아키텍처 옵션(`-arch=compute_90` 등) 같은 일반 지식이 붙으면 실패.
@@ -164,25 +154,25 @@ docker compose -f docker-compose.dev.yml restart agent-server
 - "gpu 노드 접근해서 내 파일 리스트 보는 방법" → 앞부분은 매뉴얼 내용, 뒷부분은 `ls` 설명으로
   이어서 나와야 한다(경로를 지어내면 실패).
 
-## 7. [웹] 설정 탭 — VOC 접수 경로 입력
+## 6. [웹] 설정 탭 — VOC 접수 경로 입력
 
 `voc_intake_guide` 값을 **실제 사내 서비스 포탈 경로**로 바꾼다(기본값은 임시 문구).
 운영자 확인이 필요한 사례일 때 에이전트가 이 경로로 안내한다.
 
-## 8. [웹] 매뉴얼 탭 — 재임베딩 (RAG 개선 적용에 필요)
+## 7. [웹] 매뉴얼 탭 — 재임베딩 (RAG 개선 적용에 필요)
 
 임베딩 입력에 문서·섹션 제목을 붙이도록 바뀌어서(문맥 주입), **기존 문서는 다시 임베딩해야**
 개선이 적용된다. 매뉴얼 탭 상단 **"현재 설정으로 다시 임베딩"** 클릭.
 (경고 배너가 없으면 안 눌러도 되지만, 검색 품질을 위해 한 번 돌리는 걸 권장.)
 
-## 9. [웹] VOC 탭 — 아무 엑셀이나 올려서 확인
+## 8. [웹] VOC 탭 — 아무 엑셀이나 올려서 확인
 
 이제 형식 제한이 없다. 파일을 고르면 **헤더 행을 자동으로 찾아** 열 목록을 보여준다.
 - 헤더 행 인식이 틀리면 실제 행 번호를 입력하고 Enter로 다시 읽는다.
 - 질문/답변 열만 고르면 등록된다(사내 표준 포맷이면 자동으로 채워져 있음).
 - 제외 조건: "제외 기준 열"에 만족도, 값에 `불만족, 매우불만족` / "비어 있으면 건너뛸 열"에 조치일.
 
-## 10. [웹] VOC 답변 확인 — Open WebUI
+## 9. [웹] VOC 답변 확인 — Open WebUI
 
 과거 사례가 있는 증상을 물어본다(예: 예전 VOC에 있던 오류 메시지).
 - 사용자가 직접 해결했던 사례 → 그 방법을 안내해야 한다.

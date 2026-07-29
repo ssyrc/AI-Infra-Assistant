@@ -126,8 +126,10 @@ services:
       SSH_ROOT_USER: root
       # 호스트 키가 계속 막으면 .env에 SSH_STRICT_HOST_KEY=no 를 넣고 컨테이너를 재생성한다.
       SSH_STRICT_HOST_KEY: ${SSH_STRICT_HOST_KEY:-accept-new}
-      # su - <user>가 TTY 없이 PAM에서 막히는 환경 대응(문제 시 .env에서 false).
-      SSH_FORCE_TTY: ${SSH_FORCE_TTY:-true}
+      # 느린 사내 커맨드(GPFS 쿼터 조회 등)가 중간에 끊기지 않도록 넉넉히.
+      SSH_COMMAND_TIMEOUT: ${SSH_COMMAND_TIMEOUT:-120}
+      # TTY 강제(기본 off). su가 TTY를 요구하는 환경에서만 true로.
+      SSH_FORCE_TTY: ${SSH_FORCE_TTY:-false}
     volumes:
       - ./mcp_servers:/app/mcp_servers:ro
       - ./shared:/app/shared:ro
@@ -158,8 +160,10 @@ services:
       SSH_ROOT_USER: root
       # 호스트 키가 계속 막으면 .env에 SSH_STRICT_HOST_KEY=no 를 넣고 컨테이너를 재생성한다.
       SSH_STRICT_HOST_KEY: ${SSH_STRICT_HOST_KEY:-accept-new}
-      # su - <user>가 TTY 없이 PAM에서 막히는 환경 대응(문제 시 .env에서 false).
-      SSH_FORCE_TTY: ${SSH_FORCE_TTY:-true}
+      # 느린 사내 커맨드(GPFS 쿼터 조회 등)가 중간에 끊기지 않도록 넉넉히.
+      SSH_COMMAND_TIMEOUT: ${SSH_COMMAND_TIMEOUT:-120}
+      # TTY 강제(기본 off). su가 TTY를 요구하는 환경에서만 true로.
+      SSH_FORCE_TTY: ${SSH_FORCE_TTY:-false}
       SSH_CONNECT_TIMEOUT: "8"
     volumes:
       - ./mcp_servers:/app/mcp_servers:ro

@@ -38,14 +38,22 @@ SSH_STRICT_HOST_KEY = os.environ.get("SSH_STRICT_HOST_KEY", "accept-new")
 # `su - <user> -c ...`는 원격에 TTY가 없으면 PAM 설정에 따라 인증 단계에서 실패할 수 있다
 # (`docker compose exec`로 손으로 돌리면 TTY가 붙어서 되는데 에이전트에서만 안 되는 원인).
 # ssh -tt로 TTY를 강제해 손으로 돌릴 때와 같은 조건을 만든다. 문제가 있으면 .env에서 끈다.
-SSH_FORCE_TTY = os.environ.get("SSH_FORCE_TTY", "true").strip().lower() != "false"
+# 기본 false: 컨테이너에서 TTY 없이(`exec -T`) 실행해도 `su - <user> -c ...`가 정상 동작함을
+# 확인했다. -tt는 출력에 CR/제어문자를 섞으므로, 필요한 환경에서만 .env로 켠다.
+SSH_FORCE_TTY = os.environ.get("SSH_FORCE_TTY", "false").strip().lower() == "true"
 try:
     SSH_CONNECT_TIMEOUT = int(os.environ.get("SSH_CONNECT_TIMEOUT", "8"))
 except ValueError:
     SSH_CONNECT_TIMEOUT = 8
 
 MAX_OUTPUT = 64 * 1024
-DEFAULT_TIMEOUT = 25
+# 사내 커맨드는 느린 게 많다(GPFS 쿼터 조회처럼 스토리지 전체를 훑는 것들). 25초는 너무 짧아서
+# 정상 동작하는 커맨드가 중단되고, 그러면 에이전트가 실패 원인을 엉뚱하게 해석한다.
+# .env의 SSH_COMMAND_TIMEOUT으로 조정한다.
+try:
+    DEFAULT_TIMEOUT = int(os.environ.get("SSH_COMMAND_TIMEOUT", "120"))
+except ValueError:
+    DEFAULT_TIMEOUT = 120
 
 _HOSTNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,253}$")
 # 리눅스 계정명 형식. 사내 계정이 `yr9.choi`처럼 점을 포함하므로 '.'을 허용한다.
@@ -145,7 +153,9 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
             proc.kill()
         except ProcessLookupError:
             pass
-        raise TimeoutError(f"명령이 {timeout}초 안에 끝나지 않아 중단했습니다({host}).")
+        raise TimeoutError(
+            f"명령이 {timeout}초 안에 끝나지 않아 중단했습니다({host}). 원래 오래 걸리는 "
+            "커맨드라면 .env의 SSH_COMMAND_TIMEOUT을 늘리세요(권한/인증 문제가 아닙니다).")
 
     def _clip(b: bytes) -> str:
         # -tt로 pty를 쓰면 줄바꿈이 CRLF로 오고 "Connection to ... closed." 안내가 붙는다.

@@ -1146,6 +1146,58 @@ VOC 절에도 "증상은 비슷한데 원인·대상이 다른 사례는 쓰지 
 마이그레이션은 manual_db v6 / voc_db v6 / command_db v6(pg_trgm + 인덱스)이라
 **db-init 재실행이 필요**하다.
 
+## 69. `myquota` 실패 원인 확정 — TTY가 아니라 **25초 타임아웃**이었다 (완료)
+
+**A/B 테스트 결과.** NEXT-STEPS 1번(우리 코드와 같은 조건 = `exec -T`로 TTY 없이 실행)을 돌려보니
+**성공**했다.
+
+```
+docker compose -f docker-compose.dev.yml exec -T command-mcp \
+  ssh -o BatchMode=yes ... root@202.20.185.100 "su - yr9.choi -c myquota" < /dev/null
+Filesystem    Directory       Used(GB)   Limit(GB)       Files File limits
+gpfs.gpu1     yr9.choi          10,555           0   4,202,829           0
+```
+
+→ **TTY 가설은 틀렸다.** `su - <user> -c ...`는 TTY 없이도 정상 동작한다. 손으로 돌린 것과
+에이전트가 돌린 것 사이에 남은 차이는 하나뿐이었고, 사용자가 힌트를 줬다: **"시간이 좀 오래 걸린다".**
+
+**원인.** `shared/ssh_exec.py`의 `DEFAULT_TIMEOUT = 25`. GPFS 쿼터 조회(`myquota`)는 스토리지
+전체를 훑어서 25초를 넘긴다. 타임아웃이 걸리면 우리는 프로세스를 kill하고 `TimeoutError`를 던지는데,
+에이전트 입장에서는 그냥 "실패"라 **권한/인증 문제인 것처럼 엉뚱하게 해석한 답변**을 만들었다.
+정상 동작하는 커맨드를 우리가 중간에 끊고 있었던 것이다.
+
+**조치.**
+- `DEFAULT_TIMEOUT`을 환경변수 `SSH_COMMAND_TIMEOUT`으로 빼고 기본값 25 → **120초**.
+  compose의 command-mcp/system-mcp 양쪽에 `SSH_COMMAND_TIMEOUT: ${SSH_COMMAND_TIMEOUT:-120}` 추가.
+- 타임아웃 메시지에 "원래 오래 걸리는 커맨드라면 `SSH_COMMAND_TIMEOUT`을 늘리세요
+  (**권한/인증 문제가 아닙니다**)"를 넣었다. 다음에 또 걸려도 원인을 오해하지 않게.
+- `SSH_FORCE_TTY` 기본값을 `true` → **`false`** 로 되돌렸다. TTY가 원인이 아님이 확인됐고,
+  `ssh -tt`는 출력에 CR/제어문자와 `Connection to ... closed.` 안내를 섞어 결과를 더럽힌다.
+  TTY를 요구하는 환경이 나오면 `.env`에서 켠다.
+
+**교훈.** "손으로 하면 되는데 에이전트로는 안 된다"에서 곧바로 권한/인증을 의심했지만(빈 키 파일,
+호스트 키, TTY — 셋 다 틀렸다), 실제 차이는 **실행 시간**이었다. 조건을 하나씩 지우는 A/B를
+사용자에게 돌려달라고 한 것이 결국 정답이었다.
+
+## 70. 진행 상황 표시를 사람 말로 요약 — 도구 이름 비노출 (완료)
+
+기존에는 `· run_command — myquota` / `· run_command → 완료`처럼 **도구 이름과 인자 원문**을
+그대로 뿌리고 있었다. 사용자에게 의미가 없고 내부 구현이 드러난다. 요청대로 "무엇을 하는 중인지"만
+한 줄 문장으로 요약한다.
+
+`agent_server/main.py`에 `_action_phrase()` / `_result_phrase()`를 넣었다.
+- 도구 이름을 **부분 문자열**로 매칭한다(`manual`/`voc`/`command`/`job`/`gpu`/`disk`/`file`/`dir`
+  /`system`, 그리고 `run`·`exec`→실행, `search`·`find`→검색). 관리자가 콘솔에서 새 도구를 추가해도
+  규칙이 그대로 먹고, 매칭이 안 되면 "확인하는 중"으로 떨어져 이름이 새지 않는다.
+- 인자는 첫 문자열 값만 40자로 잘라 따옴표로 감싼다(질문 키워드가 보이는 게 유용하므로).
+- 결과는 리스트면 "N건 찾음"/"찾은 내용 없음", `exit_code`면 "완료"/"실패(종료코드 N)",
+  `error`면 "실패 — <사유 60자>"로 요약한다.
+
+예시: `· 매뉴얼에서 'gpu 노드 접근' 찾는 중` → `· 3건 찾음` → `· 'myquota' 실행하는 중` → `· 완료`.
+
+`<details open>` 블록은 그대로다(Open WebUI가 답변 전에 펼친 채로 보여준다). 실패 시 사유가
+이 블록에 남으므로 디버깅용으로도 계속 쓸 수 있다.
+
 ---
 
 ## 다음 항목은 이어서 여기 아래에 추가
