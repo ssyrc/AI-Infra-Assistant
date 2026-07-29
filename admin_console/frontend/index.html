@@ -944,7 +944,8 @@ function CommandsPanel() {
       <h2>커맨드 카탈로그</h2>
       <div className="subtitle">
         커맨드 하나가 에이전트 툴 하나가 됩니다. <strong>설명</strong>을 보고 고르므로
-        사용자가 물어볼 말로 적으세요. 수정 후 <code>command-mcp</code> 재시작 필요.
+        사용자가 물어볼 말로 <strong>한 줄</strong>만 적으세요(설명이 매 요청 프롬프트에 실립니다).
+        수정 후 <code>command-mcp</code> 재시작 필요.
       </div>
 
       {items.some(c => !c.embedded) && (

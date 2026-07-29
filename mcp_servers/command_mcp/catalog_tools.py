@@ -29,9 +29,10 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../../shared"))
 from ssh_exec import run_ssh_as_user  # noqa: E402
 from catalog_exec import DEFAULT_DENY_CSV, build_catalog_argv, deny_set  # noqa: E402
 
-# 툴 하나당 대략 60~100토큰(이름+설명+스키마)이 매 요청에 실린다. LLM 컨텍스트가 32768이고
-# 지시문·검색결과·대화이력이 이미 20k 안팎을 쓰므로, 커맨드 툴에 쓸 수 있는 예산은 ~10k다.
-# => 80개 근처가 현실적인 상한. 더 늘리려면 컨텍스트 상한 설정들을 함께 낮춰야 한다.
+# 실측(2026-07): 툴 하나가 매 요청 프롬프트에서 약 270자 ≈ 100토큰을 쓴다(스키마 고정분 215자
+# + 설명). 지시문 ~4.9k토큰, 내장 툴 ~2.7k토큰이 이미 고정으로 나가고 검색 결과·대화 이력에
+# 15k 안팎이 필요하므로, 커맨드 툴 예산은 8k토큰(=80개) 정도가 상한이다.
+# 그 이상 등록해야 하면 커맨드 설명을 한 줄로 줄이거나 컨텍스트 상한 설정을 함께 낮춰야 한다.
 DEFAULT_MAX_TOOLS = 80
 
 # MCP 툴 이름에 쓸 수 있는 문자만 남긴다. 카탈로그 이름에는 공백·점·한글이 들어올 수 있다.
@@ -111,6 +112,26 @@ def build_entry(row: dict, login_host_getter) -> dict:
         "user_scoped": True,
         "scope_param": "user_id",
     }
+
+
+# 툴 하나가 프롬프트에서 차지하는 JSON 스키마의 고정분(이름·파라미터 틀). 설명 길이와 무관하게
+# 항상 따라붙는다 - 측정값 약 215자. 여기에 설명 길이를 더한 것이 이 툴의 실제 프롬프트 비용이다.
+_TOOL_SCHEMA_OVERHEAD = 215
+
+
+def estimate_prompt_tokens(descriptions: list[str]) -> tuple[int, int]:
+    """노출된 툴들이 매 요청 프롬프트에서 쓰는 (글자 수, 대략의 토큰 수).
+
+    토큰 수는 추정이다 - 폐쇄망에 Qwen 토크나이저를 두고 세는 대신, 한글은 1.2자/토큰,
+    나머지(ASCII·JSON 기호)는 3.5자/토큰으로 환산한다. 자릿수를 보려는 값이지 정밀값이 아니다.
+    """
+    chars = tokens = 0
+    for d in descriptions:
+        text = (d or "") + " " * _TOOL_SCHEMA_OVERHEAD
+        kor = len(re.findall(r"[가-힣]", text))
+        chars += len(text)
+        tokens += round(kor / 1.2 + (len(text) - kor) / 3.5)
+    return chars, tokens
 
 
 def load_catalog_tools_sync(login_host_getter, dsn_key: str = "command_db_dsn") -> tuple[dict, int]:

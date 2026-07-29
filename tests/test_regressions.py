@@ -251,3 +251,47 @@ def test_catalog_tool_names_are_ascii_and_stable():
 
     # 같은 입력은 언제 불러도 같은 이름 (hash() 랜덤화에 영향받지 않아야)
     assert m.tool_name_for("작업목록", set(), "") == m.tool_name_for("작업목록", set(), "")
+
+
+# --- 7-3번: 툴 설명은 매 요청 프롬프트에 실린다 - 길이 예산을 지켜야 한다 --------------
+# vLLM `--max-model-len 32768`인데 지시문만 이미 ~4.9k토큰이다. 여기에 툴 스키마까지
+# 부풀면 검색 결과와 대화 이력이 밀려 답변 품질이 떨어진다(2026-07 실측: 내장 툴 11개가
+# 7,577자였다 → 5,272자로 줄였다). 설명을 다시 늘리면 이 테스트가 먼저 잡는다.
+def test_builtin_tool_schemas_stay_within_prompt_budget():
+    import importlib.util
+    import json
+
+    os.environ.setdefault("CONFIG_DB_DSN", "postgresql://x:x@localhost/x")
+    total = 0
+    for mcp_dir in ("manual_mcp", "voc_mcp", "command_mcp", "system_mcp"):
+        path = os.path.join(ROOT, "mcp_servers", mcp_dir, "server.py")
+        sys.path.insert(0, os.path.dirname(path))
+        spec = importlib.util.spec_from_file_location(f"budget_{mcp_dir}", path)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        for t in asyncio.run(m.mcp.list_tools()):
+            # vLLM에 실제로 보내는 OpenAI 함수 정의 모양 그대로 잰다.
+            total += len(json.dumps(
+                {"type": "function",
+                 "function": {"name": t.name, "description": t.description or "",
+                              "parameters": t.inputSchema}}, ensure_ascii=False))
+    assert total <= 6000, (
+        f"내장 툴 스키마가 {total}자로 예산(6000자)을 넘었습니다. 툴 설명에서 공통 규칙을 빼고 "
+        "지시문(AGENT_INSTRUCTION)으로 옮기세요 - 툴 설명은 매 요청마다 통째로 실립니다.")
+
+
+# 카탈로그 툴의 프롬프트 비용 추정이 스키마 고정분을 빠뜨리지 않는지 확인한다.
+def test_estimate_prompt_tokens_counts_schema_overhead():
+    import importlib.util
+    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "command_mcp"))
+    spec = importlib.util.spec_from_file_location(
+        "cattools_budget", os.path.join(ROOT, "mcp_servers", "command_mcp", "catalog_tools.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+
+    chars, tokens = m.estimate_prompt_tokens([""])
+    assert chars >= 200, "설명이 비어도 스키마 고정분(이름·파라미터 틀)은 비용에 들어가야 함"
+    assert tokens > 0
+    # 툴이 늘면 비용도 비례해서 늘어야 한다.
+    c2, t2 = m.estimate_prompt_tokens(["", ""])
+    assert c2 == 2 * chars and t2 == 2 * tokens

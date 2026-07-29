@@ -90,36 +90,27 @@ _LOGIN_SERVER = {**_COMMON, "host_mode": "login_server"}
 
 WHITELIST = {
     "gpu_status": {"handler": gpu_status, "example_command": "nvidia-smi",
-                   "description": ("지정 서버(host)의 GPU 상태를 조회한다(nvidia-smi 결과: 인식된 GPU "
-                                   "장수, 모델명, 사용률/메모리, 실행 중인 프로세스). "
-                                   "'GPU가 이상하다/몇 장 인식되나/사용률이 높나'를 확인할 때 사용. "
-                                   "host는 서버 이름(예: hgpu8002)."), **_COMMON},
+                   "description": ("지정 서버(host)의 GPU 상태 조회(nvidia-smi: 장수·모델·"
+                                   "사용률/메모리·실행 프로세스). host는 서버 이름(예: hgpu8002)."),
+                   **_COMMON},
     "list_dir": {"handler": list_dir, "example_command": "ls -lh [-a] <path>",
-                 "description": ("로그인 서버에서 본인 권한으로 디렉토리 내용을 나열한다(ls -lh). "
-                                  "'이 경로에 뭐가 있나/파일 크기가 어떻게 되나'를 확인할 때 사용. "
-                                  "show_hidden=True면 숨김 파일(.으로 시작)도 포함."), **_LOGIN_SERVER},
+                 "description": ("로그인 서버에서 디렉토리 내용 나열(ls -lh). "
+                                 "show_hidden=True면 숨김 파일 포함."), **_LOGIN_SERVER},
     "find_files": {"handler": find_files, "example_command": "find <path> [-name pattern] [-type f|d|l] (read-only)",
-                   "description": ("로그인 서버에서 파일을 이름 패턴(glob, 예: '*.log')이나 종류로 "
-                                    "검색한다(find, 읽기 전용). '이 경로 밑에 로그 파일 어디 있나' 같은 "
-                                    "질문에 사용. 수정·삭제·실행은 못 한다."), **_LOGIN_SERVER},
+                   "description": ("로그인 서버에서 이름 패턴(glob, 예: '*.log')이나 종류로 파일 "
+                                   "검색(find, 읽기 전용)."), **_LOGIN_SERVER},
     "disk_free": {"handler": disk_free, "example_command": "df -h",
-                  "description": ("지정 서버(host)의 '파일시스템 전체' 디스크 여유/사용 용량을 "
-                                   "조회한다(df -h). 특정 서버의 디스크가 꽉 찼는지 확인할 때만 "
-                                   "사용한다. **개인 계정의 홈 스토리지 할당량(quota)을 묻는 "
-                                   "질문에는 쓰지 않는다** — df는 서버 전체 용량이라 개인 할당량과 "
-                                   "무관하다. 그런 질문은 커맨드 카탈로그에서 할당량 조회 커맨드를 "
-                                   "찾아 command.run_command로 실행한다."), **_COMMON},
+                  "description": ("지정 서버(host)의 **파일시스템 전체** 디스크 여유 용량(df -h). "
+                                  "개인 홈 할당량(quota) 질문에는 쓰지 않는다 — 그건 커맨드 툴로."),
+                  **_COMMON},
     "disk_usage": {"handler": disk_usage, "example_command": "du -h --max-depth=<n> <path>",
-                   "description": ("지정 서버(host)에서 특정 경로가 디스크를 얼마나 쓰는지 조회한다"
-                                    "(du -h). '이 디렉토리가 용량을 얼마나 차지하나'를 확인할 때 사용. "
-                                    "max_depth로 하위 폴더별 세부 내역까지 볼 수 있다."), **_COMMON},
+                   "description": ("지정 서버(host)에서 특정 경로의 디스크 사용량 조회(du -h). "
+                                   "max_depth로 하위 폴더별 내역."), **_COMMON},
     "read_file_head": {"handler": read_file_head, "example_command": "head -n <lines> <path>",
-                       "description": ("로그인 서버에서 텍스트 파일 앞부분을 읽는다(head). "
-                                        "로그/설정 파일 내용을 앞에서부터 확인할 때 사용. "
-                                        "lines로 줄 수 조절(기본 200, 최대 2000)."), **_LOGIN_SERVER},
+                       "description": ("로그인 서버에서 텍스트 파일 앞부분 읽기(head). "
+                                       "lines 기본 200, 최대 2000."), **_LOGIN_SERVER},
     "system_info": {"handler": system_info,
                     "example_command": "uptime | free -h | ip addr | who | lscpu (kind로 선택)",
-                    "description": ("지정 서버(host)의 시스템 정보를 조회한다. kind로 uptime(가동시간/"
-                                     "로드), memory(메모리), network(네트워크 인터페이스), who(로그인 "
-                                     "사용자), cpu(CPU 스펙) 중 선택."), **_COMMON},
+                    "description": ("지정 서버(host)의 시스템 정보. kind: uptime | memory | "
+                                    "network | who | cpu."), **_COMMON},
 }

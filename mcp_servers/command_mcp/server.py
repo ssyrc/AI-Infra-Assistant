@@ -32,7 +32,7 @@ from ssh_exec import (  # noqa: E402
     run_ssh_as_user, warm_master, start_master_keepalive,
 )
 from catalog_exec import DEFAULT_DENY_CSV, build_catalog_argv, deny_set  # noqa: E402
-from catalog_tools import load_catalog_tools_sync  # noqa: E402
+from catalog_tools import estimate_prompt_tokens, load_catalog_tools_sync  # noqa: E402
 
 from mcp.server.fastmcp import FastMCP
 
@@ -81,20 +81,10 @@ EXEC_TOOLS = {
     "run_command": {
         "handler": run_command,
         "description": (
-            "사내 커맨드를 실제로 실행하고 결과를 돌려준다. 사용자가 어떤 정보를 '확인해 달라'고 "
-            "하면 사용법만 안내하지 말고 이 툴로 실행해서 결과로 답한다. "
-            "**카탈로그에 등록된 커맨드는 각각 전용 툴로 이미 노출돼 있으니 그 툴을 쓴다.** "
-            "이 툴은 그 목록에 없는 커맨드를 실행할 때 쓴다 — 매뉴얼 문서에서 찾은 커맨드처럼 "
-            "등록되지 않은 것도 그대로 넘기면 실행된다. 다만 반드시 검색 결과나 툴 목록에 "
-            "실제로 있던 커맨드만 쓰고, 없는 커맨드를 지어내지 않는다. "
-            "args에는 커맨드 뒤에 붙일 인자를 한 칸씩 나눠 넣는다(예: ['-l', '/home']). 인자가 "
-            "필요 없으면 생략한다(command에 인자까지 함께 적어도 된다). "
-            "host를 지정하지 않으면 로그인 서버에서 실행되며, 사용자가 특정 서버(예: hgpu4041)를 "
-            "지목한 경우에만 그 서버 이름을 host에 넣는다. "
-            "'내 job 목록', '내 작업 상태', '내 스토리지 용량'처럼 본인 자원을 확인하는 요청은 "
-            "먼저 **툴 목록에서 해당 커맨드 툴을 찾아** 쓰고, 없을 때만 이 툴을 쓴다. "
-            "실행은 항상 호출자 본인 계정 권한으로 이뤄진다(사용자 id는 지정할 수 없다). "
-            "파일 삭제 등 파괴적 명령은 시스템이 거부한다."
+            "임의의 사내 커맨드를 실행한다. 카탈로그 커맨드는 각각 전용 툴(cmd_*)로 나와 있으니 "
+            "**그 툴을 먼저 쓰고**, 목록에 없는 커맨드(매뉴얼에서 찾은 것 등)만 이 툴로 실행한다. "
+            "args는 인자를 한 칸씩 나눠 넣는다(예: ['-l','/home']). "
+            "host는 사용자가 특정 서버를 지목했을 때만 넣는다(기본: 로그인 서버)."
         ),
         "enabled": True, "required_roles": [], "user_scoped": True, "scope_param": "user_id",
     },
@@ -147,9 +137,20 @@ if _DROPPED:
     print(f"[command-mcp] 카탈로그가 상한(command_tools_max)을 넘어 {_DROPPED}개를 툴로 "
           "노출하지 못했습니다. 설정에서 상한을 올리거나 쓰지 않는 커맨드를 정리하세요 "
           "- 노출되지 않은 커맨드는 run_command로만 실행할 수 있습니다.")
-print(f"[command-mcp] 카탈로그 커맨드 {len(CATALOG_TOOLS)}개를 툴로 노출합니다.")
+_ALL_TOOLS = {**EXEC_TOOLS, **CATALOG_TOOLS}
+_CHARS, _TOKENS = estimate_prompt_tokens(
+    [tool_description(n, e, _OVERRIDES) for n, e in _ALL_TOOLS.items()])
+# 툴 설명은 **매 요청** 프롬프트에 통째로 실린다. LLM 컨텍스트가 32768이라 카탈로그가 커지면
+# 검색 결과·대화 이력에 쓸 자리가 줄어든다. 기동할 때 실제 비용을 찍어 두면
+# "커맨드를 몇 개까지 등록해도 되나"를 감이 아니라 숫자로 판단할 수 있다.
+print(f"[command-mcp] 카탈로그 커맨드 {len(CATALOG_TOOLS)}개를 툴로 노출합니다 "
+      f"(툴 {len(_ALL_TOOLS)}개 · 스키마 {_CHARS:,}자 ≈ {_TOKENS:,}토큰/요청).")
+if _TOKENS > 6000:
+    print(f"[command-mcp] 경고: 툴 스키마가 요청마다 약 {_TOKENS:,}토큰을 씁니다. 지시문(~4.9k)과 "
+          "합치면 32768 컨텍스트의 3분의 1이 넘어 검색 결과·대화 이력이 밀려납니다. "
+          "커맨드 설명을 한 줄로 줄이거나 안 쓰는 커맨드를 정리하세요.")
 
-for _name, _entry in {**EXEC_TOOLS, **CATALOG_TOOLS}.items():
+for _name, _entry in _ALL_TOOLS.items():
     mcp.add_tool(
         build_wrapped(_name, _entry, is_enabled=_always_enabled,
                       required_roles=_no_required_roles, log_execution=_log_execution),
@@ -171,7 +172,7 @@ if __name__ == "__main__":
         try:
             host = await _login_host()
         except Exception as e:  # noqa: BLE001
-            print(f"[command-mcp] 로그인 서버 설정을 읽지 못해 예열을 건너뜁니다: {{e}}")
+            print(f"[command-mcp] 로그인 서버 설정을 읽지 못해 예열을 건너뜁니다: {e}")
             return
         if host:
             await warm_master(host)
