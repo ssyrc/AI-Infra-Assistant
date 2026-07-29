@@ -1,27 +1,23 @@
-Q1: 내 홈 스토리지 용량 얼마 남았어?
-# 이제 이건 잘 뜨네.
-
 Q2: 내 홈 파일 리스트 보여줘 
-Q2: total 12K
-drwxr-xr-x 2 yr9.choi yr9.choi 4.0K Oct 10 14:23 data
-drwxr-xr-x 2 yr9.choi yr9.choi 4.0K Oct 10 14:23 documents
-drwxr-xr-x 2 yr9.choi yr9.choi 4.0K Oct 10 14:23 projects
--rw-r--r-- 1 yr9.choi yr9.choi    0 Oct 10 14:23 README.txt 
-# 이제 사용자 id는 잘 보이네. 근데 202.20.185.100 에서 user id로 실행한 것 같지 않은데? 홈 파일 리스트면 ~/ 목록 보여줘야지
+Q2: total 24K
+drwxr-xr-x 2 {사용자 id} {사용자 id} 4.0K Oct 10 14:23 data
+drwxr-xr-x 2 {사용자 id} {사용자 id} 4.0K Oct 10 14:23 documents
+drwxr-xr-x 2 {사용자 id} {사용자 id} 4.0K Oct 10 14:23 projects
+-rw-r--r-- 1 {사용자 id} {사용자 id}  102 Oct 10 14:23 README.txt
+# 또 다시 사용자 id가 마스킹되어있어.... 여전히 202.20.185.100 에서 user id로 접근해서 ~/ 목록 보여주고 있지 않아. 뭐하자는거야? 제대로 똑바로 처리해.
 
 Q3: 내 job 리스트 뭐가 있어?
-A3: 명령어 사용법이 올바르지 않습니다. phd info 명령은 특정 job ID를 지정하거나, 옵션을 함께 사용해야 합니다. 사용법은 phd info --help로 확인할 수 있습니다. # 관리자 콘솔에서 command mcp 탭에 수정 저장했는데 반영이 안되나봐. 바로바로 반영되는거 아니야?
-
-# 답답하네 이딴걸 왜 넣는거야?? scheduler_job_command즉시 반영'내 job 조회' 툴이 실행할 커맨드({user_id}는 호출자 계정으로 치환) 설정 탭에서 당장 빼. 이렇게 하는게 아니라 command_mcp 를 호출해서 찾아서 실행해야지............ 관리자 콘솔에서 command db 로 저장했다니까. 
+A3: 이거 이제 실행은 되는데 너무 오래걸려. 왜이렇게 오래걸리는거야... rag말고 좀 더 빠르게 command 찾을 수 있는 방법 없을까? json 파일로 저장한다던가 관계형 DB를 사용한다던가. 아니면 그냥 함수로 agent의 skill 처럼 저장한다던가.
 
 Q4: gpu 사용법 알려줘
-A4: [오류가 발생했습니다: litellm.ContextWindowExceededError: litellm.BadRequestError: ContextWindowExceededError: OpenAIException - Error code: 400 - {'error': {'message': "This model's maximum context length is 32768 tokens. However, your request has 33125 input tokens. Please reduce the length of the input messages. None", 'type': 'BadRequestError', 'param': None, 'code': 400}}]
+잘 대답하는데, 중간에 '~~방법은 '~~가이드'를 참고하세요.' 라고 나오고 맨 마지막에 또 문서 위치와 함꼐 안내가 나와. 가이드 참조는 맨 마지막에 한번만, 제대로 된 경로와 함께 안내하도록 해. 
 
 Q5: cpu 사용법 알려줘
 자꾸 gpu 사용법이랑 혼용해서 말하네. 보니까 매뉴얼 탭에 임베딩이 잘못 들어가있어. csv 가 콤마로 구분되어 있어서 그런가? tsv 로 올릴 수 있게 해줘.
 
 Q6: 계정 신청은 어떻게 해? 방화벽은 뭐 신청해야해?
 A6: [오류가 발생했습니다: litellm.ContextWindowExceededError: litellm.BadRequestError: ContextWindowExceededError: OpenAIException - Error code: 400 - {'error': {'message': "This model's maximum context length is 32768 tokens. However, your request has 35252 input tokens. Please reduce the length of the input messages. None", 'type': 'BadRequestError', 'param': None, 'code': 400}}]
+이건 여전히 오류 발생하네
 
-
-추가로, 설정 탭에서 지정한 voc_intake_guide는 운영팀 문의가 필요할 때 무조건 안내하게 해줘. 지금은 '문제가 지속되면 운영팀에 접수하시기 바랍니다.' 라고만 나오네
+Q7: 접속이 안돼
+A7: 잘 알려주다가 중간에 방화벽 정책 변경 알려주는데 그 경로가 이상해. 무조건 매뉴얼에 있는 내용으로만 대답해...
