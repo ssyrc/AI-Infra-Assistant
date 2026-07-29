@@ -11,11 +11,11 @@ rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
   yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
 ```
 
-## 2. [서버] 설정 키 추가 + 재시작
+## 2. [서버] 마이그레이션 + 재시작
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker compose -f docker-compose.dev.yml run --rm db-init   # scheduler_job_command 키 추가
+docker compose -f docker-compose.dev.yml run --rm db-init   # scheduler_job_command 키 삭제
 bash scripts/restart-mounted.sh
 ```
 
@@ -32,18 +32,15 @@ bash scripts/restart-mounted.sh
 
 맨 아래 **부록** 전문을 붙여넣고 저장 → `docker compose -f docker-compose.dev.yml restart agent-server`
 
-## 5. [웹] 설정 탭 — `scheduler_job_command` 를 올바른 사용법으로
+## 5. [웹] 커맨드 탭 — job 조회 커맨드가 등록돼 있는지만 확인
 
-`phd info -u {user_id}` 가 기본값입니다. 사용법이 틀렸다고 나왔으니 **맞는 커맨드로 바꾸세요.**
-`{user_id}` 는 질문한 사람 계정으로 치환됩니다.
+**설정 탭의 `scheduler_job_command` 는 없앴습니다**(2번 `db-init`이 지웁니다).
+job 조회 전용 툴도 없앴습니다. 이제 다른 커맨드와 똑같이 **커맨드 탭 카탈로그**에서
+찾아 실행합니다 — 거기서 고치면 그게 바로 반영됩니다.
 
-```
-phd info -u {user_id}        ← 지금 값(사용법 오류가 났던 것)
-phd list -u {user_id}        ← 예시. 실제 맞는 사용법으로 넣으세요
-```
-
-저장 즉시 반영됩니다(재시작 불필요). 커맨드 탭이 아니라 **설정 탭**입니다 —
-이 툴은 카탈로그가 아니라 이 설정값을 씁니다.
+커맨드 탭에 job 조회 커맨드가 등록돼 있는지 확인하세요.
+- 설명에 "job", "작업 상태" 같은 말이 들어가야 검색에 잡힙니다.
+- 실행 커맨드에 `{user_id}` 를 쓰면 질문한 사람 계정으로 치환됩니다.
 
 ## 6. [웹] Open WebUI — 실행이 진짜 되는지부터 확인
 
@@ -234,9 +231,13 @@ doc_title(문서 이름)과 reference(전체 경로)를 **그대로** 옮겨 적
 - `ls -l` 결과의 소유자 계정을 {사용자 id}로 바꾸면 안 됩니다 — 자기 파일 목록을 못 알아봅니다.
 - 홈 경로, 쿼터 조회의 계정명, job 목록의 사용자명도 마찬가지로 그대로 둡니다.
 
-## "확인해 달라" — 실행이 필요한 요청 (예: "내 홈스토리지 용량", "이 서버 GPU 상태")
+## "확인해 달라" — 실행이 필요한 요청
+예: "내 홈스토리지 용량", "내 job 목록", "내 작업 상태", "이 서버 GPU 상태"
 1) 어떤 커맨드인지 찾습니다(커맨드 카탈로그 검색 → 없으면 매뉴얼 검색). 전용 점검 도구가 이미
    있으면 그 도구를 씁니다.
+   **스케줄러 job 조회도 예외가 아닙니다.** 전용 툴은 없습니다 — 다른 커맨드와 똑같이
+   카탈로그에서 찾아 실행합니다. 관리자가 커맨드 탭에서 고치면 그게 바로 반영됩니다.
+   `phd info` 같은 커맨드를 기억으로 쓰지 말고, **검색 결과에 나온 것을 그대로** 씁니다.
 2) 찾은 커맨드를 커맨드 실행 도구에 그대로 넘겨 실행합니다. 등록 여부와 무관하게 실행되며
    "실행할까요?"라고 묻지 않습니다. 인자는 인자 목록에 한 칸씩 나눠 넣습니다.
    대상 서버는 지정하지 않습니다(로그인 서버에서 실행). 사용자가 특정 서버를 지목한 경우에만 넣습니다.

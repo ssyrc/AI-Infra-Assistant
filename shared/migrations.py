@@ -161,6 +161,13 @@ MIGRATIONS: list[tuple[str, int, str]] = [
          WHERE key = 'scheduler_login_host'
            AND value !~ '^[0-9]{1,3}(\\.[0-9]{1,3}){3}$';
     """),
+    # v4: scheduler_job_command 설정 키 제거.
+    #     스케줄러 커맨드를 설정값으로 둔 것 자체가 잘못이었다 - 커맨드는 카탈로그(커맨드 탭)에
+    #     등록하고 에이전트가 검색해서 실행해야 한다. 설정 탭에 커맨드가 하나 더 생기면
+    #     "어디를 고쳐야 반영되나"가 두 곳이 되어 오히려 헷갈린다.
+    ("platform_config", 4, """
+        DELETE FROM platform_settings WHERE key = 'scheduler_job_command';
+    """),
     # v3: 감사로그에 사용자/대화 식별자 추가
     ("system_db", 3, """
         ALTER TABLE job_logs ADD COLUMN IF NOT EXISTS conversation_id TEXT;
@@ -455,10 +462,6 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
          "경로, docker-compose에서 마운트된 폴더 하위만 가능)", True, False, False),
         # 반드시 **IP**로 둔다. 이름(login07 등)은 배포 호스트 /etc/hosts에 의존하는데,
         # 실제로 login07이 게이트 서버가 아닌 75.11.29.7로 풀려 모든 실행이 인증 실패했다.
-        # job 조회 툴이 실행할 커맨드. 코드에 박아 두면 사이트마다 다른 사용법에 대응할 수 없어
-        # 설정으로 뺐다(hot_reload=True라 저장 즉시 반영). {user_id}는 호출자 계정으로 치환.
-        ("scheduler_job_command", "phd info -u {user_id}",
-         "'내 job 조회' 툴이 실행할 커맨드({user_id}는 호출자 계정으로 치환)", True, False, False),
         ("scheduler_login_host", os.environ.get("SCHEDULER_LOGIN_HOST", "202.20.185.100"),
          "커맨드를 실행할 로그인 서버 주소. 이름 말고 **IP**로 적는다(이름 해석 사고 방지)",
          True, False, False),
@@ -673,9 +676,13 @@ doc_title(문서 이름)과 reference(전체 경로)를 **그대로** 옮겨 적
 - `ls -l` 결과의 소유자 계정을 {사용자 id}로 바꾸면 안 됩니다 — 자기 파일 목록을 못 알아봅니다.
 - 홈 경로, 쿼터 조회의 계정명, job 목록의 사용자명도 마찬가지로 그대로 둡니다.
 
-## "확인해 달라" — 실행이 필요한 요청 (예: "내 홈스토리지 용량", "이 서버 GPU 상태")
+## "확인해 달라" — 실행이 필요한 요청
+예: "내 홈스토리지 용량", "내 job 목록", "내 작업 상태", "이 서버 GPU 상태"
 1) 어떤 커맨드인지 찾습니다(커맨드 카탈로그 검색 → 없으면 매뉴얼 검색). 전용 점검 도구가 이미
    있으면 그 도구를 씁니다.
+   **스케줄러 job 조회도 예외가 아닙니다.** 전용 툴은 없습니다 — 다른 커맨드와 똑같이
+   카탈로그에서 찾아 실행합니다. 관리자가 커맨드 탭에서 고치면 그게 바로 반영됩니다.
+   `phd info` 같은 커맨드를 기억으로 쓰지 말고, **검색 결과에 나온 것을 그대로** 씁니다.
 2) 찾은 커맨드를 커맨드 실행 도구에 그대로 넘겨 실행합니다. 등록 여부와 무관하게 실행되며
    "실행할까요?"라고 묻지 않습니다. 인자는 인자 목록에 한 칸씩 나눠 넣습니다.
    대상 서버는 지정하지 않습니다(로그인 서버에서 실행). 사용자가 특정 서버를 지목한 경우에만 넣습니다.

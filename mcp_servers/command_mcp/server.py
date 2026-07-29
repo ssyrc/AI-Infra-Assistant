@@ -228,25 +228,6 @@ async def run_command(user_id: str, command: str, args: list[str] | None = None,
     return result
 
 
-DEFAULT_JOB_COMMAND = "phd info -u {user_id}"
-
-
-async def get_scheduler_job_info(user_id: str) -> dict:
-    """현재 사용자 '본인'의 스케줄러 job 상태를 조회한다.
-
-    실행할 커맨드는 **설정값 `scheduler_job_command`** 에서 매 호출마다 읽는다.
-    예전에는 `phd info -u <user>`가 코드에 박혀 있어서, 관리자가 콘솔 커맨드 탭에서
-    아무리 고쳐도 이 툴에는 반영되지 않았다(사용법이 다른 사이트에서 곧바로 실패).
-    `{user_id}`를 쓰면 호출자 계정으로 치환된다. 로그인 서버(scheduler_login_host)에
-    ssh(root) 후 `su - <user_id>`로 강등해 실행하므로 남의 job은 조회할 수 없다."""
-    login_host = await get_config("scheduler_login_host", "202.20.185.100")
-    template = (await get_config("scheduler_job_command", DEFAULT_JOB_COMMAND)
-                or DEFAULT_JOB_COMMAND)
-    deny = deny_set(await get_config("catalog_exec_deny_commands", DEFAULT_DENY_CSV))
-    argv = build_catalog_argv(template, "scheduler_job_command", None, user_id, deny)
-    return await run_ssh_as_user(login_host, user_id, argv)
-
-
 # 실행 툴 목록. System MCP의 WHITELIST와 달리 여기 등록된 툴은 항상 실행 가능하다
 # (enabled/required_roles로 막지 않는다 - 화이트리스트 관리는 System MCP 전용 정책).
 EXEC_TOOLS = {
@@ -263,23 +244,19 @@ EXEC_TOOLS = {
             "필요 없으면 생략한다(command에 인자까지 함께 적어도 된다). "
             "host를 지정하지 않으면 로그인 서버에서 실행되며, 사용자가 특정 서버(예: hgpu4041)를 "
             "지목한 경우에만 그 서버 이름을 host에 넣는다. "
+            "'내 job 목록', '내 작업 상태', '내 스토리지 용량'처럼 본인 자원을 확인하는 요청도 "
+            "전부 이 툴로 처리한다 — search_commands로 카탈로그에서 해당 커맨드를 찾아 그대로 "
+            "넘기면 된다(카탈로그의 `{user_id}`는 호출자 계정으로 자동 치환된다). "
             "실행은 항상 호출자 본인 계정 권한으로 이뤄진다(사용자 id는 지정할 수 없다). "
             "파일 삭제 등 파괴적 명령은 시스템이 거부한다."
         ),
         "enabled": True, "required_roles": [], "user_scoped": True, "scope_param": "user_id",
     },
-    "get_scheduler_job_info": {
-        "handler": get_scheduler_job_info,
-        "description": (
-            "현재 로그인한 사용자 '본인'의 스케줄러 job 상태를 조회한다(로그인 서버에서 실행). "
-            "실행되는 커맨드는 관리자 설정값이며 사이트마다 다르다. "
-            "사용자가 '내 job', '내 작업 상태'를 물을 때 사용한다. "
-            "대상 사용자는 시스템이 본인으로 고정하므로 사용자 id를 지정하지 않는다(남의 job 불가). "
-            "커맨드 '사용법'만 궁금하면 이 툴 대신 search_commands를 쓴다."
-        ),
-        "enabled": True, "required_roles": [], "user_scoped": True, "scope_param": "user_id",
-    },
 }
+# job 조회 전용 툴은 두지 않는다. 예전에는 `phd info -u <user>`를 코드(그 다음엔 설정값)에
+# 박아 뒀는데, 그러면 관리자가 콘솔 커맨드 탭에서 커맨드를 고쳐도 반영되지 않는다.
+# 스케줄러 커맨드도 다른 사내 커맨드와 똑같이 **카탈로그에 등록하고**,
+# 에이전트가 search_commands로 찾아 run_command로 실행한다. 카탈로그가 유일한 출처다.
 
 # 설명 오버라이드만 기동 시 1회 읽는다(enabled/required_roles는 더 이상 참조하지 않는다).
 _OVERRIDES = load_overrides_sync(_DSN, _STATE)
