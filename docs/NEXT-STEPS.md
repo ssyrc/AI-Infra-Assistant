@@ -19,8 +19,19 @@ docker compose -f docker-compose.dev.yml run --rm db-init
 bash scripts/restart-mounted.sh
 ```
 
-`scheduler_job_command` 키가 삭제되고, 컨텍스트 상한 키 3개가 추가됩니다
-(`manual_result_max_chars` / `voc_result_max_chars` / `history_max_chars`).
+`scheduler_job_command` 키가 삭제되고, 컨텍스트 상한 키 3개
+(`manual_result_max_chars` / `voc_result_max_chars` / `history_max_chars`)와
+차트 키 4개(`chart_*`)가 추가됩니다.
+
+**차트 MCP가 새로 생겨서 컨테이너를 하나 더 띄워야 합니다**(재시작만으로는 안 뜹니다):
+
+```bash
+cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
+docker compose -f docker-compose.dev.yml up -d --no-build chart-mcp
+docker compose -f docker-compose.dev.yml ps chart-mcp
+```
+
+이미지 재빌드는 **필요 없습니다** — 새 pip 패키지 없이 표준 라이브러리만 씁니다.
 
 ## 3. [웹] 매뉴얼 탭 — 활용가이드를 **TSV로 다시 업로드**
 
@@ -112,6 +123,34 @@ docker compose -f docker-compose.dev.yml logs command-mcp | grep 노출
 - **Y가 6000을 넘으면 경고 줄이 함께 찍힙니다.** 그 줄까지 그대로 보내주세요.
 - 지시문(~4,900토큰) + 내장 툴(~2,700토큰)이 이미 고정으로 나갑니다. 컨텍스트는 32,768입니다.
 - 내장 툴 설명은 이번에 7,577자 → 5,272자로 줄였습니다(지시문과 겹치던 문장 제거).
+
+## 9-2. [웹] 차트 MCP — 설정 한 줄 넣고 확인
+
+설정 탭 **Chart MCP** 그룹에서 `chart_public_base_url`을 넣어야 그림이 보입니다.
+컨테이너는 자기 외부 주소를 모르기 때문에, **사용자 브라우저가 접근할 주소**를 직접 적어야 합니다.
+
+```
+chart_public_base_url = http://202.20.183.30:8509
+```
+
+저장 후 확인:
+
+```bash
+# [서버] 차트가 실제로 만들어지고 받아지는지
+curl -s http://localhost:8509/charts/ -o /dev/null -w "%{http_code}\n"   # 404가 정상(목록 없음)
+docker compose -f docker-compose.dev.yml logs chart-mcp | tail -5
+```
+
+그 다음 **[웹] Open WebUI**에서:
+
+- "최근 6개월 GPU 사용률 추이를 그래프로 보여줘"
+- 커맨드 결과가 숫자 목록으로 나오는 질문 뒤에 "그래프로 그려줘"
+
+그림이 안 보이면 다음을 알려주세요.
+- 답변에 `![...](http://...svg)` 링크가 **글자로** 보인다 → 주소는 맞는데 브라우저가 못 받는 것
+  (8509 포트 방화벽 확인)
+- `chart_public_base_url이 비어 있어` 라는 안내가 나온다 → 위 설정이 저장되지 않은 것
+- 링크 자체가 안 나온다 → 지시문(4번)을 아직 안 바꾼 것
 
 ## 10. [웹] 콘솔이 정리됐습니다 — 훑어보고 불편한 곳 알려주세요
 
@@ -317,7 +356,14 @@ doc_title(문서 이름)과 reference(전체 경로)를 **그대로** 옮겨 적
 - 없으면: 로그인 서버로 고정 실행됩니다. 서버를 묻지 말고 바로 호출합니다.
 - 있으면: 사용자가 밝힌 서버 이름을, 특정 서버에 매인 질문이 아니면 로그인 서버 이름(맨 끝에
   안내됨)을 넣습니다. 특정 서버 이야기인데 이름을 모르면 되묻습니다.
-```
 
----
-`docs/RUN-LOG.md` 기동·배포 절차 · `docs/HISTORY.md` 원인분석 이력
+## 그래프로 보여 달라고 하면
+"추이/그래프/차트로 보여줘"라고 하거나, 커맨드 실행 결과에 기간·항목별 수치가 여럿 있어
+그림이 이해에 도움이 될 때 차트 생성 도구를 씁니다.
+- **숫자는 반드시 조회·실행해서 얻은 값만** 넣습니다. 그래프를 만들려고 값을 지어내지 않습니다.
+  값이 없으면 차트를 만들지 말고 값이 없다고 답합니다.
+- 도구가 돌려준 `markdown` 한 줄을 답변에 **그대로** 붙여 넣습니다(주소를 고치지 마세요).
+  그 한 줄이 그림으로 표시됩니다.
+- 그림만 남기지 말고, 무엇을 그린 것인지 한두 줄로 함께 설명합니다.
+- `warning`이 함께 오면 그림이 표시되지 않는 상태입니다. 그 사유를 사용자에게 알립니다.
+```

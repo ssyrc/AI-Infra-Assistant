@@ -137,6 +137,24 @@ services:
     # /etc/hosts에 서버가 매핑된 뒤, 관리자 콘솔 System 탭에서 켠다. 대상 서버에는 runuser/su가
     # 있고 root가 해당 user로 강등 가능해야 한다(리눅스 표준).
 
+  # 차트 생성. ssh/DB를 쓰지 않고, 호출자가 준 숫자만 SVG로 그린다.
+  # 생성된 SVG는 같은 포트의 /charts/<이름>.svg로 **사용자 브라우저에 직접** 서빙되므로
+  # 이 서비스만 호스트 포트를 연다(설정 chart_public_base_url이 이 주소를 가리켜야 한다).
+  chart-mcp:
+    <<: *mcpimage
+    command: ["python", "mcp_servers/chart_mcp/server.py"]
+    environment:
+      CONFIG_DB_DSN: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD}@postgres:5432/platform_config
+      MCP_PORT: "8005"
+      CHART_OUTPUT_DIR: /app/charts
+    volumes:
+      - chart_files:/app/charts
+    ports: ["${CHART_MCP_PORT:-8509}:8005"]
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
   agent-server:
     build: { context: ., dockerfile: agent_server/Dockerfile, args: *pyargs }
     environment:
@@ -155,6 +173,8 @@ services:
       voc-mcp:
         condition: service_started
       system-mcp:
+        condition: service_started
+      chart-mcp:
         condition: service_started
     restart: unless-stopped
 
@@ -314,6 +334,8 @@ services:
 
 volumes:
   pg_data:
+  # 생성된 차트 SVG(컨테이너를 다시 만들어도 최근 대화의 그림이 깨지지 않게).
+  chart_files:
   open_webui_data:
   clickhouse_data:
   minio_data:

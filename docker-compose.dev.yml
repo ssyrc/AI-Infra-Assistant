@@ -68,6 +68,9 @@ services:
       COMMAND_MCP_URL: http://command-mcp:8002/mcp
       VOC_MCP_URL: http://voc-mcp:8003/mcp
       SYSTEM_MCP_URL: http://system-mcp:8004/mcp
+      CHART_MCP_URL: http://chart-mcp:8005/mcp
+      # 차트 이미지는 사용자 브라우저가 직접 받아간다 -> 배포 호스트에서 접근 가능한 주소.
+      CHART_PUBLIC_BASE_URL: ${CHART_PUBLIC_BASE_URL:-}
     depends_on:
       postgres: { condition: service_healthy }
     restart: "no"
@@ -181,6 +184,24 @@ services:
     depends_on:
       dev-config: { condition: service_completed_successfully }
 
+  # 차트 생성. ssh도 DB도 쓰지 않는다(호출자가 준 숫자만 SVG로 그린다).
+  # 생성된 SVG는 같은 포트의 /charts/<이름>.svg로 사용자 브라우저에 직접 서빙된다 →
+  # Open WebUI가 접근할 수 있도록 호스트 포트를 연다.
+  chart-mcp:
+    <<: *mcpimage
+    command: ["watchfiles", "--filter", "python", "python mcp_servers/chart_mcp/server.py", "mcp_servers/chart_mcp", "shared"]
+    environment:
+      CONFIG_DB_DSN: *configdsn
+      MCP_PORT: "8005"
+      CHART_OUTPUT_DIR: /app/charts
+    volumes:
+      - ./mcp_servers:/app/mcp_servers:ro
+      - ./shared:/app/shared:ro
+      - chart_files:/app/charts
+    ports: ["${CHART_MCP_PORT:-8509}:8005"]
+    depends_on:
+      dev-config: { condition: service_completed_successfully }
+
   agent-server:
     image: ai-infra-assistant-agent-server:latest
     build: { context: ., dockerfile: dev/Dockerfile.agent-dev, args: *pyargs }
@@ -198,6 +219,7 @@ services:
       command-mcp: { condition: service_started }
       voc-mcp: { condition: service_started }
       system-mcp: { condition: service_started }
+      chart-mcp: { condition: service_started }
 
   admin-console:
     image: ai-infra-assistant-admin-console:latest
@@ -241,3 +263,5 @@ services:
 
 volumes:
   open_webui_dev_data:
+  # 생성된 차트 SVG. 컨테이너를 다시 만들어도 최근 대화의 그림이 깨지지 않게 볼륨에 둔다.
+  chart_files:

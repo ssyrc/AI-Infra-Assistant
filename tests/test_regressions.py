@@ -342,3 +342,92 @@ def test_remote_command_quotes_injection_attempts():
     # 메타문자가 인용 밖으로 새 나가면 안 된다.
     for danger in ("; rm -rf /", "`whoami`", "$(id)"):
         assert f" {danger} " not in cmd, f"인용되지 않은 채 노출됨: {danger}"
+
+
+# --- 9번: 차트 MCP ------------------------------------------------------------------
+# 사용자가 준 숫자만 SVG로 그린다. 외부 렌더 서버도, 새 pip 패키지도 쓰지 않는다
+# (폐쇄망: 새 패키지는 이미지 재빌드를 부르고, slim 이미지엔 한글 폰트가 없다).
+def _chart_module(tmp_dir):
+    import importlib.util
+    os.environ["CHART_OUTPUT_DIR"] = str(tmp_dir)
+    os.environ.setdefault("CONFIG_DB_DSN", "postgresql://x:x@localhost/x")
+    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "chart_mcp"))
+    spec = importlib.util.spec_from_file_location(
+        "chart_srv_test", os.path.join(ROOT, "mcp_servers", "chart_mcp", "server.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_chart_renders_all_types_and_is_deterministic(tmp_path):
+    m = _chart_module(tmp_path)
+    labels = ["1월", "2월", "3월"]
+    series = [{"name": "GPU 사용률", "values": [41, 58, 63]}]
+
+    for kind in ("line", "bar", "pie", "scatter"):
+        r = asyncio.run(m.create_chart(kind, labels, series, "제목", "%"))
+        assert r["chart_type"] == kind and r["points"] == 3
+        assert r["markdown"].startswith("![") and r["url"].endswith(".svg")
+        svg = (tmp_path / r["url"].rsplit("/", 1)[-1]).read_text(encoding="utf-8")
+        assert svg.startswith("<svg") and svg.endswith("</svg>")
+        assert "제목" in svg, "한글 제목이 SVG 안에 그대로 들어가야 한다(폰트 없이 렌더)"
+
+    # 같은 입력 -> 같은 파일(내용 해시가 이름). 파일이 무한정 늘지 않는다.
+    a = asyncio.run(m.create_chart("line", labels, series, "제목", "%"))
+    b = asyncio.run(m.create_chart("line", labels, series, "제목", "%"))
+    assert a["url"] == b["url"]
+
+
+def test_chart_rejects_broken_input(tmp_path):
+    m = _chart_module(tmp_path)
+    bad = [
+        ("line", ["a", "b"], [{"name": "x", "values": [1]}]),      # 길이 불일치
+        ("line", [], [{"name": "x", "values": [1]}]),              # labels 없음
+        ("line", ["a"], []),                                       # series 없음
+        ("line", ["a"], ["문자열"]),                                # series 형태 오류
+        ("line", ["a"], [{"name": "x", "values": ["없음"]}]),       # 숫자가 아님
+        ("nope", ["a"], [{"name": "x", "values": [1]}]),           # 없는 차트 종류
+    ]
+    for args in bad:
+        with pytest.raises(ValueError):
+            asyncio.run(m.create_chart(*args))
+
+
+def test_chart_escapes_labels(tmp_path):
+    """라벨은 사용자/LLM이 준 문자열이다. 그대로 넣으면 SVG 구조가 깨진다."""
+    m = _chart_module(tmp_path)
+    r = asyncio.run(m.create_chart(
+        "bar", ["<script>x</script>"], [{"name": "a&b", "values": [1]}], "5 > 3", ""))
+    svg = (tmp_path / r["url"].rsplit("/", 1)[-1]).read_text(encoding="utf-8")
+    assert "<script>" not in svg and "&lt;script&gt;" in svg
+    assert "5 &gt; 3" in svg
+
+
+def test_chart_file_server_only_serves_generated_names(tmp_path):
+    """경로 조작으로 컨테이너 안 다른 파일을 읽을 수 없어야 한다."""
+    m = _chart_module(tmp_path)
+    (tmp_path / "secret.txt").write_text("비밀", encoding="utf-8")
+
+    async def call(path, method="GET"):
+        sent = []
+
+        async def send(msg):
+            sent.append(msg)
+
+        async def receive():
+            return {"type": "http.request"}
+
+        async def passthrough(scope, receive, send):
+            sent.append({"type": "passthrough"})
+
+        await m.ChartFiles(passthrough)(
+            {"type": "http", "path": path, "method": method}, receive, send)
+        return sent
+
+    ok = asyncio.run(m.create_chart("bar", ["a"], [{"name": "x", "values": [1]}]))
+    name = ok["url"].rsplit("/", 1)[-1]
+    assert asyncio.run(call(f"/charts/{name}"))[0]["status"] == 200
+    for bad in ("/charts/../secret.txt", "/charts/secret.txt", "/charts/x.svg"):
+        assert asyncio.run(call(bad))[0]["status"] == 404, f"열리면 안 됨: {bad}"
+    # MCP 경로는 그대로 통과시킨다.
+    assert asyncio.run(call("/mcp"))[0]["type"] == "passthrough"

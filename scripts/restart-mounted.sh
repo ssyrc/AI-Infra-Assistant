@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 COMPOSE="docker compose -f docker-compose.dev.yml"
-SERVICES="agent-server manual-mcp command-mcp voc-mcp system-mcp admin-console mock-vllm"
+SERVICES="agent-server manual-mcp command-mcp voc-mcp system-mcp chart-mcp admin-console mock-vllm"
 
 echo "== restart mounted-code services =="
 $COMPOSE restart $SERVICES

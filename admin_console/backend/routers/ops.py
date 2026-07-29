@@ -17,7 +17,8 @@ from db import get_http_client
 
 router = APIRouter(prefix="/api/ops", tags=["ops"])
 
-ALLOWED_SERVICES = {"agent-server", "manual-mcp", "command-mcp", "voc-mcp", "system-mcp"}
+ALLOWED_SERVICES = {"agent-server", "manual-mcp", "command-mcp", "voc-mcp", "system-mcp",
+                    "chart-mcp"}
 AGENT_SERVER_URL = "http://agent-server:8000"
 
 

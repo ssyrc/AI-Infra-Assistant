@@ -518,6 +518,18 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
          "Agent Server가 연결할 VOC MCP 주소", False, False, False),
         ("system_mcp_url", os.environ.get("SYSTEM_MCP_URL", "http://system-mcp:8004/mcp"),
          "Agent Server가 연결할 System MCP 주소", False, False, False),
+        ("chart_mcp_url", os.environ.get("CHART_MCP_URL", "http://chart-mcp:8005/mcp"),
+         "Agent Server가 연결할 Chart MCP 주소(비우면 차트 기능 없이 동작)", False, False, False),
+        # 차트 이미지는 **사용자 브라우저가 직접** 가져간다. 컨테이너는 자기 외부 주소를 모르므로
+        # 여기에 배포 호스트에서 접근 가능한 주소를 적어 둔다(예: http://202.20.183.30:8509).
+        # 비어 있으면 이미지 주소가 완성되지 않아 그림이 표시되지 않는다.
+        ("chart_public_base_url", os.environ.get("CHART_PUBLIC_BASE_URL", ""),
+         "차트 이미지를 사용자 브라우저가 받아갈 공개 주소(예: http://202.20.183.30:8509)",
+         True, False, False),
+        ("chart_max_points", "200", "차트 하나에 넣을 수 있는 최대 항목 수", True, False, False),
+        ("chart_retention_hours", "72",
+         "생성된 차트 파일 보관 시간(시간). 지나면 자동 삭제, 0이면 삭제하지 않음", True, False, False),
+
         ("service_hub_mcp_url", os.environ.get("SERVICE_HUB_MCP_URL", ""),
          "유사 VOC 조회용 Service Hub MCP 주소(비우면 similar_voc 생략). 방화벽 개통 후 설정", True, False, False),
         ("voc_similar_top_k", "3", "VOC 답변에 붙일 유사 VOC 최대 개수(0이면 비활성)", True, False, False),
@@ -723,7 +735,17 @@ doc_title(문서 이름)과 reference(전체 경로)를 **그대로** 옮겨 적
 대상 서버(host) 파라미터가 있는지로 판단합니다.
 - 없으면: 로그인 서버로 고정 실행됩니다. 서버를 묻지 말고 바로 호출합니다.
 - 있으면: 사용자가 밝힌 서버 이름을, 특정 서버에 매인 질문이 아니면 로그인 서버 이름(맨 끝에
-  안내됨)을 넣습니다. 특정 서버 이야기인데 이름을 모르면 되묻습니다."""
+  안내됨)을 넣습니다. 특정 서버 이야기인데 이름을 모르면 되묻습니다.
+
+## 그래프로 보여 달라고 하면
+"추이/그래프/차트로 보여줘"라고 하거나, 커맨드 실행 결과에 기간·항목별 수치가 여럿 있어
+그림이 이해에 도움이 될 때 차트 생성 도구를 씁니다.
+- **숫자는 반드시 조회·실행해서 얻은 값만** 넣습니다. 그래프를 만들려고 값을 지어내지 않습니다.
+  값이 없으면 차트를 만들지 말고 값이 없다고 답합니다.
+- 도구가 돌려준 `markdown` 한 줄을 답변에 **그대로** 붙여 넣습니다(주소를 고치지 마세요).
+  그 한 줄이 그림으로 표시됩니다.
+- 그림만 남기지 말고, 무엇을 그린 것인지 한두 줄로 함께 설명합니다.
+- `warning`이 함께 오면 그림이 표시되지 않는 상태입니다. 그 사유를 사용자에게 알립니다."""
 
 
 async def ensure_databases():

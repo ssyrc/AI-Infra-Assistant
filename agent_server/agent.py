@@ -95,6 +95,10 @@ async def build_agent(caller_headers: dict | None = None,
     if missing:
         raise RuntimeError(f"MCP 주소가 설정되지 않았습니다: {', '.join(missing)}")
 
+    # 차트는 부가 기능이라 **없어도 서비스가 떠야 한다**. 주소가 비어 있으면 조용히 건너뛴다
+    # (아직 배포하지 않은 환경, 또는 차트를 쓰지 않기로 한 환경).
+    chart_url = (await get_config("chart_mcp_url", "") or "").strip()
+
     headers = {k: v for k, v in (caller_headers or {}).items() if v is not None}
 
     def toolset(url: str) -> McpToolset:
@@ -103,6 +107,8 @@ async def build_agent(caller_headers: dict | None = None,
 
     toolsets = [toolset(urls["manual"]), toolset(urls["command"]),
                 toolset(urls["voc"]), toolset(urls["system"])]
+    if chart_url:
+        toolsets.append(toolset(chart_url))
     agent = Agent(
         model=LiteLlm(model=f"openai/{llm_model}", api_base=llm_base_url, api_key="not-needed"),
         name="ops_assistant",
