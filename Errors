@@ -1,24 +1,12 @@
-next steps 에는 정확히 내가 당장 해야 할 커맨드들만 있어야 해. 매번 에러를 읽고 업데이트해. 
-RUN-LOG.md 파일에는 작업 내용 전체가 아니라, agent 를 서버에 띄우고 실행, 셋업하는 과정만 담아.
+1. 중간에 생각하는 과정은 생각 중인 내용을 보여주되, 요약해서 간단한 문장으로 보여주기 (tool 노출 X)
 
-1. 모든 인프라 활용법 관련 답변은 매뉴얼 기반으로 대답해. gpu 사용법 이제 아까보단 잘 대답하는데, 또 아래처럼 우리 인프라에서 쓸수 없는 쓸데없는 걸 붙여서 대답하네
-
-사용할 GPU에 맞춰 CUDA 바이너리를 재컴파일해야 합니다: 
-     H100: -arch=compute_90 -code=sm_90
-     A100: -arch=compute_80 -code=sm_80
-     V100: -arch=compute_70 -code=sm_70
-     
-
-2. 중간에 생각하는 과정은 웹 상에서 "생각 중" 이라고 뜨는데, 생각 중인 내용도 뜨게 하면 안되나? 
-
-3. command mcp 가 느리긴 하지만 작동하고 있어
-[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml exec command-mcp \
+2. 실행
+[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml exec -T command-mcp \
 >   ssh -o BatchMode=yes -o PasswordAuthentication=no \
 >       -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_agent \
->       -i /root/.ssh/id_ed25519 root@202.20.185.100 "su - yr9.choi -c myquota"
-Warning: Permanently added '202.20.185.100' (ECDSA) to the list of known hosts.
-Filesystem    Directory       Used(GB)   Limit(GB)       Files File limits
-gpfs.gpu1     yr9.choi          10,557           0   4,202,591           0
+>       -i /root/.ssh/id_ed25519 root@202.20.185.100 "su - yr9.choi -c myquota" < /dev/null
 
-그리고 여전히, 물어보면 절대 실행되지 않아
-myquota 명령어 실행 중 인증 오류가 발생했습니다. SSH 키가 정상적으로 설정되어 있는지 확인하고, 필요 시 재생성하세요.
+Filesystem    Directory       Used(GB)   Limit(GB)       Files File limits
+gpfs.gpu1     yr9.choi          10,555           0   4,202,829           0
+
+
