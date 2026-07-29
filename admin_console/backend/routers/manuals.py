@@ -37,7 +37,7 @@ def _embed_input(menu_title: str | None, doc_title: str | None,
     """임베딩할 텍스트에 '등록 제목 > 원본 문서 이름 > 섹션 제목'을 앞에 붙인다
     (Contextual retrieval).
 
-    청크 본문만 임베딩하면 "이게 무엇에 대한 문서인지"가 벡터에 안 들어간다. 특히 엑셀/CSV처럼
+    청크 본문만 임베딩하면 "이게 무엇에 대한 문서인지"가 벡터에 안 들어간다. 특히 엑셀/CSV/TSV처럼
     한 행이 한 청크인 경우 본문이 짧아 문맥이 거의 없어서, 제목을 붙이면 검색 정확도가 크게 는다.
     한 번에 여러 가이드 문서를 올리면(활용 가이드 메뉴 전체 등) 등록 제목만으로는 문서가
     구분되지 않으므로 원본 문서 이름(doc_title)까지 넣는다.
@@ -219,7 +219,7 @@ async def preview_excel(
     drop_urls: bool = Form(False),
     admin: str = Depends(require_admin),
 ):
-    """엑셀/CSV 컬럼 목록과 샘플 행, 전체 행 수를 반환한다."""
+    """엑셀/CSV/TSV 컬럼 목록과 샘플 행, 전체 행 수를 반환한다."""
     ext, content, filename = await read_upload_or_server_file(file, server_path, TABLE_EXTS)
     options = {"strip_html": strip_html, "collapse_space": collapse_space, "drop_urls": drop_urls}
     upload_id = await create_upload_session(_DSN, admin, filename, ext, "spreadsheet", content, options)

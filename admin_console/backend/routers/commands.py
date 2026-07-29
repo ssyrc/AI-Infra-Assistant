@@ -110,7 +110,7 @@ async def preview_command_excel(
     drop_urls: bool = Form(False),
     admin: str = Depends(require_admin),
 ):
-    """엑셀/CSV 열 목록과 샘플 행을 반환한다.
+    """엑셀/CSV/TSV 열 목록과 샘플 행을 반환한다.
     어떤 열을 name/description/exec_command로 쓸지 선택하게 한다."""
     ext, content, filename = await read_upload_or_server_file(file, server_path, TABLE_EXTS)
     options = {"strip_html": strip_html, "collapse_space": collapse_space, "drop_urls": drop_urls}

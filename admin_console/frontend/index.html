@@ -181,11 +181,12 @@ function ManualsPanel() {
   };
 
   const extOf = (f) => (f ? f.name.slice(f.name.lastIndexOf(".")).toLowerCase() : "");
-  const isExcel = (f) => [".xlsx", ".xls", ".csv"].includes(extOf(f));
+  const isExcel = (f) => [".xlsx", ".xls", ".csv", ".tsv"].includes(extOf(f));
   const fileKind = (f) => {
     const e = extOf(f);
     if ([".xlsx", ".xls"].includes(e)) return "엑셀 (열 선택)";
     if (e === ".csv") return "CSV (열 선택)";
+    if (e === ".tsv") return "TSV·탭 구분 (열 선택)";
     if (e === ".pptx") return "PPT (슬라이드 단위)";
     if ([".docx", ".pdf"].includes(e)) return "문서 (섹션 단위)";
     if ([".txt", ".md"].includes(e)) return "텍스트 (문단 단위)";
@@ -343,7 +344,7 @@ function ManualsPanel() {
       <div className="card">
         <div className="toolbar">
           <input placeholder="문서 제목 (버전 그룹핑 키)" value={title} onChange={e => setTitle(e.target.value)} style={{width: 260}} />
-          <input type="file" accept=".xlsx,.xls,.csv,.docx,.pptx,.pdf,.txt,.md"
+          <input type="file" accept=".xlsx,.xls,.csv,.tsv,.docx,.pptx,.pdf,.txt,.md"
                  onChange={e => pickFile(e.target.files[0])} />
           <button onClick={() => setShowBrowser(true)}>서버 파일에서 선택</button>
           {file && <span className="badge" style={{borderColor: "var(--muted)", color: "var(--muted)"}}>
@@ -719,11 +720,11 @@ function VocPanel() {
           <button className="primary" onClick={submit}>{editingId ? "수정 저장" : "등록"}</button>
           {editingId && <button onClick={() => { setEditingId(null); setForm({ question: "", answer: "", department: "", resolved: true }); }}>취소</button>}
           <span style={{marginLeft: "auto", display: "flex", alignItems: "center", gap: 6}}>
-            <input type="file" accept=".xlsx,.xls,.csv" disabled={busy}
+            <input type="file" accept=".xlsx,.xls,.csv,.tsv" disabled={busy}
                    onChange={e => { importFile(e.target.files[0]); e.target.value = ""; }} />
             <button disabled={busy} onClick={() => setShowBrowser(true)}>서버 파일에서 선택</button>
             <span style={{fontSize: 11.5, color: "var(--muted)"}}>
-              엑셀·CSV 일괄 등록 — 표가 몇 번째 행부터 시작하든 자동으로 찾아 열을 고르게 합니다.
+              엑셀·CSV·TSV 일괄 등록 — 표가 몇 번째 행부터 시작하든 자동으로 찾아 열을 고르게 합니다.
             </span>
           </span>
         </div>
@@ -1004,7 +1005,7 @@ function CommandsPanel() {
           <button className="primary" onClick={submit}>{editingId ? "수정 저장" : "등록"}</button>
           {editingId && <button onClick={() => { setEditingId(null); setForm({ name: "", description: "", exec_command: "" }); }}>취소</button>}
           <span style={{marginLeft: "auto", display: "flex", alignItems: "center", gap: 6}}>
-            <input type="file" accept=".xlsx,.xls,.csv" disabled={busy}
+            <input type="file" accept=".xlsx,.xls,.csv,.tsv" disabled={busy}
                    onChange={e => { analyzeExcel(e.target.files[0]); e.target.value = ""; }} />
             <button disabled={busy} onClick={() => setShowBrowser(true)}>서버 파일에서 선택</button>
             <span style={{fontSize: 11.5, color: "var(--muted)"}}>엑셀·CSV 일괄 업로드 (열 매핑)</span>

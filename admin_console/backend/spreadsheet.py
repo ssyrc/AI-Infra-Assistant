@@ -1,12 +1,13 @@
 """
-표 형식 파일(.xlsx/.xls/.csv) 읽기 공통 유틸.
+표 형식 파일(.xlsx/.xls/.csv/.tsv) 읽기 공통 유틸.
 
 여러 탭(매뉴얼·커맨드 등)이 같은 방식으로 헤더/샘플을 미리 보고, 선택한 열을 정제해
 가져올 수 있도록 파싱을 한 곳에 모은다. 실제 정제(clean_text)는 호출부에서 수행한다.
 
-CSV는 엑셀과 완전히 같은 "열 매핑" 흐름을 타도록 여기서 흡수한다(호출부는 확장자를 몰라도 된다).
+CSV/TSV는 엑셀과 완전히 같은 "열 매핑" 흐름을 타도록 여기서 흡수한다(호출부는 확장자를 몰라도 된다).
 사내에서 만든 CSV는 UTF-8(BOM 포함)이거나 CP949(엑셀 한글 기본)인 경우가 많아 둘 다 시도하고,
-구분자도 쉼표/탭/세미콜론/파이프를 자동 판별한다.
+구분자도 쉼표/탭/세미콜론/파이프를 자동 판별한다. 단 **.tsv는 탭으로 고정**한다 -
+셀 안에 쉼표가 흔해서 자동 판별에 맡기면 쉼표를 구분자로 오인하는 경우가 있다.
 """
 import csv
 import os
@@ -14,18 +15,25 @@ import os
 import openpyxl
 
 CSV_EXTS = {".csv"}
+TSV_EXTS = {".tsv"}
+TEXT_TABLE_EXTS = CSV_EXTS | TSV_EXTS
 EXCEL_EXTS = {".xlsx", ".xls"}
-TABLE_EXTS = EXCEL_EXTS | CSV_EXTS
+TABLE_EXTS = EXCEL_EXTS | TEXT_TABLE_EXTS
 
 _CSV_ENCODINGS = ("utf-8-sig", "cp949", "utf-8", "latin-1")
 
 
 def _read_csv_all(path: str) -> list[list[str]]:
-    """CSV 전체를 문자열 2차원 리스트로 읽는다. 인코딩/구분자를 자동으로 맞춘다."""
+    """CSV/TSV 전체를 문자열 2차원 리스트로 읽는다. 인코딩/구분자를 자동으로 맞춘다."""
+    is_tsv = os.path.splitext(path)[1].lower() in TSV_EXTS
     last_err: Exception | None = None
     for enc in _CSV_ENCODINGS:
         try:
             with open(path, "r", newline="", encoding=enc) as f:
+                if is_tsv:
+                    # 확장자가 탭 구분을 명시하므로 판별하지 않는다. VOC 본문에는 쉼표가 흔해서
+                    # 자동 판별에 맡기면 쉼표를 구분자로 잡아 열이 어긋난다.
+                    return [row for row in csv.reader(f, csv.excel_tab)]
                 sample = f.read(8192)
                 f.seek(0)
                 try:
@@ -37,11 +45,12 @@ def _read_csv_all(path: str) -> list[list[str]]:
             last_err = e
             continue
     raise ValueError(
-        f"CSV 인코딩을 인식할 수 없습니다(UTF-8 또는 CP949로 저장해 주세요): {last_err}")
+        f"파일 인코딩을 인식할 수 없습니다(UTF-8 또는 CP949로 저장해 주세요): {last_err}")
 
 
 def _is_csv(path: str) -> bool:
-    return os.path.splitext(path)[1].lower() in CSV_EXTS
+    """구분자 텍스트 표(csv/tsv)인지. 엑셀이면 False."""
+    return os.path.splitext(path)[1].lower() in TEXT_TABLE_EXTS
 
 
 def _norm(v) -> str:
@@ -81,7 +90,7 @@ def _header_of(row) -> list[str]:
 
 
 def _all_rows(path: str) -> list[list]:
-    """엑셀/CSV를 2차원 리스트로 읽는다. 빈 행도 그대로 둔다 —
+    """엑셀/CSV/TSV를 2차원 리스트로 읽는다. 빈 행도 그대로 둔다 —
     그래야 헤더 행 번호가 사용자가 엑셀에서 보는 실제 행 번호와 일치한다."""
     if _is_csv(path):
         return [list(r) for r in _read_csv_all(path)]
@@ -94,7 +103,7 @@ def _all_rows(path: str) -> list[list]:
 
 def _sheet_name(path: str) -> str:
     if _is_csv(path):
-        return "CSV"
+        return os.path.splitext(path)[1].lower().lstrip(".").upper()
     wb = openpyxl.load_workbook(path, read_only=True)
     try:
         return wb.active.title

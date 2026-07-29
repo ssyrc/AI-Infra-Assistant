@@ -312,7 +312,7 @@ async def preview_voc_table(
     header_row: int | None = Form(None),
     admin: str = Depends(require_admin),
 ):
-    """엑셀/CSV의 헤더 행을 자동으로 찾아 열 목록과 샘플을 돌려준다.
+    """엑셀/CSV/TSV의 헤더 행을 자동으로 찾아 열 목록과 샘플을 돌려준다.
     header_row를 주면 그 행(1-based, 엑셀에서 보이는 실제 행 번호)을 헤더로 강제한다."""
     ext, content, filename = await read_upload_or_server_file(file, server_path, TABLE_EXTS)
     upload_id = await create_upload_session(_DSN_VOC, admin, filename, ext, "voc_table", content, {})
