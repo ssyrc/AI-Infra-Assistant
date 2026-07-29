@@ -306,8 +306,9 @@ def _result_phrase(name: str, resp) -> str:
 def _tool_status_lines(event) -> str:
     """진행 상황을 사람이 읽는 한 줄로 만든다(도구 이름·인자 원문은 노출하지 않는다).
 
-    Open WebUI가 <details open> 블록 안의 내용을 답변 전에 그대로 보여주므로,
-    사용자는 "지금 무엇을 하는 중인지"만 알게 되고 내부 도구 구성은 드러나지 않는다.
+    답변 앞에 그대로 흘려보낸다(예전에는 <details> 블록으로 감쌌는데, 클라이언트에 따라
+    태그가 그대로 보여서 걷어냈다). 사용자는 "지금 무엇을 하는 중인지"만 알게 되고
+    내부 도구 구성은 드러나지 않는다.
     """
     lines = []
     for fc in (event.get_function_calls() or []):
@@ -456,20 +457,17 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                     if show_tools:
                         status = _tool_status_lines(event)
                         if status:
-                            if not in_think:
-                                yield _sse(request_id, model_name,
-                                           "<details open>\n<summary>진행 상황</summary>\n\n")
-                                in_think = True
+                            in_think = True
                             yield _sse(request_id, model_name, status + "\n")
                     delta = dedup.feed(event)
                     if delta:
-                        if in_think:          # 답변이 시작되면 진행 영역을 닫는다
-                            yield _sse(request_id, model_name, "\n</details>\n\n")
+                        if in_think:          # 진행 줄과 답변 사이만 한 줄 띄운다
+                            yield _sse(request_id, model_name, "\n")
                             in_think = False
                         yield _sse(request_id, model_name, delta)
 
             if in_think:
-                yield _sse(request_id, model_name, "\n</details>\n\n")
+                yield _sse(request_id, model_name, "\n")
             yield _sse(request_id, model_name, "", finish=True)
             yield "data: [DONE]\n\n"
         except asyncio.CancelledError:
@@ -642,19 +640,16 @@ async def agent_query(body: AgentQueryIn, request: Request):
                     if show_tools:
                         status = _tool_status_lines(event)
                         if status:
-                            if not in_think:
-                                yield _sse(request_id, model_name,
-                                           "<details open>\n<summary>진행 상황</summary>\n\n")
-                                in_think = True
+                            in_think = True
                             yield _sse(request_id, model_name, status + "\n")
                     delta = dedup.feed(event)
                     if delta:
-                        if in_think:          # 답변이 시작되면 진행 영역을 닫는다
-                            yield _sse(request_id, model_name, "\n</details>\n\n")
+                        if in_think:          # 진행 줄과 답변 사이만 한 줄 띄운다
+                            yield _sse(request_id, model_name, "\n")
                             in_think = False
                         yield _sse(request_id, model_name, delta)
             if in_think:
-                yield _sse(request_id, model_name, "\n</details>\n\n")
+                yield _sse(request_id, model_name, "\n")
             yield _sse(request_id, model_name, "", finish=True)
             yield "data: [DONE]\n\n"
         except asyncio.CancelledError:

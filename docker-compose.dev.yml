@@ -130,6 +130,9 @@ services:
       SSH_COMMAND_TIMEOUT: ${SSH_COMMAND_TIMEOUT:-120}
       # TTY 강제(기본 off). su가 TTY를 요구하는 환경에서만 true로.
       SSH_FORCE_TTY: ${SSH_FORCE_TTY:-false}
+      # 연결 다중화: 첫 커맨드만 핸드셰이크하고 이후는 같은 연결에 얹는다(체감 지연의 대부분).
+      SSH_MULTIPLEX: ${SSH_MULTIPLEX:-true}
+      SSH_CONTROL_PERSIST: ${SSH_CONTROL_PERSIST:-300}
     volumes:
       - ./mcp_servers:/app/mcp_servers:ro
       - ./shared:/app/shared:ro
@@ -164,6 +167,9 @@ services:
       SSH_COMMAND_TIMEOUT: ${SSH_COMMAND_TIMEOUT:-120}
       # TTY 강제(기본 off). su가 TTY를 요구하는 환경에서만 true로.
       SSH_FORCE_TTY: ${SSH_FORCE_TTY:-false}
+      # 연결 다중화: 첫 커맨드만 핸드셰이크하고 이후는 같은 연결에 얹는다(체감 지연의 대부분).
+      SSH_MULTIPLEX: ${SSH_MULTIPLEX:-true}
+      SSH_CONTROL_PERSIST: ${SSH_CONTROL_PERSIST:-300}
       SSH_CONNECT_TIMEOUT: "8"
     volumes:
       - ./mcp_servers:/app/mcp_servers:ro

@@ -49,6 +49,14 @@ try:
 except ValueError:
     SSH_CONNECT_TIMEOUT = 8
 
+# ssh 연결 다중화(ControlMaster). 커맨드 하나마다 TCP+SSH 핸드셰이크와 `su -` 로그인 셸을
+# 새로 여는 게 지연의 대부분이다(요청당 1~3초). 첫 연결만 실제로 맺고 이후 커맨드는 그 위에
+# 채널만 얹으면 두 번째부터는 왕복이 거의 사라진다.
+# ControlPersist 동안 마스터 프로세스가 살아 있다가 알아서 종료된다.
+SSH_CONTROL_DIR = os.environ.get("SSH_CONTROL_DIR", "/tmp/.ssh-mux")
+SSH_MULTIPLEX = os.environ.get("SSH_MULTIPLEX", "true").strip().lower() != "false"
+SSH_CONTROL_PERSIST = os.environ.get("SSH_CONTROL_PERSIST", "300")
+
 MAX_OUTPUT = 64 * 1024
 # 사내 커맨드는 느린 게 많다(GPFS 쿼터 조회처럼 스토리지 전체를 훑는 것들). 25초는 너무 짧아서
 # 정상 동작하는 커맨드가 중단되고, 그러면 에이전트가 실패 원인을 엉뚱하게 해석한다.
@@ -108,6 +116,24 @@ def resolve_host(name: str) -> str:
         "이름 대신 IP로 지정하면 이름 해석을 타지 않습니다(예: 202.20.185.100).")
 
 
+_control_dir_ready = False
+
+
+def _ensure_control_dir() -> bool:
+    """다중화 소켓을 둘 디렉토리를 준비한다(0700). 실패하면 다중화 없이 진행한다."""
+    global _control_dir_ready
+    if _control_dir_ready:
+        return True
+    try:
+        os.makedirs(SSH_CONTROL_DIR, mode=0o700, exist_ok=True)
+        os.chmod(SSH_CONTROL_DIR, 0o700)
+        _control_dir_ready = True
+    except OSError as e:
+        print(f"[ssh_exec] ControlPath 디렉토리를 만들 수 없어 연결 다중화를 끕니다: {e}")
+        _control_dir_ready = False
+    return _control_dir_ready
+
+
 def validate_user(user_id: str) -> str:
     if not user_id or not _USER_RE.match(user_id):
         raise PermissionError(
@@ -142,6 +168,13 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
         "-o", f"UserKnownHostsFile={SSH_KNOWN_HOSTS}",
         "-o", f"ConnectTimeout={SSH_CONNECT_TIMEOUT}",
     ]
+    if SSH_MULTIPLEX and _ensure_control_dir():
+        # 소켓 경로는 %C(호스트·포트·사용자 해시)로 만들어 길이 제한(보통 108바이트)을 피한다.
+        ssh_argv += [
+            "-o", "ControlMaster=auto",
+            "-o", f"ControlPath={os.path.join(SSH_CONTROL_DIR, 'cm-%C')}",
+            "-o", f"ControlPersist={SSH_CONTROL_PERSIST}",
+        ]
     if SSH_FORCE_TTY:
         ssh_argv.append("-tt")
     # SSH_KEY 경로가 '파일'일 때만 -i로 넘긴다. compose가 없는 경로를 bind mount하면 도커가
