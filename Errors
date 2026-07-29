@@ -1,23 +1,24 @@
 Q2: 내 홈 파일 리스트 보여줘 
-Q2: total 24K
-drwxr-xr-x 2 {사용자 id} {사용자 id} 4.0K Oct 10 14:23 data
-drwxr-xr-x 2 {사용자 id} {사용자 id} 4.0K Oct 10 14:23 documents
-drwxr-xr-x 2 {사용자 id} {사용자 id} 4.0K Oct 10 14:23 projects
--rw-r--r-- 1 {사용자 id} {사용자 id}  102 Oct 10 14:23 README.txt
-# 또 다시 사용자 id가 마스킹되어있어.... 여전히 202.20.185.100 에서 user id로 접근해서 ~/ 목록 보여주고 있지 않아. 뭐하자는거야? 제대로 똑바로 처리해.
+A2: <details open> <summary> 진행 상황 </summary> 이런식으로 먼저 뜨네. 이런거 말고 그냥 진행상황만 뜨게 해줘.
+그리고 이렇게 무한 루프에 걸리다가, 파일 목록 쭉 뱉어. 결과적으로는 쭉 뱉긴 한데 너무 오래걸려... 이것도 개선할 방법이 없을까?
+· 디렉토리 확인하는 중
+· 확인 완료
+· 디렉토리 확인하는 중
+· 확인 완료
+· 'echo $HOME' 실행하는 중
+· 확인 완료
+· 'pwd' 실행하는 중
+· 확인 완료
+· 디렉토리 확인하는 중
+
 
 Q3: 내 job 리스트 뭐가 있어?
-A3: 이거 이제 실행은 되는데 너무 오래걸려. 왜이렇게 오래걸리는거야... rag말고 좀 더 빠르게 command 찾을 수 있는 방법 없을까? json 파일로 저장한다던가 관계형 DB를 사용한다던가. 아니면 그냥 함수로 agent의 skill 처럼 저장한다던가.
+A3: 이거 이제 실행은 되네. 어떻게 한거야? 
 
 Q4: gpu 사용법 알려줘
-잘 대답하는데, 중간에 '~~방법은 '~~가이드'를 참고하세요.' 라고 나오고 맨 마지막에 또 문서 위치와 함꼐 안내가 나와. 가이드 참조는 맨 마지막에 한번만, 제대로 된 경로와 함께 안내하도록 해. 
-
 Q5: cpu 사용법 알려줘
-자꾸 gpu 사용법이랑 혼용해서 말하네. 보니까 매뉴얼 탭에 임베딩이 잘못 들어가있어. csv 가 콤마로 구분되어 있어서 그런가? tsv 로 올릴 수 있게 해줘.
+이제 대답은 잘해!그런데 맨 마지막에 가이드 참고 문서 목록 보여줄때, 문서 위치가 함께 나오지 않고 있어. 만약 rag 로 가져온 청크가 문서 위치가 등록된 거라면, 문서 위치 > '가이드 문서 이름' 이렇게 보여줘야해.
+
 
 Q6: 계정 신청은 어떻게 해? 방화벽은 뭐 신청해야해?
-A6: [오류가 발생했습니다: litellm.ContextWindowExceededError: litellm.BadRequestError: ContextWindowExceededError: OpenAIException - Error code: 400 - {'error': {'message': "This model's maximum context length is 32768 tokens. However, your request has 35252 input tokens. Please reduce the length of the input messages. None", 'type': 'BadRequestError', 'param': None, 'code': 400}}]
-이건 여전히 오류 발생하네
-
-Q7: 접속이 안돼
-A7: 잘 알려주다가 중간에 방화벽 정책 변경 알려주는데 그 경로가 이상해. 무조건 매뉴얼에 있는 내용으로만 대답해...
+A6: 알려주는데 엉뚱한 참고문서를 가이드해주네. manual db에서 제대로 rag가 안되는것 같은데. gpu 서버 활용 가이드를 알려주고 있어..
