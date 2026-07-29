@@ -89,6 +89,10 @@ TSV는 이미 매뉴얼 탭에서도 됩니다(파일 선택창에 `.tsv` 포함
   docker compose -f docker-compose.dev.yml restart command-mcp
   ```
 - 설명은 **한 줄**로. 설명이 매 요청 프롬프트에 그대로 실립니다(툴 하나당 약 270자 ≈ 100토큰).
+- ⚠️ **사용자별 자원을 조회하는 커맨드는 실행 커맨드에 `{user_id}`를 꼭 넣으세요.**
+  예: `phd info -u {user_id}` (O) / `phd info` (X)
+  `{user_id}`가 있어야 에이전트가 `-u 남의계정`으로 덮어쓰는 것을 시스템이 막습니다.
+  등록된 커맨드 중 `-u`/`--user` 류 옵션을 받는데 `{user_id}`가 없는 게 있으면 고쳐 주세요.
 - 상한은 `command_tools_max`(기본 **80**). 넘으면 경고가 찍히고 남는 커맨드는
   `run_command` 로만 실행됩니다.
 

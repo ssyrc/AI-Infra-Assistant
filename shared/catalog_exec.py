@@ -92,5 +92,30 @@ def build_catalog_argv(exec_command: str | None, name: str, args: list | None,
         extra = list(args or [])
     if len(extra) > MAX_ARGS:
         raise ValueError(f"인자가 너무 많습니다(최대 {MAX_ARGS}개).")
-    argv += [_check_token(str(a), "인자") for a in extra]
-    return argv
+    extra = [_check_token(str(a), "인자") for a in extra]
+
+    # deny 목록을 argv[0]에만 걸면 '인자를 실행하는 커맨드'로 빠져나갈 수 있다
+    # (`srun rm -rf ~`, `xargs rm`, `watch reboot`). srun/sbatch는 정상 사용이라 커맨드
+    # 자체를 막을 수 없으므로, 인자 쪽에서 파괴적 기본 명령 이름을 거부한다.
+    # 경로(`/data/kill`)나 옵션(`--rm`)까지 막지 않도록 '맨 이름' 토큰만 본다.
+    for token in extra:
+        t = token.strip().lower()
+        if t and "/" not in t and not t.startswith("-") and t in deny:
+            raise PermissionError(
+                f"인자로 준 '{t}'는 파괴적이거나 권한 상승 위험이 있어 실행할 수 없습니다"
+                "(커맨드가 인자를 그대로 실행하는 경우가 있어 인자도 검사합니다).")
+
+    # `{user_id}`로 호출자를 고정한 커맨드에서, 같은 옵션을 뒤에 한 번 더 주면 값이 덮인다
+    # (`phd info -u 나 -u 남` -> 대부분의 CLI가 뒤엣것을 쓴다). 그러면 "user_id는 호출자
+    # 신원에서 강제 주입한다(남의 자원 접근 불가)"는 보장이 이 경로에서만 깨진다.
+    # OS 권한은 여전히 본인으로 강등돼 있지만, 커맨드가 자기 권한으로 남의 정보를 보여줄 수
+    # 있으므로 **이미 고정된 옵션의 재지정 자체를** 막는다.
+    if "{user_id}" in raw:
+        fixed_flags = {t for t in base_argv if t.startswith("-") and len(t) > 1}
+        for token in extra:
+            if token.split("=", 1)[0] in fixed_flags:
+                raise PermissionError(
+                    f"'{token.split('=', 1)[0]}' 옵션은 이 커맨드에서 호출자 계정으로 이미 "
+                    "고정돼 있어 다시 지정할 수 없습니다(다른 사용자의 자원은 조회할 수 없습니다).")
+
+    return argv + extra

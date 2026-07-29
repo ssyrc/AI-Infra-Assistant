@@ -295,3 +295,50 @@ def test_estimate_prompt_tokens_counts_schema_overhead():
     # 툴이 늘면 비용도 비례해서 늘어야 한다.
     c2, t2 = m.estimate_prompt_tokens(["", ""])
     assert c2 == 2 * chars and t2 == 2 * tokens
+
+
+# --- 8번: 카탈로그 커맨드의 args는 자유 입력이다 - 두 가지를 막아야 한다 ---------------
+# (1) deny 목록을 argv[0]에만 걸면 '인자를 실행하는 커맨드'로 빠져나간다(`srun rm -rf ~`).
+#     srun/sbatch는 정상 사용이라 커맨드 자체는 막을 수 없으므로 인자 쪽에서 막는다.
+# (2) `{user_id}`로 고정한 옵션을 뒤에 다시 주면 값이 덮인다(`phd info -u 나 -u 남`).
+#     대부분의 CLI가 뒤엣것을 쓰므로, "user_id는 호출자 신원에서 강제 주입한다"는 보장이
+#     이 경로에서만 깨진다. OS 권한은 본인이지만 커맨드가 남의 정보를 뿌릴 수 있다.
+def test_catalog_args_cannot_bypass_deny_or_impersonate():
+    from catalog_exec import build_catalog_argv, deny_set, DEFAULT_DENY_CSV
+    deny = deny_set(DEFAULT_DENY_CSV)
+
+    def build(exec_command, args):
+        return build_catalog_argv(exec_command, "n", args, "yr9.choi", deny)
+
+    # 인자 없이도 그대로 실행된다({user_id}만 치환).
+    assert build("phd info -u {user_id}", None) == ["phd", "info", "-u", "yr9.choi"]
+    assert build("phd info -u {user_id}", []) == ["phd", "info", "-u", "yr9.choi"]
+    assert build("phd info -u {user_id}", ["-a"])[-1] == "-a"
+
+    # (1) 래퍼 커맨드의 인자로 파괴적 명령을 넘기면 거부.
+    for args in (["rm", "-rf", "~"], ["chmod", "777", "/"], ["sudo", "id"]):
+        with pytest.raises(PermissionError):
+            build("srun", args)
+    # 정상 사용은 그대로 통과해야 한다(과잉 차단 금지).
+    assert build("srun", ["-n", "4", "./my_job.sh"]) == ["srun", "-n", "4", "./my_job.sh"]
+    # 경로나 옵션에 우연히 deny 단어가 들어간 경우도 막지 않는다.
+    assert build("du -h", ["/data/kill"])[-1] == "/data/kill"
+    assert build("ls", ["--rm"])[-1] == "--rm"
+
+    # (2) 호출자로 고정된 옵션의 재지정은 거부(= 형태 포함).
+    for args in (["-u", "someone_else"], ["-u=someone_else"]):
+        with pytest.raises(PermissionError):
+            build("phd info -u {user_id}", args)
+
+    # 셸 주입은 예전처럼 '통과하되 무해'해야 한다(quote되어 한 덩어리 인자가 됨).
+    assert build("phd info -u {user_id}", ["; rm -rf /"])[-1] == "; rm -rf /"
+
+
+def test_remote_command_quotes_injection_attempts():
+    """`su - user -c <문자열>`은 셸을 거치므로 인용이 유일한 방어선이다."""
+    from ssh_exec import _remote_command
+    cmd = _remote_command("yr9.choi", ["phd", "info", "; rm -rf /", "`whoami`", "$(id)"])
+    assert cmd.startswith("su - yr9.choi -c ")
+    # 메타문자가 인용 밖으로 새 나가면 안 된다.
+    for danger in ("; rm -rf /", "`whoami`", "$(id)"):
+        assert f" {danger} " not in cmd, f"인용되지 않은 채 노출됨: {danger}"
