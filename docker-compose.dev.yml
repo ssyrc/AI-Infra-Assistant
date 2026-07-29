@@ -13,7 +13,7 @@ x-mcp-source-volumes: &mcp-source-volumes
 x-admin-source-volumes: &admin-source-volumes
   - ./admin_console:/app/admin_console:ro
   - ./shared:/app/shared:ro
-  - ./mcp_servers/system_mcp:/app/mcp_servers/system_mcp:ro
+  - ./mcp_servers/execution_mcp:/app/mcp_servers/execution_mcp:ro
 
 # 폐쇄망: 사내 미러 레지스트리를 .env로 지정한다(기본은 공개 레지스트리).
 #   REGISTRY_DOCKERHUB=repository.samsungds.net/proxy-docker-registry-1.docker.io
@@ -65,9 +65,8 @@ services:
       POSTGRES_PASSWORD: *pgpass
       REDIS_HOST: ""          # dev에는 redis 없음 -> 임베딩 캐시 비활성
       MANUAL_MCP_URL: http://manual-mcp:8001/mcp
-      COMMAND_MCP_URL: http://command-mcp:8002/mcp
+      EXECUTION_MCP_URL: http://execution-mcp:8002/mcp
       VOC_MCP_URL: http://voc-mcp:8003/mcp
-      SYSTEM_MCP_URL: http://system-mcp:8004/mcp
       CHART_MCP_URL: http://chart-mcp:8005/mcp
       # 차트 이미지는 사용자 브라우저가 직접 받아간다 -> 배포 호스트에서 접근 가능한 주소.
       CHART_PUBLIC_BASE_URL: ${CHART_PUBLIC_BASE_URL:-}
@@ -117,9 +116,10 @@ services:
     depends_on:
       dev-config: { condition: service_completed_successfully }
 
-  command-mcp:
+  # 커맨드 실행 전담(구 command-mcp + system-mcp). 내장 커맨드·등록 커맨드·run_command.
+  execution-mcp:
     <<: *mcpimage
-    command: ["watchfiles", "--filter", "python", "python mcp_servers/command_mcp/server.py", "mcp_servers/command_mcp", "shared"]
+    command: ["watchfiles", "--filter", "python", "python mcp_servers/execution_mcp/server.py", "mcp_servers/execution_mcp", "shared"]
     environment:
       CONFIG_DB_DSN: *configdsn
       MCP_PORT: "8002"
@@ -142,7 +142,7 @@ services:
       # 대상 서버 IP 매핑(이름으로 지정할 때만 쓰인다 - 로그인 서버는 설정에 IP로 박는다) + ssh 개인키.
       - /etc/hosts:/etc/hosts.targets:ro
       - ${SSH_KEY_PATH:-./secrets/id_ed25519}:/root/.ssh/id_ed25519:ro
-    ports: ["${COMMAND_MCP_PORT:-8504}:8002"]
+    ports: ["${EXECUTION_MCP_PORT:-8504}:8002"]
     depends_on:
       dev-config: { condition: service_completed_successfully }
 
@@ -151,36 +151,6 @@ services:
     command: ["watchfiles", "--filter", "python", "python mcp_servers/voc_mcp/server.py", "mcp_servers/voc_mcp", "shared"]
     environment: { CONFIG_DB_DSN: *configdsn, MCP_PORT: "8003" }
     ports: ["${VOC_MCP_PORT:-8505}:8003"]
-    depends_on:
-      dev-config: { condition: service_completed_successfully }
-
-  system-mcp:
-    <<: *mcpimage
-    command: ["watchfiles", "--filter", "python", "python mcp_servers/system_mcp/server.py", "mcp_servers/system_mcp", "shared"]
-    environment:
-      CONFIG_DB_DSN: *configdsn
-      MCP_PORT: "8004"
-      # 리눅스 실행 툴(disk_free 등)은 대상 서버로 ssh(root) 후 su - <user>로 실행한다.
-      HOSTS_FILE: /etc/hosts.targets
-      SSH_KEY: /root/.ssh/id_ed25519
-      SSH_ROOT_USER: root
-      # 호스트 키가 계속 막으면 .env에 SSH_STRICT_HOST_KEY=no 를 넣고 컨테이너를 재생성한다.
-      SSH_STRICT_HOST_KEY: ${SSH_STRICT_HOST_KEY:-accept-new}
-      # 느린 사내 커맨드(GPFS 쿼터 조회 등)가 중간에 끊기지 않도록 넉넉히.
-      SSH_COMMAND_TIMEOUT: ${SSH_COMMAND_TIMEOUT:-120}
-      # TTY 강제(기본 off). su가 TTY를 요구하는 환경에서만 true로.
-      SSH_FORCE_TTY: ${SSH_FORCE_TTY:-false}
-      # 연결 다중화: 첫 커맨드만 핸드셰이크하고 이후는 같은 연결에 얹는다(체감 지연의 대부분).
-      SSH_MULTIPLEX: ${SSH_MULTIPLEX:-true}
-      SSH_CONTROL_PERSIST: ${SSH_CONTROL_PERSIST:-300}
-      SSH_CONNECT_TIMEOUT: "8"
-    volumes:
-      - ./mcp_servers:/app/mcp_servers:ro
-      - ./shared:/app/shared:ro
-      # 대상 서버 IP 매핑(이름으로 지정할 때만 쓰인다 - 로그인 서버는 설정에 IP로 박는다) + ssh 개인키.
-      - /etc/hosts:/etc/hosts.targets:ro
-      - ${SSH_KEY_PATH:-./secrets/id_ed25519}:/root/.ssh/id_ed25519:ro
-    ports: ["${SYSTEM_MCP_PORT:-8506}:8004"]
     depends_on:
       dev-config: { condition: service_completed_successfully }
 
@@ -216,9 +186,8 @@ services:
       dev-config: { condition: service_completed_successfully }
       mock-vllm: { condition: service_started }
       manual-mcp: { condition: service_started }
-      command-mcp: { condition: service_started }
+      execution-mcp: { condition: service_started }
       voc-mcp: { condition: service_started }
-      system-mcp: { condition: service_started }
       chart-mcp: { condition: service_started }
 
   admin-console:
@@ -227,7 +196,7 @@ services:
     volumes:
       - ./admin_console:/app/admin_console:ro
       - ./shared:/app/shared:ro
-      - ./mcp_servers/system_mcp:/app/mcp_servers/system_mcp:ro
+      - ./mcp_servers/execution_mcp:/app/mcp_servers/execution_mcp:ro
       # "서버 파일에서 선택" 업로드용. 호스트 경로는 .env의 UPLOAD_SOURCE_HOST_DIR로 바꿀 수 있다.
       - ${UPLOAD_SOURCE_HOST_DIR:-/home/gpu1/yr9.choi/05_halo/datasets}:/data/uploads:ro
       # 설정/화이트리스트 저장 후 "지금 재시작" 버튼용. admin-console에 사실상 호스트 권한을

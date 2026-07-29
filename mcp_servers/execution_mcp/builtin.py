@@ -1,6 +1,11 @@
 """
-System MCP 화이트리스트 - 사용자가 지정한 '서버'에 ssh(root)로 접속해 호출자(user_id)
-권한으로 실행하는 read-only 리눅스 명령.
+Execution MCP의 **코드 내장 커맨드** - 지정 서버에 ssh(root)로 접속해 호출자(user_id) 권한으로
+실행하는 read-only 리눅스 명령.
+
+콘솔에 등록하는 커맨드(execution_commands)와 달리 여기 있는 것들은 **파이썬 함수**다.
+그 이유는 값 검증 때문이다 - `lines`는 1~2000, `max_depth`는 0~10, `kind`는 정해진 다섯 개,
+경로는 safe_path()를 통과해야 한다. 템플릿 문자열로는 표현할 수 없는 검사라 코드로 남긴다.
+활성/역할/설명/실행위치는 콘솔에서 바꾼다(execution_builtin_state).
 
 동작:
 - LLM은 서버 이름(host)과 타입이 정해진 파라미터만 준다. 원시 셸/플래그는 노출하지 않는다.
@@ -74,12 +79,12 @@ async def system_info(user_id: str, host: str, kind: str = "uptime") -> dict:
     return await run_ssh_as_user(host, user_id, table[kind])
 
 
-# name -> 실행 핸들러와 메타데이터.
+# 툴 이름 -> 실행 핸들러와 메타데이터.
 #  - enabled: 최초 기동 시 기본 활성 여부(이후 관리자 콘솔 토글이 우선). 전부 read-only라 기본 ON.
 #  - required_roles: 지정 시 해당 역할 보유자만 실행(콘솔 편집, 실시간). X-User-Roles로 검증.
 #  - user_scoped: True면 user_id를 LLM 스키마에서 감추고 호출자 신원에서 강제 주입.
-#  - host_mode: host 파라미터 처리 방식(관리자 콘솔 "분류"로 실시간 변경 가능, 단 스키마에
-#    영향을 주므로 반영에는 System MCP 재시작이 필요함).
+#  - host_mode: host 파라미터 처리 방식(관리자 콘솔에서 변경 가능, 단 스키마에
+#    영향을 주므로 반영에는 Execution MCP 재시작이 필요함).
 #      target_server(기본) - 서버마다 값이 다른 툴. host를 LLM이 지정해야 한다(예: hgpu8002의
 #        GPU 상태는 hgpu8002에서만 의미가 있음).
 #      login_server - 특정 서버에 매인 게 아니라 로그인 서버 기준으로 보는 게 자연스러운 툴.
@@ -88,7 +93,7 @@ _COMMON = {"enabled": True, "required_roles": [], "user_scoped": True, "scope_pa
            "host_mode": "target_server"}
 _LOGIN_SERVER = {**_COMMON, "host_mode": "login_server"}
 
-WHITELIST = {
+BUILTIN_COMMANDS = {
     "gpu_status": {"handler": gpu_status, "example_command": "nvidia-smi",
                    "description": ("지정 서버(host)의 GPU 상태 조회(nvidia-smi: 장수·모델·"
                                    "사용률/메모리·실행 프로세스). host는 서버 이름(예: hgpu8002)."),

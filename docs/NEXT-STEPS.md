@@ -11,27 +11,35 @@ rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
   yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
 ```
 
-## 2. [서버] 마이그레이션 + 재시작
+## 2. [서버] 마이그레이션 + 컨테이너 재구성
+
+**Command MCP와 System MCP가 `execution-mcp` 하나로 합쳐졌고, `chart-mcp`가 새로 생겼습니다.**
+컨테이너 구성이 바뀌었으므로 재시작만으로는 안 되고 `up -d`가 필요합니다.
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
 docker compose -f docker-compose.dev.yml run --rm db-init
-bash scripts/restart-mounted.sh
+docker compose -f docker-compose.dev.yml up -d --no-build
+docker compose -f docker-compose.dev.yml rm -sf command-mcp system-mcp   # 예전 컨테이너 정리
+docker compose -f docker-compose.dev.yml ps
 ```
 
-`scheduler_job_command` 키가 삭제되고, 컨텍스트 상한 키 3개
-(`manual_result_max_chars` / `voc_result_max_chars` / `history_max_chars`)와
-차트 키 4개(`chart_*`)가 추가됩니다.
+`execution-mcp`와 `chart-mcp`가 떠 있고 `command-mcp`/`system-mcp`가 없으면 정상입니다.
+**이미지 재빌드는 필요 없습니다**(새 pip 패키지 없음).
 
-**차트 MCP가 새로 생겨서 컨테이너를 하나 더 띄워야 합니다**(재시작만으로는 안 뜹니다):
+db-init이 하는 일:
+- 등록해 둔 커맨드 카탈로그와 System 커스텀 커맨드를 `execution_commands` 한 테이블로 **자동 이관**
+- 내장 커맨드의 활성/역할/설명/실행위치도 그대로 옮김
+- 설정 키 이름 변경(`command_tools_max` → `execution_tools_max`,
+  `catalog_exec_deny_commands` → `execution_deny_commands`) — **바꿔 둔 값은 유지**됩니다
+- 쓰지 않던 커맨드 임베딩 컬럼 삭제(#105 이후로 아무도 읽지 않았는데 업로드가 느렸던 원인)
+
+이관 결과 확인:
 
 ```bash
-cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker compose -f docker-compose.dev.yml up -d --no-build chart-mcp
-docker compose -f docker-compose.dev.yml ps chart-mcp
+docker compose -f docker-compose.dev.yml logs db-init | grep 이관
+docker compose -f docker-compose.dev.yml logs execution-mcp | grep 내장
 ```
-
-이미지 재빌드는 **필요 없습니다** — 새 pip 패키지 없이 표준 라이브러리만 씁니다.
 
 ## 3. [웹] 매뉴얼 탭 — 활용가이드를 **TSV로 다시 업로드**
 
@@ -86,43 +94,64 @@ TSV는 이미 매뉴얼 탭에서도 됩니다(파일 선택창에 `.tsv` 포함
 3번에서 TSV로 다시 올린 뒤에도 섞이면 매뉴얼 탭 **검색 테스트**에 "cpu 사용법"을 넣고
 결과 화면을 전달해 주세요(어떤 문서가 왜 올라오는지 점수까지 보입니다).
 
-## 9. [웹] 커맨드 탭 — 이제 **검색이 아니라 툴**입니다
+## 9. [웹] 실행 탭 — 커맨드 탭 + System MCP 탭이 합쳐졌습니다
 
-커맨드 카탈로그의 행 하나가 **MCP 툴 하나**가 됩니다. 에이전트가 툴 목록을 직접 보고
-고르므로, 검색이 어긋나 등록해 둔 커맨드를 못 찾는 일이 없어집니다(System MCP와 같은 방식).
+사이드바에 **"커맨드 실행"** 하나만 있고, 그 안에 세 화면이 있습니다.
 
-- **설명(description)을 잘 써 두세요.** 에이전트가 그것만 보고 고릅니다.
-  "내 홈 스토리지 사용량/할당량 조회" 처럼 **사용자가 물어볼 말**로 적으면 좋습니다.
-- 실행 커맨드의 `{user_id}` 는 질문한 사람 계정으로 치환됩니다.
-- ⚠️ **카탈로그를 고치면 command-mcp를 재시작해야 반영됩니다**(예전 검색 방식은 즉시
-  반영됐습니다). 콘솔의 "지금 재시작" 버튼 또는:
-  ```bash
-  docker compose -f docker-compose.dev.yml restart command-mcp
-  ```
-- 설명은 **한 줄**로. 설명이 매 요청 프롬프트에 그대로 실립니다(툴 하나당 약 270자 ≈ 100토큰).
-- ⚠️ **사용자별 자원을 조회하는 커맨드는 실행 커맨드에 `{user_id}`를 꼭 넣으세요.**
-  예: `phd info -u {user_id}` (O) / `phd info` (X)
-  `{user_id}`가 있어야 에이전트가 `-u 남의계정`으로 덮어쓰는 것을 시스템이 막습니다.
-  등록된 커맨드 중 `-u`/`--user` 류 옵션을 받는데 `{user_id}`가 없는 게 있으면 고쳐 주세요.
-- 상한은 `command_tools_max`(기본 **80**). 넘으면 경고가 찍히고 남는 커맨드는
-  `run_command` 로만 실행됩니다.
+| 화면 | 내용 |
+|---|---|
+| 등록 커맨드 | 콘솔에 등록한 커맨드. 각각 에이전트 툴 하나가 됩니다 |
+| 내장 커맨드 | 코드로 만든 read-only 리눅스 명령 7개(활성/역할/설명/실행위치만 변경) |
+| 실행 로그 | 누가 무엇을 실행했는지 |
+
+**인자 지정 방식이 바뀌었습니다.** 실행 커맨드에 `{이름}`을 쓰면 그 자리가 **에이전트가 채우는
+인자**가 되고, 아래에 인자 표가 자동으로 나타납니다.
+
+```
+실행 커맨드:  head -n {lines} {path}
+→ 인자 표:   lines (정수, 기본값 200) · path (문자열, 필수)
+```
+
+- **실행 위치**: `로그인 서버 고정`(202.20.185.100) / `서버 지정`(에이전트가 서버를 고릅니다)
+- **추가 인자 허용**: 켜면 정의한 인자 외에 에이전트가 자유롭게 덧붙일 수 있습니다
+- **활성 체크박스**: 끄면 **재시작 없이 즉시** 막힙니다
+- ⚠️ 커맨드/인자/실행위치를 고치면 **execution-mcp 재시작 필요**(화면에 버튼이 뜹니다)
+- ⚠️ **사용자별 자원 조회 커맨드는 `{user_id}`를 꼭 넣으세요.**
+  `phd info -u {user_id}` (O) / `phd info` (X) — 있어야 에이전트가 `-u 남의계정`으로
+  덮어쓰는 것을 시스템이 막습니다.
+
+### 미등록 커맨드와 차단 목록
+
+등록하지 않은 커맨드(매뉴얼에서 찾은 것, LLM이 아는 것)도 `run_command`로 실행됩니다.
+대신 **모든 토큰**을 차단 목록으로 검사합니다 — 기본 명령만 보면
+`mpirun -n 4 rm -rf /`가 그대로 나가기 때문입니다.
+
+| 시도 | 결과 |
+|---|---|
+| `mpirun -n 4 rm -rf /` | 거부 (`rm`) |
+| `docker run -v /:/host alpine rm -rf /host` | 거부 (`docker`) |
+| `bash -c "rm -rf /"` | 거부 (`bash`) |
+| `srun -n 4 /bin/rm -rf ~` | 거부 (경로로 우회해도 잡힘) |
+| `mpirun -n 4 ./my_sim` | **정상 실행** |
+| `sinfo` / `squeue -u me` / `awk '{print $1}' x.log` | **정상 실행** |
+
+목록은 설정 탭 `execution_deny_commands`에서 조정합니다. 셸(`bash`,`sh`), 원격(`ssh`),
+컨테이너(`docker`,`kubectl`)가 기본 포함입니다 — 이것들이 열려 있으면 나머지 차단이 무의미해집니다.
+사내에서 이 중 꼭 써야 하는 게 있으면 알려주세요(빼거나, 안전한 형태로 등록해 드립니다).
 
 ## 9-1. [서버] 프롬프트 비용 확인 — 로그 한 줄만 보내주세요
 
-기동 로그에 툴이 매 요청에서 쓰는 실제 크기가 찍힙니다.
-
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker compose -f docker-compose.dev.yml logs command-mcp | grep 노출
+docker compose -f docker-compose.dev.yml logs execution-mcp | grep 내장
 ```
 
 ```
-[command-mcp] 카탈로그 커맨드 N개를 툴로 노출합니다 (툴 M개 · 스키마 X자 ≈ Y토큰/요청)
+[execution-mcp] 내장 7개 · 등록 N개 · run_command 1개 = 툴 M개 (스키마 X자 ≈ Y토큰/요청)
 ```
 
-- **Y가 6000을 넘으면 경고 줄이 함께 찍힙니다.** 그 줄까지 그대로 보내주세요.
-- 지시문(~4,900토큰) + 내장 툴(~2,700토큰)이 이미 고정으로 나갑니다. 컨텍스트는 32,768입니다.
-- 내장 툴 설명은 이번에 7,577자 → 5,272자로 줄였습니다(지시문과 겹치던 문장 제거).
+- **Y가 8000을 넘으면 경고 줄이 함께 찍힙니다.** 그 줄까지 그대로 보내주세요.
+- 지시문(~5,200토큰)이 이미 고정으로 나갑니다. 컨텍스트는 32,768입니다.
 
 ## 9-2. [웹] 차트 MCP — 설정 한 줄 넣고 확인
 
@@ -356,6 +385,12 @@ doc_title(문서 이름)과 reference(전체 경로)를 **그대로** 옮겨 적
 - 없으면: 로그인 서버로 고정 실행됩니다. 서버를 묻지 말고 바로 호출합니다.
 - 있으면: 사용자가 밝힌 서버 이름을, 특정 서버에 매인 질문이 아니면 로그인 서버 이름(맨 끝에
   안내됨)을 넣습니다. 특정 서버 이야기인데 이름을 모르면 되묻습니다.
+
+## 커맨드를 실행하지 못했다고 나오면
+파괴적이거나 다른 명령을 대신 실행할 수 있는 커맨드는 시스템이 거부합니다
+(`rm`, `chmod`, `bash -c`, `docker`, `ssh` 등. 다른 커맨드의 인자에 섞여 있어도 거부됩니다).
+- 거부되면 **우회하지 않습니다.** 다른 이름으로 바꾸거나 경로를 붙여 다시 시도하지 마세요.
+- 거부 사유를 그대로 전하고, 필요하면 관리자에게 커맨드 등록을 요청하도록 안내합니다.
 
 ## 그래프로 보여 달라고 하면
 "추이/그래프/차트로 보여줘"라고 하거나, 커맨드 실행 결과에 기간·항목별 수치가 여럿 있어

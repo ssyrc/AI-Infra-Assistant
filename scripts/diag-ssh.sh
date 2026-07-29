@@ -12,7 +12,7 @@ set -u
 HOST="${1:-202.20.185.100}"
 USER_ID="${2:-}"
 CMD="${3:-id}"
-SVC="${SVC:-command-mcp}"
+SVC="${SVC:-execution-mcp}"
 COMPOSE="docker compose -f docker-compose.dev.yml"
 
 if [ -z "$USER_ID" ]; then

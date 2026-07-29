@@ -1,0 +1,215 @@
+"""
+`execution_commands`(관리자 콘솔 실행 탭)의 행을 **MCP 툴 하나씩**으로 노출한다.
+
+왜 검색(RAG)이 아니라 툴인가:
+  예전에는 카탈로그를 하이브리드 검색해 LLM에게 후보를 넘겼다. 그런데 "내 홈 스토리지 용량"이
+  `myquota`를 못 찾는 일이 반복됐다 - 검색이 한 번 어긋나면 등록해 둔 커맨드가 통째로 없는 것처럼
+  취급된다. 툴로 노출하면 LLM이 **목록을 직접 보고** 고르므로 그런 실패가 없다(#105, #106).
+
+인자 설계:
+  콘솔에서 `head -n {lines} {path}`처럼 **자리표시자가 든 커맨드 한 줄**을 적고, 각 자리표시자의
+  타입/필수/기본값을 정한다. 그러면 LLM에게는 `lines`, `path`가 **타입이 붙은 파라미터**로 보인다
+  (예전 Command MCP의 `args` 리스트 하나보다 훨씬 정확하게 채운다).
+  `allow_extra_args`를 켜면 그 위에 자유 인자도 덧붙일 수 있다.
+  `{user_id}`는 예약어라 LLM에 노출되지 않고 호출자 신원에서 강제 주입된다.
+
+트레이드오프(알고 택한 것):
+  - 툴 목록이 등록 개수만큼 커진다. 설명이 전부 프롬프트에 실리므로 상한을 둔다
+    (`execution_tools_max`). 넘치면 남는 것은 툴로 못 내보내고 경고를 남긴다(#108).
+  - 등록 내용을 고치면 **Execution MCP 재시작**이 필요하다(툴 목록이 기동 시 1회 구성됨).
+"""
+import asyncio
+import hashlib
+import inspect
+import json
+import os
+import re
+import sys
+
+import asyncpg
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../shared"))
+from ssh_exec import run_ssh_as_user  # noqa: E402
+from execution_exec import (  # noqa: E402
+    DEFAULT_DENY_CSV, build_registered_argv, deny_set,
+)
+
+# 실측(#108): 툴 하나가 매 요청 프롬프트에서 약 270자 ≈ 100토큰을 쓴다(스키마 고정분 + 설명).
+# 지시문 ~4.9k + 내장 툴이 이미 고정으로 나가고 검색 결과·대화 이력에 15k 안팎이 필요하므로,
+# 등록 커맨드 예산은 8k토큰(=80개) 정도가 상한이다.
+DEFAULT_MAX_TOOLS = 80
+
+# 툴 하나가 프롬프트에서 차지하는 JSON 스키마의 고정분(이름·파라미터 틀). 설명 길이와 무관하게
+# 항상 따라붙는다 - 측정값 약 215자.
+_TOOL_SCHEMA_OVERHEAD = 215
+
+_UNSAFE = re.compile(r"[^A-Za-z0-9_]")
+
+_PY_TYPES = {"str": str, "int": int, "enum": str}
+
+
+def _stable_hash(text: str, length: int) -> str:
+    """프로세스가 바뀌어도 같은 값이 나오는 짧은 해시(툴 이름 고정용).
+    파이썬 hash()는 PYTHONHASHSEED로 매번 달라져 재시작할 때마다 툴 이름이 바뀐다."""
+    return hashlib.sha1((text or "").encode("utf-8")).hexdigest()[:length]
+
+
+def tool_name_for(title: str, taken: set[str], exec_command: str = "") -> str:
+    """사람이 읽는 이름 -> 충돌 없는 ASCII 툴 이름.
+
+    OpenAI 호환 함수 이름 규칙은 `[a-zA-Z0-9_-]{1,64}`라 한글 이름은 그대로 못 쓴다.
+    한글이면 남는 글자가 없어 전부 같은 이름으로 뭉개지므로 **실행 커맨드에서 이름을 만들고**
+    (`phd info -u {user_id}` -> `phd_info`), 그것도 없으면 고정 해시를 붙인다.
+    의미는 툴 '설명'이 담으므로 이름은 서로 구분만 되면 된다.
+    """
+    def _ascii(text: str) -> str:
+        cleaned = re.sub(r"\{[^}]*\}", " ", text or "")
+        toks = [t for t in _UNSAFE.sub(" ", cleaned).split() if t and not t.isdigit()]
+        return "_".join(toks[:2]).lower()
+
+    base = _ascii(title) or _ascii(exec_command) or ("k" + _stable_hash(title, 6))
+    if not base[0].isalpha():
+        base = f"c_{base}"
+    name = base[:60]
+    if name not in taken:
+        return name
+    for i in range(2, 100):
+        alt = f"{name[:57]}_{i}"
+        if alt not in taken:
+            return alt
+    return f"{name[:52]}_{_stable_hash(title, 4)}"
+
+
+def estimate_prompt_tokens(descriptions: list[str]) -> tuple[int, int]:
+    """노출된 툴들이 매 요청 프롬프트에서 쓰는 (글자 수, 대략의 토큰 수).
+
+    토큰 수는 추정이다 - 폐쇄망에 Qwen 토크나이저를 두는 대신 한글 1.2자/토큰,
+    나머지(ASCII·JSON 기호) 3.5자/토큰으로 환산한다. 자릿수를 보려는 값이다.
+    """
+    chars = tokens = 0
+    for d in descriptions:
+        text = (d or "") + " " * _TOOL_SCHEMA_OVERHEAD
+        kor = len(re.findall(r"[가-힣]", text))
+        chars += len(text)
+        tokens += round(kor / 1.2 + (len(text) - kor) / 3.5)
+    return chars, tokens
+
+
+def _describe(row: dict) -> str:
+    """LLM에 보일 설명. **짧게** - 툴 하나당 설명이 통째로 매 요청에 실린다(#108).
+    공통 규칙("본인 권한으로 실행된다" 등)은 지시문에 한 번만 두고 여기서는 뺀다."""
+    parts = [(row.get("description") or "").strip()]
+    parts.append(f"[{row['exec_command']}]")
+    return " ".join(p for p in parts if p)[:300]
+
+
+def build_entry(row: dict, login_host_getter) -> dict:
+    """등록 커맨드 한 행 -> build_wrapped가 받는 형태의 항목."""
+    exec_command = row["exec_command"]
+    arg_specs = row.get("args") or []
+    allow_extra = bool(row.get("allow_extra_args", True))
+
+    async def handler(user_id: str, host: str = "", **kwargs) -> dict:
+        extra = kwargs.pop("args", None)
+        deny = deny_set(await _deny_csv())
+        argv = build_registered_argv(exec_command, arg_specs, kwargs, extra,
+                                     user_id, deny, allow_extra)
+        target = (host or "").strip() or await login_host_getter()
+        return await run_ssh_as_user(target, user_id, argv)
+
+    # LLM에 보일 파라미터: 콘솔에서 정의한 인자들(+ allow_extra_args면 args).
+    # user_id는 항상 감춰지고, host는 host_mode='login_server'면 build_wrapped가 감춘다.
+    params = [
+        inspect.Parameter("user_id", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=str),
+        inspect.Parameter("host", inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                          default="", annotation=str),
+    ]
+    annotations = {"user_id": str, "host": str}
+    for spec in arg_specs:
+        py = _PY_TYPES.get(spec.get("type", "str"), str)
+        default = inspect.Parameter.empty if spec.get("required") else (spec.get("default") or "")
+        params.append(inspect.Parameter(spec["name"], inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                                        default=default, annotation=py))
+        annotations[spec["name"]] = py
+    if allow_extra:
+        params.append(inspect.Parameter("args", inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                                        default=None, annotation=list))
+        annotations["args"] = list
+    # 기본값 없는 파라미터가 뒤에 오면 시그니처가 만들어지지 않는다.
+    params.sort(key=lambda p: p.default is not inspect.Parameter.empty)
+    handler.__signature__ = inspect.Signature(params)
+    handler.__annotations__ = annotations
+
+    return {
+        "handler": handler,
+        "description": _describe(row),
+        "enabled": bool(row.get("enabled", True)),
+        "required_roles": list(row.get("required_roles") or []),
+        "user_scoped": True,
+        "scope_param": "user_id",
+        "host_mode": row.get("host_mode") or "login_server",
+    }
+
+
+_deny_csv_getter = None
+
+
+def set_deny_csv_getter(getter):
+    """설정에서 차단 목록을 읽는 함수를 주입한다(이 모듈이 config_store에 묶이지 않게)."""
+    global _deny_csv_getter
+    _deny_csv_getter = getter
+
+
+async def _deny_csv() -> str:
+    if _deny_csv_getter is None:
+        return DEFAULT_DENY_CSV
+    return await _deny_csv_getter()
+
+
+def load_registered_sync(login_host_getter, dsn_key: str = "execution_db_dsn") -> tuple[dict, int]:
+    """(툴 dict, 상한 때문에 빠진 개수). 기동 시 1회 호출."""
+    async def _run():
+        config_dsn = os.environ.get("CONFIG_DB_DSN")
+        if not config_dsn:
+            return {}, 0
+        conn = await asyncpg.connect(config_dsn)
+        try:
+            dsn = await conn.fetchval(
+                "SELECT value FROM platform_settings WHERE key = $1", dsn_key)
+            raw_max = await conn.fetchval(
+                "SELECT value FROM platform_settings WHERE key = 'execution_tools_max'")
+        finally:
+            await conn.close()
+        if not dsn:
+            return {}, 0
+        try:
+            max_tools = int(raw_max) if raw_max else DEFAULT_MAX_TOOLS
+        except (TypeError, ValueError):
+            max_tools = DEFAULT_MAX_TOOLS
+
+        c2 = await asyncpg.connect(dsn)
+        try:
+            total = await c2.fetchval("SELECT count(*) FROM execution_commands")
+            rows = await c2.fetch(
+                "SELECT tool_name, title, description, exec_command, args, allow_extra_args, "
+                "host_mode, enabled, required_roles FROM execution_commands "
+                "ORDER BY title LIMIT $1", max_tools)
+        finally:
+            await c2.close()
+
+        tools, taken = {}, set()
+        for r in rows:
+            row = dict(r)
+            row["args"] = json.loads(row["args"]) if isinstance(row["args"], str) else (row["args"] or [])
+            name = row.get("tool_name") or tool_name_for(row["title"], taken, row["exec_command"])
+            if name in taken:                      # DB에 중복이 들어와도 툴이 사라지지 않게
+                name = tool_name_for(row["title"], taken, row["exec_command"])
+            taken.add(name)
+            tools[name] = build_entry(row, login_host_getter)
+        return tools, max(0, (total or 0) - len(rows))
+
+    try:
+        return asyncio.run(_run())
+    except Exception as e:  # noqa: BLE001
+        print(f"[execution-mcp] 등록 커맨드 로드 실패, 내장 툴만으로 기동: {type(e).__name__}: {e}")
+        return {}, 0

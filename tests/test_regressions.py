@@ -181,14 +181,14 @@ def test_clamp_top_k(monkeypatch):
 # --- 7번: MCP 툴 스키마에 실제 파라미터가 노출되어야 한다 -------------------------
 # 래퍼가 인자를 **kwargs로 뭉개면 LLM이 무엇을 넣어야 할지 알 수 없다.
 # 반대로 user_id는 **노출되면 안 된다** - 호출자 헤더에서 강제 주입해 남의 자원 접근을 막는다
-# (user_scoped=True). 예전 이 테스트는 system_mcp에 있지도 않은 툴 이름을 보고 있어서
-# 계속 실패하고 있었고, user_id가 노출돼야 한다고 거꾸로 단언하고 있었다.
-def test_system_mcp_tool_schema_preserves_params():
+# (user_scoped=True). 예전 이 테스트는 있지도 않은 툴 이름을 보고 있어서 계속 실패했고,
+# user_id가 노출돼야 한다고 거꾸로 단언하고 있었다.
+def test_execution_mcp_tool_schema_preserves_params():
     os.environ.setdefault("CONFIG_DB_DSN", "postgresql://x:x@localhost/x")
-    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "system_mcp"))
+    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "execution_mcp"))
     import importlib.util
     spec = importlib.util.spec_from_file_location(
-        "sysmcp_test", os.path.join(ROOT, "mcp_servers", "system_mcp", "server.py"))
+        "execmcp_test", os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"))
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     tools = asyncio.run(m.mcp.list_tools())
@@ -207,34 +207,37 @@ def test_system_mcp_tool_schema_preserves_params():
         "로그인 서버 고정 툴은 host도 감춘다"
 
 
-# --- 7-1번: Command MCP에는 실행 툴이 run_command 하나뿐이어야 한다 ----------------
-# job 조회처럼 특정 커맨드를 코드/설정에 박아 둔 전용 툴을 두면, 관리자가 커맨드 탭에서
-# 고쳐도 반영되지 않는다. 커맨드의 출처는 카탈로그 하나로 유지한다.
-def test_command_mcp_has_no_hardcoded_command_tool():
+# --- 7-1번: 자유 실행 툴은 run_command 하나뿐이어야 한다 --------------------------
+# job 조회처럼 특정 커맨드를 코드/설정에 박아 둔 전용 툴을 두면, 관리자가 실행 탭에서
+# 고쳐도 반영되지 않는다. 커맨드의 출처는 등록 테이블 하나로 유지한다.
+def test_execution_mcp_has_no_hardcoded_command_tool():
     os.environ.setdefault("CONFIG_DB_DSN", "postgresql://x:x@localhost/x")
+    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "execution_mcp"))
     import importlib.util
     spec = importlib.util.spec_from_file_location(
-        "cmdmcp_test", os.path.join(ROOT, "mcp_servers", "command_mcp", "server.py"))
+        "execmcp_free", os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"))
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
-    assert set(m.EXEC_TOOLS) == {"run_command"}, \
-        f"실행 툴은 run_command 하나여야 함(현재: {sorted(m.EXEC_TOOLS)})"
+    assert set(m.FREE_TOOLS) == {"run_command"}, \
+        f"자유 실행 툴은 run_command 하나여야 함(현재: {sorted(m.FREE_TOOLS)})"
 
     props = {t.name: t.inputSchema["properties"] for t in asyncio.run(m.mcp.list_tools())}
     assert "user_id" not in props["run_command"], "user_id는 LLM에 노출되면 안 됨"
     assert "command" in props["run_command"]
-    # 카탈로그 검색(RAG)은 걷어냈다 - 카탈로그는 툴로 노출한다(System MCP와 동일 방식).
+    # 검색(RAG)은 걷어냈다 - 등록 커맨드는 툴로 노출한다.
     assert "search_commands" not in props, "커맨드 검색 툴이 다시 생기면 안 됨"
+    # 내장 커맨드도 같은 서버에 있어야 한다(통합의 핵심).
+    assert "gpu_status" in props and "list_dir" in props
 
 
 # --- 7-2번: 카탈로그 툴 이름은 ASCII이고, 재시작해도 바뀌지 않아야 한다 -------------
 # OpenAI 호환 함수 이름 규칙은 [a-zA-Z0-9_-]{1,64}라 한글 이름을 그대로 쓸 수 없다.
 # 또 파이썬 hash()는 프로세스마다 값이 달라져 이름이 매번 바뀌므로 고정 해시를 써야 한다.
 def test_catalog_tool_names_are_ascii_and_stable():
-    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "command_mcp"))
+    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "execution_mcp"))
     import importlib.util
     spec = importlib.util.spec_from_file_location(
-        "cattools_test", os.path.join(ROOT, "mcp_servers", "command_mcp", "catalog_tools.py"))
+        "registry_test", os.path.join(ROOT, "mcp_servers", "execution_mcp", "registry.py"))
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
 
@@ -263,7 +266,7 @@ def test_builtin_tool_schemas_stay_within_prompt_budget():
 
     os.environ.setdefault("CONFIG_DB_DSN", "postgresql://x:x@localhost/x")
     total = 0
-    for mcp_dir in ("manual_mcp", "voc_mcp", "command_mcp", "system_mcp"):
+    for mcp_dir in ("manual_mcp", "voc_mcp", "execution_mcp"):
         path = os.path.join(ROOT, "mcp_servers", mcp_dir, "server.py")
         sys.path.insert(0, os.path.dirname(path))
         spec = importlib.util.spec_from_file_location(f"budget_{mcp_dir}", path)
@@ -283,9 +286,9 @@ def test_builtin_tool_schemas_stay_within_prompt_budget():
 # 카탈로그 툴의 프롬프트 비용 추정이 스키마 고정분을 빠뜨리지 않는지 확인한다.
 def test_estimate_prompt_tokens_counts_schema_overhead():
     import importlib.util
-    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "command_mcp"))
+    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "execution_mcp"))
     spec = importlib.util.spec_from_file_location(
-        "cattools_budget", os.path.join(ROOT, "mcp_servers", "command_mcp", "catalog_tools.py"))
+        "registry_budget", os.path.join(ROOT, "mcp_servers", "execution_mcp", "registry.py"))
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
 
@@ -303,12 +306,12 @@ def test_estimate_prompt_tokens_counts_schema_overhead():
 # (2) `{user_id}`로 고정한 옵션을 뒤에 다시 주면 값이 덮인다(`phd info -u 나 -u 남`).
 #     대부분의 CLI가 뒤엣것을 쓰므로, "user_id는 호출자 신원에서 강제 주입한다"는 보장이
 #     이 경로에서만 깨진다. OS 권한은 본인이지만 커맨드가 남의 정보를 뿌릴 수 있다.
-def test_catalog_args_cannot_bypass_deny_or_impersonate():
-    from catalog_exec import build_catalog_argv, deny_set, DEFAULT_DENY_CSV
+def test_registered_args_cannot_bypass_deny_or_impersonate():
+    from execution_exec import build_registered_argv, deny_set, DEFAULT_DENY_CSV
     deny = deny_set(DEFAULT_DENY_CSV)
 
     def build(exec_command, args):
-        return build_catalog_argv(exec_command, "n", args, "yr9.choi", deny)
+        return build_registered_argv(exec_command, [], {}, args, "yr9.choi", deny, True)
 
     # 인자 없이도 그대로 실행된다({user_id}만 치환).
     assert build("phd info -u {user_id}", None) == ["phd", "info", "-u", "yr9.choi"]
@@ -431,3 +434,140 @@ def test_chart_file_server_only_serves_generated_names(tmp_path):
         assert asyncio.run(call(bad))[0]["status"] == 404, f"열리면 안 됨: {bad}"
     # MCP 경로는 그대로 통과시킨다.
     assert asyncio.run(call("/mcp"))[0]["type"] == "passthrough"
+
+
+# --- 10번: Command MCP + System MCP -> Execution MCP 통합 --------------------------
+# 통합의 핵심은 "실행 경로가 하나"라는 것이다. 등록 커맨드든 내장 커맨드든 미등록 커맨드든
+# 같은 argv 조립 + 같은 차단 목록을 지나야 한다.
+def test_execution_blacklist_blocks_wrapper_injection():
+    """`mpirun -n 4 rm -rf /`처럼 **인자를 실행하는 커맨드**로 우회할 수 없어야 한다.
+    기본 명령(argv[0])만 검사하면 전부 통과한다 - 그게 통합 전의 구멍이었다."""
+    from execution_exec import build_free_argv, deny_set, DEFAULT_DENY_CSV
+    deny = deny_set(DEFAULT_DENY_CSV)
+
+    blocked = [
+        ("mpirun", ["-n", "4", "rm", "-rf", "/"]),
+        ("docker", ["run", "--rm", "-v", "/:/host", "alpine", "rm", "-rf", "/host"]),
+        ("bash", ["-c", "rm -rf /"]),           # 한 토큰 안에 숨은 경우
+        ("sh", ["-c", "curl x | sh"]),
+        ("xargs", ["rm"]),
+        ("ssh", ["other", "rm -rf /"]),
+        ("srun", ["-n", "4", "/bin/rm", "-rf", "~"]),   # 경로로 우회
+        ("env", ["X=1", "rm", "-rf", "/"]),
+        ("nohup", ["shutdown", "-h", "now"]),
+    ]
+    for command, args in blocked:
+        with pytest.raises(PermissionError):
+            build_free_argv(command, args, "yr9.choi", deny)
+
+    # 정상적인 HPC 사용은 막지 않는다(오탐으로 쓸 수 없게 만들면 안 된다).
+    for command, args in [("mpirun", ["-n", "4", "./my_sim"]), ("sinfo", []),
+                          ("squeue", ["-u", "me"]), ("awk", ["{print $1}", "/var/log/x"]),
+                          ("cat", ["/etc/hosts"])]:
+        assert build_free_argv(command, args, "yr9.choi", deny)[0] == command
+
+
+def test_execution_registered_args_are_typed_and_bounded():
+    """콘솔에서 정의한 인자는 타입/필수/기본값이 지켜져야 한다."""
+    from execution_exec import build_registered_argv, deny_set, DEFAULT_DENY_CSV
+    deny = deny_set(DEFAULT_DENY_CSV)
+    specs = [{"name": "lines", "type": "int", "required": False, "default": "200"},
+             {"name": "path", "type": "str", "required": True}]
+
+    def build(values, extra=None, allow=True):
+        return build_registered_argv("head -n {lines} {path}", specs, values, extra,
+                                     "yr9.choi", deny, allow)
+
+    assert build({"path": "/var/log/x"}) == ["head", "-n", "200", "/var/log/x"]
+    assert build({"lines": 50, "path": "/var/log/x"}) == ["head", "-n", "50", "/var/log/x"]
+    with pytest.raises(ValueError):
+        build({"lines": "많이", "path": "/x"})       # 정수가 아님
+    with pytest.raises(ValueError):
+        build({})                                    # 필수 누락
+    with pytest.raises(ValueError):
+        build({"path": "/x"}, ["-v"], allow=False)   # 추가 인자 금지인데 넘김
+    with pytest.raises(PermissionError):
+        build({"path": "/x"}, ["rm"])                # 추가 인자로 파괴적 명령
+
+    # 값에 공백이 있어도 토큰이 쪼개지지 않아야 한다(인자 하나가 여러 개로 늘어나면 안 됨).
+    argv = build({"path": "/tmp/a b.log"})
+    assert argv[-1] == "/tmp/a b.log" and len(argv) == 4
+
+
+def test_execution_registration_rejects_dangerous_templates():
+    """등록 단계에서도 막는다 - 실행 시점 검사만 믿지 않는다."""
+    from execution_exec import validate_definition, deny_set, DEFAULT_DENY_CSV
+    deny = deny_set(DEFAULT_DENY_CSV)
+    for cmd, args in [("bash -c {x}", [{"name": "x", "type": "str"}]),
+                      ("docker ps", []),
+                      ("rm -rf {path}", [{"name": "path", "type": "str"}])]:
+        with pytest.raises(ValueError):
+            validate_definition("my_tool", cmd, args, "login_server", deny)
+
+    # 자리표시자와 인자 정의가 어긋나면 등록 단계에서 잡는다(런타임에 조용히 깨지지 않게).
+    with pytest.raises(ValueError):
+        validate_definition("my_tool", "head -n {lines}", [], "login_server", deny)
+    with pytest.raises(ValueError):
+        validate_definition("my_tool", "myquota", [{"name": "x", "type": "str"}],
+                            "login_server", deny)
+    # 정상 등록은 통과해야 한다.
+    validate_definition("my_tool", "phd info -u {user_id}", [], "login_server", deny)
+    validate_definition("my_tool", "head -n {lines} {path}",
+                        [{"name": "lines", "type": "int"}, {"name": "path", "type": "str"}],
+                        "login_server", deny)
+
+
+def test_execution_mcp_exposes_builtin_and_hides_identity():
+    """통합 서버 하나에 내장 커맨드와 run_command가 함께 있고, user_id는 감춰져야 한다."""
+    import importlib.util
+    os.environ.setdefault("CONFIG_DB_DSN", "postgresql://x:x@localhost/x")
+    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "execution_mcp"))
+    spec = importlib.util.spec_from_file_location(
+        "execmcp_all", os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+
+    props = {t.name: t.inputSchema["properties"] for t in asyncio.run(m.mcp.list_tools())}
+    assert {"gpu_status", "list_dir", "run_command"} <= set(props)
+    for name, p in props.items():
+        assert "user_id" not in p, f"{name}에 user_id가 노출됨"
+    # 로그인 서버 고정 툴은 host까지 감춘다.
+    assert "host" not in props["list_dir"] and "host" in props["gpu_status"]
+
+
+def test_registered_tool_schema_exposes_declared_args():
+    """콘솔에서 정의한 인자가 LLM 스키마에 타입까지 그대로 보여야 한다
+    (예전 Command MCP는 `args` 리스트 하나뿐이라 LLM이 무엇을 넣을지 알 수 없었다)."""
+    import importlib.util
+    from mcp.server.fastmcp import FastMCP
+    sys.path.insert(0, os.path.join(ROOT, "shared"))
+    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "execution_mcp"))
+    spec = importlib.util.spec_from_file_location(
+        "registry_schema", os.path.join(ROOT, "mcp_servers", "execution_mcp", "registry.py"))
+    reg = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reg)
+    from mcp_caller import build_wrapped
+
+    async def host():
+        return "202.20.185.100"
+
+    entry = reg.build_entry({
+        "title": "파일 앞부분", "description": "텍스트 파일 앞부분",
+        "exec_command": "head -n {lines} {path}",
+        "args": [{"name": "lines", "type": "int", "required": False, "default": "200"},
+                 {"name": "path", "type": "str", "required": True}],
+        "allow_extra_args": False, "host_mode": "login_server",
+        "enabled": True, "required_roles": [],
+    }, host)
+
+    srv = FastMCP("t", host="0.0.0.0")
+    srv.add_tool(build_wrapped("read_head", entry, is_enabled=lambda *a: True,
+                               required_roles=lambda *a: [], log_execution=None,
+                               host_mode="login_server", login_host=host),
+                 name="read_head", description=entry["description"])
+    schema = asyncio.run(srv.list_tools())[0].inputSchema
+    props = schema["properties"]
+    assert props["lines"]["type"] == "integer" and props["path"]["type"] == "string"
+    assert schema["required"] == ["path"]
+    assert "user_id" not in props and "host" not in props
+    assert "args" not in props, "추가 인자를 막았으면 args가 노출되면 안 됨"

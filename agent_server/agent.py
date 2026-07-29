@@ -1,7 +1,7 @@
 """
 ADK 루트 에이전트 빌더.
 - LLM/MCP 엔드포인트/시스템 지시문을 전부 config_store(platform_settings)에서 읽는다.
-- MCP 호출 시 호출자 식별 헤더(X-User-Id 등)를 함께 보내 System MCP 감사로그에 남긴다.
+- MCP 호출 시 호출자 식별 헤더(X-User-Id 등)를 함께 보내 Execution MCP 감사로그에 남긴다.
 - Tracing: Langfuse (키가 없으면 자동 비활성화).
 """
 import os
@@ -46,7 +46,7 @@ async def build_agent(caller_headers: dict | None = None,
     """config_store의 현재 설정값으로 ADK 에이전트를 만든다.
 
     caller_headers가 주어지면 MCP 호출에 호출자 식별 헤더(X-User-Id 등)를 함께 보낸다.
-    이 헤더는 요청마다 달라지므로(사용자별), 에이전트를 요청 단위로 만든다. System MCP는
+    이 헤더는 요청마다 달라지므로(사용자별), 에이전트를 요청 단위로 만든다. Execution MCP는
     이 헤더로 user_scoped 툴의 user_id를 강제 주입하고 감사로그·권한검사를 수행한다.
 
     반환하는 toolset 목록은 요청 종료 시 호출자가 close()로 정리한다."""
@@ -60,7 +60,7 @@ async def build_agent(caller_headers: dict | None = None,
         temperature = 0.2
     instruction = await get_config("agent_system_instruction", DEFAULT_INSTRUCTION)
     # 로그인 서버 주소는 설정 탭에서 바뀔 수 있으므로 지시문에 하드코딩하지 않고 매 요청 주입한다
-    # (System MCP의 "로그인 서버 실행" 툴은 host를 자동 고정하지만, disk_free처럼 host가
+    # (Execution MCP의 "로그인 서버 실행" 툴은 host를 자동 고정하지만, disk_free처럼 host가
     # 노출된 툴에서 에이전트가 로그인 서버를 직접 지정해야 하는 경우를 위함).
     # 이름이 아니라 **IP**다 - 이름 해석(/etc/hosts)이 엉뚱한 서버를 가리킨 사고가 있었다.
     login_host = await get_config("scheduler_login_host", "202.20.185.100")
@@ -87,9 +87,9 @@ async def build_agent(caller_headers: dict | None = None,
 
     urls = {
         "manual": await get_config("manual_mcp_url"),
-        "command": await get_config("command_mcp_url"),
+        # 커맨드 실행은 Execution MCP 하나로 통합됐다(구 Command MCP + System MCP, #111).
+        "execution": await get_config("execution_mcp_url"),
         "voc": await get_config("voc_mcp_url"),
-        "system": await get_config("system_mcp_url"),
     }
     missing = [k for k, v in urls.items() if not v]
     if missing:
@@ -105,8 +105,7 @@ async def build_agent(caller_headers: dict | None = None,
         return McpToolset(
             connection_params=StreamableHTTPConnectionParams(url=url, headers=headers or None))
 
-    toolsets = [toolset(urls["manual"]), toolset(urls["command"]),
-                toolset(urls["voc"]), toolset(urls["system"])]
+    toolsets = [toolset(urls["manual"]), toolset(urls["execution"]), toolset(urls["voc"])]
     if chart_url:
         toolsets.append(toolset(chart_url))
     agent = Agent(

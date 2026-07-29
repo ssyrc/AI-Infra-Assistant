@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 # 저장 요청도 막는다(무의미한 편집로 인한 혼란 방지). 값 변경은 .env에서 한다.
 # (shared/migrations.py::config_seed의 force=True 항목과 일치해야 한다.)
 ENV_MANAGED_KEYS = {
-    "manual_db_dsn", "voc_db_dsn", "command_db_dsn", "system_db_dsn",
+    "manual_db_dsn", "voc_db_dsn", "execution_db_dsn", "system_db_dsn",
     "agent_session_db_dsn", "memory_db_dsn", "redis_url",
 }
 

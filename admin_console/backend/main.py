@@ -7,14 +7,13 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../../shared"))
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from routers import manuals, voc, commands, system, settings, accounts, files, ops
+from routers import manuals, voc, execution, settings, accounts, files, ops
 
 app = FastAPI(title="Agent Platform Admin Console")
 
 app.include_router(manuals.router)
 app.include_router(voc.router)
-app.include_router(commands.router)
-app.include_router(system.router)
+app.include_router(execution.router)
 app.include_router(settings.router)
 app.include_router(accounts.router)
 app.include_router(files.router)

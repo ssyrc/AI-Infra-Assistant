@@ -11,10 +11,12 @@ DB 마이그레이션 + 설정 부트스트랩 러너.
       python -m migrations  (또는 python migrations.py)
 """
 import os
+import sys
+import json
 import asyncio
 import asyncpg
 
-from catalog_exec import DEFAULT_DENY_CSV
+from execution_exec import DEFAULT_DENY_CSV
 
 PG_HOST = os.environ.get("POSTGRES_HOST", "postgres")
 PG_PORT = os.environ.get("POSTGRES_PORT", "5432")
@@ -167,6 +169,26 @@ MIGRATIONS: list[tuple[str, int, str]] = [
     #     "어디를 고쳐야 반영되나"가 두 곳이 되어 오히려 헷갈린다.
     ("platform_config", 4, """
         DELETE FROM platform_settings WHERE key = 'scheduler_job_command';
+    """),
+    # v5: Command MCP + System MCP -> Execution MCP 통합(#111). 새 키는 seed_config가 넣는다.
+    #   관리자가 바꿔 둔 값은 옮겨 준다 - 통합했다고 설정을 다시 하게 만들지 않는다.
+    #   *_mcp_url은 옮기지 않는다(컨테이너 이름·포트가 바뀌었으므로 새 기본값이 맞다).
+    ("platform_config", 5, """
+        INSERT INTO platform_settings (key, value, description, hot_reload, is_secret, updated_by)
+        SELECT 'execution_tools_max', value, '등록 커맨드를 MCP 툴로 노출할 최대 개수',
+               false, false, updated_by
+        FROM platform_settings WHERE key = 'command_tools_max'
+        ON CONFLICT (key) DO NOTHING;
+
+        INSERT INTO platform_settings (key, value, description, hot_reload, is_secret, updated_by)
+        SELECT 'execution_deny_commands', value, '실행을 거부할 명령 이름(콤마 구분)',
+               true, false, updated_by
+        FROM platform_settings WHERE key = 'catalog_exec_deny_commands'
+        ON CONFLICT (key) DO NOTHING;
+
+        DELETE FROM platform_settings
+        WHERE key IN ('command_tools_max', 'catalog_exec_deny_commands',
+                      'command_mcp_url', 'system_mcp_url', 'command_db_dsn');
     """),
     # v3: 감사로그에 사용자/대화 식별자 추가
     ("system_db", 3, """
@@ -382,6 +404,54 @@ MIGRATIONS: list[tuple[str, int, str]] = [
     ("command_db", 5, """
         ALTER TABLE command_catalog ADD COLUMN IF NOT EXISTS exec_command TEXT;
     """),
+    # v7: Command MCP + System MCP -> **Execution MCP 하나**로 합친다(#111).
+    #   등록 커맨드는 여기 한 테이블로 모인다(구 command_catalog + system_custom_commands).
+    #   물리 DB는 command_db를 그대로 쓴다 - 이미 올라간 카탈로그와 job_logs를 옮기지 않기 위함.
+    #   설정 키는 execution_db_dsn으로 새로 두되 같은 DB를 가리킨다.
+    #     exec_command: `head -n {lines} {path}` 같은 **자리표시자가 든 커맨드 한 줄**
+    #     args: [{name,type,required,default,description,choices}] - 자리표시자의 타입 정의
+    #     allow_extra_args: 에이전트가 정의된 인자 외에 자유 인자를 덧붙일 수 있는가
+    #     host_mode: login_server(로그인 서버 고정) | target_server(LLM이 서버를 지정)
+    ("command_db", 7, """
+        CREATE TABLE IF NOT EXISTS execution_commands (
+            id SERIAL PRIMARY KEY,
+            tool_name        TEXT UNIQUE NOT NULL,
+            title            TEXT NOT NULL,
+            description      TEXT NOT NULL DEFAULT '',
+            exec_command     TEXT NOT NULL,
+            args             JSONB NOT NULL DEFAULT '[]',
+            allow_extra_args BOOLEAN NOT NULL DEFAULT true,
+            host_mode        TEXT NOT NULL DEFAULT 'login_server',
+            enabled          BOOLEAN NOT NULL DEFAULT true,
+            required_roles   TEXT[] NOT NULL DEFAULT '{}',
+            updated_by       TEXT,
+            updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT execution_commands_host_mode_check
+                CHECK (host_mode IN ('login_server', 'target_server'))
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS execution_commands_title_idx
+            ON execution_commands (title);
+        -- 코드 내장 커맨드(builtin.py)의 활성/역할/설명/실행위치. 구 system_whitelist_state.
+        CREATE TABLE IF NOT EXISTS execution_builtin_state (
+            tool_name            TEXT PRIMARY KEY,
+            enabled              BOOLEAN NOT NULL DEFAULT true,
+            required_roles       TEXT[],
+            description_override TEXT,
+            host_mode            TEXT NOT NULL DEFAULT 'target_server',
+            updated_by           TEXT,
+            updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT execution_builtin_host_mode_check
+                CHECK (host_mode IN ('login_server', 'target_server'))
+        );
+    """),
+    # v8: 커맨드 RAG 검색은 #105에서 없앴다(툴로 노출한다). 임베딩 컬럼은 그때부터 아무도 읽지
+    #     않는데 업로드할 때마다 수천 건을 임베딩하느라 몇 분씩 걸리고 있었다. 통합하며 정리한다.
+    ("command_db", 8, """
+        DROP INDEX IF EXISTS command_catalog_embedding_idx;
+        ALTER TABLE command_catalog DROP COLUMN IF EXISTS embedding;
+        ALTER TABLE command_catalog DROP COLUMN IF EXISTS embed_model;
+        ALTER TABLE command_catalog DROP COLUMN IF EXISTS embed_dim;
+    """),
     # reference_path = 이 문서가 실제로 있는 위치(사내 포탈 경로 등).
     #   에이전트가 "OO 문서를 참고하세요"라고만 하면 사용자는 그 문서를 찾을 수 없다.
     #   관리자가 여기에 전체 경로를 넣어 두면 답변에 경로가 그대로 붙는다.
@@ -469,18 +539,20 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
          "경로, docker-compose에서 마운트된 폴더 하위만 가능)", True, False, False),
         # 반드시 **IP**로 둔다. 이름(login07 등)은 배포 호스트 /etc/hosts에 의존하는데,
         # 실제로 login07이 게이트 서버가 아닌 75.11.29.7로 풀려 모든 실행이 인증 실패했다.
-        # 카탈로그 커맨드를 MCP 툴로 노출하는 개수 상한. 툴 설명이 전부 프롬프트에 실리므로
+        # 등록 커맨드를 MCP 툴로 노출하는 개수 상한. 툴 설명이 전부 프롬프트에 실리므로
         # 무한정 늘릴 수 없다. 넘치면 남는 커맨드는 run_command로만 실행 가능하다.
-        ("command_tools_max", "80",
-         "커맨드 카탈로그를 MCP 툴로 노출할 최대 개수(툴 하나당 60~100토큰이 매 요청에 실린다)",
+        ("execution_tools_max", "80",
+         "등록 커맨드를 MCP 툴로 노출할 최대 개수(툴 하나당 약 100토큰이 매 요청에 실린다)",
          False, False, False),
         ("scheduler_login_host", os.environ.get("SCHEDULER_LOGIN_HOST", "202.20.185.100"),
          "커맨드를 실행할 로그인 서버 주소. 이름 말고 **IP**로 적는다(이름 해석 사고 방지)",
          True, False, False),
-        # 커맨드 카탈로그는 전부 실행 가능하다(항목별 on/off 화이트리스트는 System MCP에서만 관리).
-        # 그래도 파괴적인 기본 명령은 실행 시점에 거부한다. 콤마 구분, 비우면 제한 없음.
-        ("catalog_exec_deny_commands", DEFAULT_DENY_CSV,
-         "커맨드 카탈로그 실행 시 거부할 기본 명령(콤마 구분). 비우면 제한 없이 전부 실행됨", True, False, False),
+        # 차단 목록. 등록 커맨드의 '추가 인자'와 미등록 커맨드(run_command)의 **모든 토큰**을
+        # 이 목록으로 검사한다 - `mpirun -n 4 rm -rf /`처럼 인자를 실행하는 커맨드가 있기 때문이다.
+        # 콤마 구분, 비우면 제한 없음.
+        ("execution_deny_commands", DEFAULT_DENY_CSV,
+         "실행을 거부할 명령 이름(콤마 구분). 커맨드의 모든 토큰을 검사한다. 비우면 제한 없음",
+         True, False, False),
 
         # 도구 호출/결과를 답변에 접히는 블록으로 표시(사용자가 "생각 과정 보이게" 요청).
         # 낮을수록 학습 지식으로 지어내는 경향이 줄고 조회 결과에 충실해진다.
@@ -502,8 +574,12 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
         # credential류: 환경변수 기반, 매 기동 시 갱신(force=True)
         ("manual_db_dsn", dsn("manual_db"), "Manual MCP 전용 DB", False, True, True),
         ("voc_db_dsn", dsn("voc_db"), "VOC MCP 전용 DB", False, True, True),
-        ("command_db_dsn", dsn("command_db"), "Command MCP 전용 DB", False, True, True),
-        ("system_db_dsn", dsn("system_db"), "System MCP 전용 DB", False, True, True),
+        # Execution MCP 전용 DB. 물리적으로는 기존 command_db를 그대로 쓴다(#111에서 통합할 때
+        # 이미 올라간 카탈로그와 job_logs를 옮기지 않기 위해 이름만 바꿨다).
+        ("execution_db_dsn", dsn("command_db"), "Execution MCP 전용 DB", False, True, True),
+        # 구 System MCP DB. 이관이 끝나면 읽지 않지만, 되돌릴 수 있게 남겨 둔다.
+        ("system_db_dsn", dsn("system_db"), "구 System MCP DB(통합 이관용, 읽기 전용)",
+         False, True, True),
         ("agent_session_db_dsn",
          dsn("agent_sessions_db").replace("postgresql://", "postgresql+asyncpg://"),
          "ADK DatabaseSessionService용 DB (asyncpg 스킴)", False, True, True),
@@ -512,12 +588,10 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
 
         ("manual_mcp_url", os.environ.get("MANUAL_MCP_URL", "http://manual-mcp:8001/mcp"),
          "Agent Server가 연결할 Manual MCP 주소", False, False, False),
-        ("command_mcp_url", os.environ.get("COMMAND_MCP_URL", "http://command-mcp:8002/mcp"),
-         "Agent Server가 연결할 Command MCP 주소", False, False, False),
+        ("execution_mcp_url", os.environ.get("EXECUTION_MCP_URL", "http://execution-mcp:8002/mcp"),
+         "Agent Server가 연결할 Execution MCP 주소(커맨드 실행 전담)", False, False, False),
         ("voc_mcp_url", os.environ.get("VOC_MCP_URL", "http://voc-mcp:8003/mcp"),
          "Agent Server가 연결할 VOC MCP 주소", False, False, False),
-        ("system_mcp_url", os.environ.get("SYSTEM_MCP_URL", "http://system-mcp:8004/mcp"),
-         "Agent Server가 연결할 System MCP 주소", False, False, False),
         ("chart_mcp_url", os.environ.get("CHART_MCP_URL", "http://chart-mcp:8005/mcp"),
          "Agent Server가 연결할 Chart MCP 주소(비우면 차트 기능 없이 동작)", False, False, False),
         # 차트 이미지는 **사용자 브라우저가 직접** 가져간다. 컨테이너는 자기 외부 주소를 모르므로
@@ -737,6 +811,12 @@ doc_title(문서 이름)과 reference(전체 경로)를 **그대로** 옮겨 적
 - 있으면: 사용자가 밝힌 서버 이름을, 특정 서버에 매인 질문이 아니면 로그인 서버 이름(맨 끝에
   안내됨)을 넣습니다. 특정 서버 이야기인데 이름을 모르면 되묻습니다.
 
+## 커맨드를 실행하지 못했다고 나오면
+파괴적이거나 다른 명령을 대신 실행할 수 있는 커맨드는 시스템이 거부합니다
+(`rm`, `chmod`, `bash -c`, `docker`, `ssh` 등. 다른 커맨드의 인자에 섞여 있어도 거부됩니다).
+- 거부되면 **우회하지 않습니다.** 다른 이름으로 바꾸거나 경로를 붙여 다시 시도하지 마세요.
+- 거부 사유를 그대로 전하고, 필요하면 관리자에게 커맨드 등록을 요청하도록 안내합니다.
+
 ## 그래프로 보여 달라고 하면
 "추이/그래프/차트로 보여줘"라고 하거나, 커맨드 실행 결과에 기간·항목별 수치가 여럿 있어
 그림이 이해에 도움이 될 때 차트 생성 도구를 씁니다.
@@ -816,9 +896,124 @@ async def seed_config():
         await conn.close()
 
 
+async def import_execution_registry():
+    """구 Command/System MCP의 등록 내용을 Execution MCP의 한 테이블로 옮긴다(#111).
+
+    SQL 마이그레이션으로 못 하는 이유가 둘이다.
+      1) `system_custom_commands`는 **다른 데이터베이스**(system_db)에 있다.
+      2) 한글 이름에서 ASCII 툴 이름을 만드는 규칙이 파이썬 코드(registry.tool_name_for)에 있다.
+    여러 번 돌려도 안전하다 - 이미 있는 title은 건너뛴다(관리자가 콘솔에서 고친 값을 덮지 않는다).
+    """
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "..", "mcp_servers", "execution_mcp"))
+    try:
+        from registry import tool_name_for
+    except ImportError as e:  # noqa: BLE001
+        print(f"[migrate] execution 레지스트리 모듈을 찾지 못해 이관을 건너뜁니다: {e}")
+        return
+
+    conn = await asyncpg.connect(dsn("command_db"))
+    try:
+        taken = {r["tool_name"] for r in
+                 await conn.fetch("SELECT tool_name FROM execution_commands")}
+        have_titles = {r["title"] for r in
+                       await conn.fetch("SELECT title FROM execution_commands")}
+        moved = 0
+
+        # (1) 커맨드 카탈로그(매뉴얼 엑셀 업로드본). 인자 정의가 없고 자유 인자를 허용하던 것들이라
+        #     allow_extra_args=true, 로그인 서버 고정으로 옮긴다(지금 동작과 같다).
+        for r in await conn.fetch(
+                "SELECT name, description, exec_command FROM command_catalog ORDER BY name"):
+            title = (r["name"] or "").strip()
+            if not title or title in have_titles:
+                continue
+            exec_command = (r["exec_command"] or "").strip() or title
+            name = tool_name_for(title, taken, exec_command)
+            taken.add(name)
+            have_titles.add(title)
+            await conn.execute(
+                """
+                INSERT INTO execution_commands
+                    (tool_name, title, description, exec_command, args, allow_extra_args,
+                     host_mode, enabled, updated_by)
+                VALUES ($1,$2,$3,$4,'[]'::jsonb, true, 'login_server', true, 'migrate')
+                ON CONFLICT (tool_name) DO NOTHING
+                """,
+                name, title, (r["description"] or "").strip(), exec_command)
+            moved += 1
+
+        # (2) 콘솔에서 등록한 System MCP 커스텀 커맨드(다른 DB). argv 리스트 + params를
+        #     새 형식(커맨드 한 줄 + args 정의)으로 바꿔 옮긴다.
+        try:
+            sysconn = await asyncpg.connect(dsn("system_db"))
+        except Exception as e:  # noqa: BLE001
+            print(f"[migrate] system_db에 접속하지 못해 커스텀 커맨드 이관을 건너뜁니다: {e}")
+            sysconn = None
+        if sysconn is not None:
+            try:
+                rows = await sysconn.fetch(
+                    "SELECT tool_name, description, argv_template, params, required_roles, "
+                    "enabled, host_mode FROM system_custom_commands")
+                states = await sysconn.fetch(
+                    "SELECT tool_name, enabled, required_roles, description_override, host_mode "
+                    "FROM system_whitelist_state")
+            except Exception as e:  # noqa: BLE001
+                print(f"[migrate] 구 System MCP 테이블을 읽지 못했습니다(무시): {e}")
+                rows, states = [], []
+            finally:
+                await sysconn.close()
+
+            for r in rows:
+                title = (r["tool_name"] or "").strip()
+                if not title or title in have_titles:
+                    continue
+                argv = json.loads(r["argv_template"]) if isinstance(r["argv_template"], str) \
+                    else (r["argv_template"] or [])
+                params = json.loads(r["params"]) if isinstance(r["params"], str) \
+                    else (r["params"] or [])
+                # argv 리스트 -> 한 줄. 토큰에 공백이 있으면 따옴표로 묶어 원래 경계를 지킨다.
+                exec_command = " ".join(
+                    (f'"{t}"' if " " in str(t) else str(t)) for t in argv)
+                args = [{"name": p.get("name"), "type": p.get("type", "str"),
+                         "required": True, "default": "", "description": ""} for p in params]
+                taken.add(title)
+                have_titles.add(title)
+                await conn.execute(
+                    """
+                    INSERT INTO execution_commands
+                        (tool_name, title, description, exec_command, args, allow_extra_args,
+                         host_mode, enabled, required_roles, updated_by)
+                    VALUES ($1,$2,$3,$4,$5::jsonb, false, $6, $7, $8, 'migrate')
+                    ON CONFLICT (tool_name) DO NOTHING
+                    """,
+                    title, title, (r["description"] or "").strip(), exec_command,
+                    json.dumps(args, ensure_ascii=False), r["host_mode"] or "target_server",
+                    r["enabled"], list(r["required_roles"] or []))
+                moved += 1
+
+            # (3) 내장 커맨드의 on/off·역할·설명·실행위치는 관리자가 조정해 둔 값이다. 그대로 옮긴다.
+            for s in states:
+                await conn.execute(
+                    """
+                    INSERT INTO execution_builtin_state
+                        (tool_name, enabled, required_roles, description_override, host_mode,
+                         updated_by, updated_at)
+                    VALUES ($1,$2,$3,$4,$5,'migrate', now())
+                    ON CONFLICT (tool_name) DO NOTHING
+                    """,
+                    s["tool_name"], s["enabled"], s["required_roles"],
+                    s["description_override"], s["host_mode"] or "target_server")
+
+        if moved:
+            print(f"[migrate] execution_commands로 {moved}건 이관")
+    finally:
+        await conn.close()
+
+
 async def main():
     await ensure_databases()
     await apply_migrations()
+    await import_execution_registry()
     await seed_config()
     print("[migrate] done")
 

@@ -34,7 +34,7 @@
 | 게이트/로그인 서버 | 202.20.185.100 (`login07`), `/home/gpu1/yr9.choi/05_halo/` | rsync 수신 지점. 내부 서버로 자동 라우팅. ssh 키 등록 완료 |
 | 폐쇄망 배포 호스트 | 202.20.183.30, `05_halo/AI-Infra-Assistant` | 도커 컨테이너 전부 여기 |
 | GPU 서버 | 75.23.32.41 (`hgpu4041`) | vLLM LLM :8000 / 임베딩 :8010 / 리랭커 :8020 |
-| 포트 | agent :8500 · 관리자 콘솔 :8501 · 사용자 웹(Open WebUI) :8502 |
+| 포트 | agent :8500 · 관리자 콘솔 :8501 · 사용자 웹(Open WebUI) :8502 · 차트 이미지 :8509 |
 
 - 모델: LLM `Qwen3-235B-A22B-Instruct-2507-FP8`(TP=4, `--max-model-len 32768`,
   `--enable-auto-tool-choice --tool-call-parser hermes` 필수), 임베딩 `bge-m3`(1024차원 —
@@ -113,13 +113,15 @@ docker compose -f docker-compose.dev.yml up -d --no-build
 
 ## 4. MCP 역할 분담 (사용자 결정 사항)
 
-- **Command MCP**: 커맨드 카탈로그의 행 하나 = **MCP 툴 하나**(RAG 검색 안 씀. #105).
-  에이전트가 툴 목록·설명을 보고 고른다. 카탈로그 등록 자체가 승인이고 화이트리스트는 없다.
-  미등록 커맨드(매뉴얼에서 찾은 것)는 `run_command`로 실행. 로그인 서버에서 실행.
-  **카탈로그를 고치면 command-mcp 재시작 필요**(툴 목록이 기동 시 1회 구성됨).
-- **System MCP**: 화이트리스트 관리는 **여기서만**. 항목별 on/off, 필요 역할,
-  "분류"(`host_mode`: `login_server` 고정 실행 / `target_server` LLM이 서버 지정),
-  콘솔에서 등록하는 커스텀 커맨드(argv_template).
+- **Execution MCP**(구 Command MCP + System MCP를 #111에서 통합): 커맨드 실행 전담. 세 갈래다.
+  · **내장 커맨드**(`builtin.py` 7개) — 값 검증이 필요한 read-only 리눅스 명령(코드).
+  · **등록 커맨드**(`execution_commands`) — 콘솔에서 `head -n {lines} {path}`처럼 등록.
+    자리표시자가 **타입 붙은 파라미터**로 LLM에 노출된다. 항목별 on/off·역할·실행위치 지정.
+  · **`run_command`** — 미등록 커맨드(매뉴얼/VOC/LLM이 아는 것). 차단 목록을 **모든 토큰에**
+    엄격 적용(`mpirun ... rm -rf /` 우회 차단).
+  RAG 검색은 쓰지 않는다 — 툴 목록을 보고 에이전트가 고른다(#105).
+  **등록 내용을 고치면 execution-mcp 재시작 필요**(활성/역할만 바꾸면 즉시 반영).
+- **Chart MCP**: 추이/비교를 SVG로 그려 URL만 돌려준다(#110). 실행도 DB 조회도 하지 않는다.
 - Manual MCP / VOC MCP: 하이브리드 RAG 검색(읽기 전용). 매뉴얼은 **발행(published)** 해야 검색됨.
 
 ## 5. 반영 제약 (자주 놓치는 것)
@@ -127,17 +129,17 @@ docker compose -f docker-compose.dev.yml up -d --no-build
 | 바꾼 것 | 반영 방법 |
 |---|---|
 | 새 설정 키 / 마이그레이션 | `db-init` 재실행 필수 |
-| MCP 툴 추가·설명·`host_mode`·커스텀 커맨드 | 해당 MCP 컨테이너 재시작 |
-| **커맨드 카탈로그(커맨드 탭) 추가·수정** | `command-mcp` 재시작(툴 목록 재구성) |
+| **등록 커맨드 추가·수정·인자·`host_mode`** | `execution-mcp` 재시작(툴 목록 재구성) |
+| 내장 커맨드 설명·`host_mode` | `execution-mcp` 재시작 |
 | `enabled` / `required_roles` | 실시간 반영(재시작 불필요) |
 | `agent_system_instruction` | non-force 시드라 **기존 DB에 자동 반영 안 됨** → 콘솔 설정 탭에 직접 붙여넣고 agent-server 재시작 |
 | `hot_reload=false` 설정값 | 해당 서비스 재시작(콘솔에 "지금 재시작" 버튼 있음) |
 | requirements 변경 | 이미지 재빌드(재시작만으로는 pip 패키지가 안 깔림) |
 
 재시작 커맨드([서버] `cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant`):
-`docker compose -f docker-compose.dev.yml restart <agent-server|command-mcp|system-mcp|admin-console>`
+`docker compose -f docker-compose.dev.yml restart <agent-server|execution-mcp|chart-mcp|admin-console>`
 · 전부 한 번에는 `bash scripts/restart-mounted.sh` · 콘솔 재시작 버튼은
-agent-server/manual-mcp/command-mcp/voc-mcp/system-mcp 5개만 지원(admin-console은 CLI로만).
+agent-server/manual-mcp/execution-mcp/voc-mcp/chart-mcp 5개만 지원(admin-console은 CLI로만).
 
 ## 6. 이미 규명된 것 — 다시 추측하지 말 것
 
