@@ -39,10 +39,28 @@ async def get_settings(admin: str = Depends(require_admin)):
     return rows
 
 
+# 이 키를 저장하면 Open WebUI 기본 모델 지정까지 자동으로 이어서 한다.
+# 예전에는 저장 후 별도 버튼을 눌러야 했는데, agent나 DB를 재기동할 때마다 반복해야 해서
+# 번거롭다는 요청이 있었다. 저장 하나로 끝낸다.
+_AUTO_SYNC_OPENWEBUI = {"openwebui_admin_api_key", "openwebui_base_url"}
+
+
 @router.put("/{key}")
 async def update_setting(key: str, body: SettingIn, admin: str = Depends(require_admin)):
     if key in ENV_MANAGED_KEYS:
         raise HTTPException(
             400, "이 값은 .env(환경변수)로 관리됩니다. .env를 수정하고 해당 서비스를 재시작하세요.")
     await set_config(key, body.value, updated_by=admin)
+
+    if key in _AUTO_SYNC_OPENWEBUI and body.value.strip():
+        # 실패해도 저장 자체는 성공으로 둔다(키를 막 넣은 직후라 Open WebUI가 아직 준비 전일 수
+        # 있다). 결과만 알려주고, 필요하면 사용자가 다시 저장하면 된다.
+        from routers.ops import sync_openwebui_model
+        try:
+            synced = await sync_openwebui_model(admin=admin)
+            return {"ok": True, "openwebui_default_model": synced.get("default_model")}
+        except HTTPException as e:
+            return {"ok": True, "openwebui_sync_error": str(e.detail)}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": True, "openwebui_sync_error": f"{type(e).__name__}: {e}"}
     return {"ok": True}

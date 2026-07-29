@@ -29,7 +29,10 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../../shared"))
 from ssh_exec import run_ssh_as_user  # noqa: E402
 from catalog_exec import DEFAULT_DENY_CSV, build_catalog_argv, deny_set  # noqa: E402
 
-DEFAULT_MAX_TOOLS = 200
+# 툴 하나당 대략 60~100토큰(이름+설명+스키마)이 매 요청에 실린다. LLM 컨텍스트가 32768이고
+# 지시문·검색결과·대화이력이 이미 20k 안팎을 쓰므로, 커맨드 툴에 쓸 수 있는 예산은 ~10k다.
+# => 80개 근처가 현실적인 상한. 더 늘리려면 컨텍스트 상한 설정들을 함께 낮춰야 한다.
+DEFAULT_MAX_TOOLS = 80
 
 # MCP 툴 이름에 쓸 수 있는 문자만 남긴다. 카탈로그 이름에는 공백·점·한글이 들어올 수 있다.
 _UNSAFE = re.compile(r"[^A-Za-z0-9_]")
@@ -90,18 +93,19 @@ def build_entry(row: dict, login_host_getter) -> dict:
     ])
     handler.__annotations__ = {"user_id": str, "args": list}
 
+    # 설명은 **짧게**. 툴 하나당 (이름 + 설명 + 스키마)가 전부 매 요청 프롬프트에 실린다.
+    # 공통 설명("args에 인자를 나눠 넣는다", "본인 권한으로 실행된다")은 툴마다 반복하면
+    # 커맨드 수만큼 곱해지므로 지시문에 한 번만 두고 여기서는 뺀다.
     desc = (row.get("description") or "").strip()
     usage = (row.get("usage") or "").strip()
     parts = [desc] if desc else []
-    parts.append(f"실행되는 커맨드: `{exec_command}`")
-    if usage:
-        parts.append(f"사용법: {usage}")
-    parts.append("추가 인자가 필요하면 args에 한 칸씩 나눠 넣는다(예: ['-l', '/home']). "
-                 "로그인 서버에서 호출자 본인 권한으로 실행된다.")
+    parts.append(f"[{exec_command}]")
+    if usage and usage != exec_command:
+        parts.append(usage)
 
     return {
         "handler": handler,
-        "description": " ".join(parts),
+        "description": " ".join(parts)[:300],
         "enabled": True,
         "required_roles": [],
         "user_scoped": True,

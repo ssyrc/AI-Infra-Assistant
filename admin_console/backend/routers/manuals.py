@@ -245,11 +245,11 @@ async def preview_excel(
 
 
 class ExcelCommitIn(BaseModel):
+    # 청크의 소제목(section_title)·페이지 번호 열 선택은 화면에서 뺐다 - 실제로 쓰이지 않는데
+    # 업로드할 때마다 고르게 해서 번거로웠다. 본문 열과 문서명 열만 고르면 된다.
     upload_id: str
     title: str = Field(min_length=1, max_length=200)
     content_columns: list[str] = Field(min_length=1)
-    title_column: str | None = None
-    page_no_column: str | None = None
     # 한 파일에 여러 가이드 문서가 섞여 있을 때, 행마다의 '원본 문서 이름'이 든 열.
     # (사내 표준 추출 포맷에서는 ppt_title) 지정하면 청크마다 저장돼 답변에서
     # "메뉴 경로 > 문서 이름"으로 안내된다.
@@ -268,7 +268,7 @@ async def commit_excel(body: ExcelCommitIn, uploaded_by: str = Depends(require_a
         for c in body.content_columns:
             if c not in col_idx:
                 raise ValueError(f"존재하지 않는 컬럼입니다: {c}")
-        for c in (body.title_column, body.page_no_column, body.doc_title_column):
+        for c in (body.doc_title_column,):
             if c and c not in col_idx:
                 raise ValueError(f"존재하지 않는 컬럼입니다: {c}")
 
@@ -285,22 +285,11 @@ async def commit_excel(body: ExcelCommitIn, uploaded_by: str = Depends(require_a
             content = "\n".join(parts)
             if not content:
                 continue
-            section_title = None
-            if body.title_column and body.title_column in col_idx:
-                tv = row[col_idx[body.title_column]]
-                section_title = clean_text(str(tv), opts) if tv is not None else None
             doc_title = None
             if body.doc_title_column and body.doc_title_column in col_idx:
                 dv = row[col_idx[body.doc_title_column]]
                 doc_title = clean_text(str(dv), opts) if dv is not None else None
-            page_no = None
-            if body.page_no_column and body.page_no_column in col_idx:
-                pv = row[col_idx[body.page_no_column]]
-                try:
-                    page_no = int(pv) if pv is not None else None
-                except (TypeError, ValueError):
-                    page_no = None
-            built.append((doc_title or None, section_title or None, page_no, content))
+            built.append((doc_title or None, None, None, content))
         return built
 
     # 실패해도 세션을 지우지 않는다(성공 시에만 정리). 무조건 지우면 등록이 한 번

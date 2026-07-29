@@ -127,8 +127,6 @@ function ManualsPanel() {
   // 엑셀 미리보기 결과 + 컬럼 선택 상태
   const [excelPreview, setExcelPreview] = useState(null); // {upload_id, columns, sample_rows, total_rows}
   const [contentCols, setContentCols] = useState([]);
-  const [titleCol, setTitleCol] = useState("");
-  const [pageCol, setPageCol] = useState("");
   const [docCol, setDocCol] = useState("");   // 행마다의 원본 문서 이름(ppt_title 등)
 
   const [embStatus, setEmbStatus] = useState(null);
@@ -197,7 +195,7 @@ function ManualsPanel() {
     return "";
   };
 
-  const resetPreviews = () => { setDocPreview(null); setExcelPreview(null); setContentCols([]); setTitleCol(""); setPageCol(""); setDocCol(""); };
+  const resetPreviews = () => { setDocPreview(null); setExcelPreview(null); setContentCols([]); setDocCol(""); };
 
   const appendFile = (fd, f) => { if (f.serverPath) fd.append("server_path", f.serverPath); else fd.append("file", f); };
 
@@ -264,8 +262,8 @@ function ManualsPanel() {
         method: "POST",
         body: JSON.stringify({
           upload_id: excelPreview.upload_id, title,
-          content_columns: contentCols, title_column: titleCol || null,
-          page_no_column: pageCol || null, doc_title_column: docCol || null,
+          content_columns: contentCols,
+          doc_title_column: docCol || null,
         }),
       });
       resetPreviews(); setTitle(""); setFile(null);
@@ -333,11 +331,6 @@ function ManualsPanel() {
   return (
     <div>
       <h2>매뉴얼 관리</h2>
-      <div className="subtitle">
-        PPT·Word·PDF·txt는 파일 형식에 맞춰 자동 분할되고, 엑셀·CSV는 열을 골라 등록합니다.
-        업로드 시 HTML·불필요한 문자는 자동으로 정제됩니다. 같은 제목으로 재업로드하면 새 버전이 생깁니다.
-      </div>
-
       {embStatus && embStatus.stale_chunks > 0 && (
         <div className="card" style={{borderColor: "var(--warn)"}}>
           <div style={{color: "var(--warn)", fontSize: 13, marginBottom: 8}}>
@@ -458,23 +451,16 @@ function ManualsPanel() {
         <div className="card">
           <div style={{marginBottom: 8}}><strong>열 선택</strong> · {excelPreview.filename} · {excelPreview.sheet} · {excelPreview.total_rows}행 · 헤더 {excelPreview.header_row}행</div>
           <div className="subtitle">
-            행 하나가 검색 청크(chunk) 하나가 됩니다. 아래 표에서 열마다 3가지를 고르세요(전부 선택 사항, 필요한 것만 체크):<br/>
-            ① <strong>내용</strong>(체크박스, 여러 개 가능) — 청크 본문에 넣을 열. 체크한 열들이 전부 <code>열이름: 값</code> 줄로 이어붙습니다.<br/>
-            ② <strong>문서명</strong>(라디오, 최대 1개) — 행마다의 <strong>원본 가이드 문서 이름</strong>이 든 열(예: <code>ppt_title</code>).
-            메뉴 하나에 여러 문서가 섞여 있을 때 필수입니다. 답변에서 "문서 위치 + 이 이름"으로 안내됩니다. <code>ppt_title</code>이 있으면 자동으로 잡힙니다.<br/>
-            ③ <strong>제목</strong>(라디오, 최대 1개) — 청크의 소제목으로 쓸 열(예: section).<br/>
-            ④ <strong>페이지/순번</strong>(라디오, 최대 1개) — 숫자인 열(예: slide_index)이면 청크의 p번호로 저장.<br/>
-            뭘 체크해야 할지 모르겠으면 일단 텍스트/설명이 들어있는 열만 "내용"에 체크해도 충분합니다 — 아래 미리보기로 결과를 바로 확인할 수 있습니다.
+            <strong>내용</strong>: 청크 본문에 넣을 열(복수 선택) ·
+            <strong>문서명</strong>: 원본 문서 이름 열(<code>ppt_title</code>이면 자동 선택)
           </div>
           <table style={{marginBottom: 12}}>
-            <thead><tr><th>① 내용</th><th>② 문서명</th><th>③ 제목</th><th>④ 페이지/순번</th><th>열 이름</th><th>샘플 값</th></tr></thead>
+            <thead><tr><th>① 내용</th><th>② 문서명</th><th>열 이름</th><th>샘플 값</th></tr></thead>
             <tbody>
               {excelPreview.columns.map((col, i) => (
                 <tr key={col + i}>
                   <td><input type="checkbox" checked={contentCols.includes(col)} onChange={() => toggleContentCol(col)} /></td>
                   <td><input type="radio" name="dc" checked={docCol === col} onChange={() => setDocCol(col)} /></td>
-                  <td><input type="radio" name="tc" checked={titleCol === col} onChange={() => setTitleCol(col)} /></td>
-                  <td><input type="radio" name="pc" checked={pageCol === col} onChange={() => setPageCol(col)} /></td>
                   <td style={{fontFamily: "var(--mono)"}}>{col}</td>
                   <td style={{color: "var(--muted)", fontSize: 12}}>{excelPreview.sample_rows.map(r => r[i]).filter(v => v).slice(0, 3).join(" · ")}</td>
                 </tr>
@@ -488,10 +474,6 @@ function ManualsPanel() {
               </div>
               <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 4}}>
                 문서명: {docCol ? (excelPreview.sample_rows[0][excelPreview.columns.indexOf(docCol)] || "(비어있음)") : "(없음)"}
-                {" · "}
-                제목: {titleCol ? (excelPreview.sample_rows[0][excelPreview.columns.indexOf(titleCol)] || "(비어있음)") : "(없음)"}
-                {" · "}
-                페이지: {pageCol ? (excelPreview.sample_rows[0][excelPreview.columns.indexOf(pageCol)] || "(비어있음)") : "(없음)"}
               </div>
               <pre style={{whiteSpace: "pre-wrap", fontSize: 12.5, margin: 0}}>
                 {contentCols.map(c => `${c}: ${excelPreview.sample_rows[0][excelPreview.columns.indexOf(c)] || ""}`).join("\n")}
@@ -501,8 +483,6 @@ function ManualsPanel() {
           <div className="row-actions">
             <button className="primary" disabled={busy || contentCols.length === 0} onClick={commitExcel}>선택한 열로 등록</button>
             {docCol && <button onClick={() => setDocCol("")}>문서명 열 해제</button>}
-            {titleCol && <button onClick={() => setTitleCol("")}>제목 열 해제</button>}
-            {pageCol && <button onClick={() => setPageCol("")}>페이지 열 해제</button>}
             <button onClick={resetPreviews}>취소</button>
           </div>
         </div>
@@ -564,9 +544,7 @@ function ManualsPanel() {
           <div style={{marginTop: 12}}>
             {detail.file.status !== "draft" && (
               <div className="subtitle" style={{color: "var(--warn)"}}>
-                {detail.file.status === "published"
-                  ? "발행 중인 버전은 읽기 전용입니다. 내용을 바꾸려면 발행취소 후 교정하거나, 같은 제목으로 새 버전을 업로드하세요."
-                  : "보관된 버전은 읽기 전용입니다. 다시 발행(롤백)하거나 같은 제목으로 새 버전을 업로드하세요."}
+                읽기 전용입니다.
               </div>
             )}
             {detail.chunks.map(c => (
@@ -725,7 +703,6 @@ function VocPanel() {
   return (
     <div>
       <h2>VOC 이력 관리</h2>
-      <div className="subtitle">사용자/운영자 질의응답 이력. VOC MCP가 이 데이터를 하이브리드 검색합니다.</div>
 
       <div className="card">
         <div className="toolbar">
@@ -810,9 +787,6 @@ function VocPanel() {
 
       <div className="card">
         <div style={{marginBottom: 8}}><strong>업로드 묶음</strong>
-          <span className="subtitle" style={{marginLeft: 8}}>
-            파일 하나가 한 줄입니다. 잘못 올렸으면 묶음째 되돌리세요.
-          </span>
         </div>
         <table>
           <thead><tr><th>파일</th><th>건수</th><th>올린 사람</th><th>등록일</th><th></th></tr></thead>
@@ -969,10 +943,8 @@ function CommandsPanel() {
     <div>
       <h2>커맨드 카탈로그</h2>
       <div className="subtitle">
-        Command MCP가 조회 <strong>및 실행</strong>하는 시스템 활용 커맨드 목록입니다.
-        여기 등록된 커맨드는 별도 승인 없이 전부 실행 가능합니다(항목별 on/off 화이트리스트는
-        System MCP 탭에서만 관리). 실행은 항상 <strong>질문한 사용자 본인 계정 권한</strong>으로,
-        기본적으로 로그인 서버에서 이뤄집니다. 항목은 <strong>이름 · 실행 커맨드 · 설명</strong> 3개로 관리합니다.
+        커맨드 하나가 에이전트 툴 하나가 됩니다. <strong>설명</strong>을 보고 고르므로
+        사용자가 물어볼 말로 적으세요. 수정 후 <code>command-mcp</code> 재시작 필요.
       </div>
 
       {items.some(c => !c.embedded) && (
@@ -1034,11 +1006,7 @@ function CommandsPanel() {
       {excel && (
         <div className="card">
           <div style={{marginBottom: 8}}><strong>열 매핑</strong> · {excel.filename} · {excel.sheet} · {excel.total_rows}행 · 헤더 {excel.header_row}행</div>
-          <div className="subtitle">
-            각 항목에 대응하는 엑셀 열을 고르세요. 이름 기준으로 등록/갱신(upsert)됩니다.
-            "실행 커맨드" 열을 지정하지 않으면 커맨드 이름이 그대로 실행됩니다(이름 열이 실제
-            커맨드면 매핑하지 않아도 됩니다).
-          </div>
+          <div className="subtitle">이름 기준으로 등록/갱신됩니다.</div>
           <div style={{display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12}}>
             {colSelect("name_column", "이름(name)", true)}
             {colSelect("description_column", "설명(description)", true)}
@@ -1287,7 +1255,7 @@ function SystemPanel() {
   return (
     <div>
       <h2>System MCP</h2>
-      <div className="subtitle">화이트리스트 함수의 활성/비활성·설명·필요 역할을 편집하고 실행 감사로그를 봅니다. "추가" 버튼으로 코드 배포 없이 새 커맨드를 등록할 수 있습니다(등록 후 System MCP 재시작 필요).</div>
+      <div className="subtitle">활성/설명/필요 역할 편집 · 실행 로그. 커맨드 추가 후 System MCP 재시작 필요.</div>
 
       <div className="toolbar">
         <button className={tab === "whitelist" ? "primary" : ""} onClick={() => setTab("whitelist")}>화이트리스트</button>
@@ -1503,140 +1471,103 @@ async function syncOpenWebUIModel() {
   }
 }
 
+// 화면에 보여줄 설정만, 그룹 순서대로. 여기 없는 키는 표시하지 않는다
+// (내부 튜닝값까지 다 늘어놓으면 정작 바꿔야 할 값을 찾기 어렵다).
+const SETTING_GROUPS = [
+  { title: "에이전트", service: "agent-server",
+    keys: ["agent_system_instruction", "llm_temperature", "history_max_chars",
+           "show_tool_activity", "voc_intake_guide"] },
+  { title: "LLM", service: "agent-server",
+    keys: ["vllm_llm_base_url", "vllm_llm_model"] },
+  { title: "임베딩 · 리랭커", service: null,
+    keys: ["vllm_embed_base_url", "vllm_embed_model", "embed_dim",
+           "rerank_provider", "rerank_base_url", "rerank_model", "rerank_min_score"] },
+  { title: "Manual MCP", service: "manual-mcp",
+    keys: ["manual_mcp_url", "manual_result_max_chars", "manual_neighbor_window"] },
+  { title: "Command MCP", service: "command-mcp",
+    keys: ["command_mcp_url", "command_tools_max", "catalog_exec_deny_commands"] },
+  { title: "VOC MCP", service: "voc-mcp",
+    keys: ["voc_mcp_url", "voc_result_max_chars"] },
+  { title: "System MCP", service: "system-mcp",
+    keys: ["system_mcp_url", "scheduler_login_host"] },
+  { title: "Open WebUI", service: null,
+    keys: ["openwebui_base_url", "openwebui_admin_api_key"] },
+];
+
 function SettingsPanel() {
   const [settings, setSettings] = useState([]);
-  const [edits, setEdits] = useState({}); // key -> new value
+  const [edits, setEdits] = useState({});
 
   const load = useCallback(async () => setSettings(await api("/api/settings")), []);
   useEffect(() => { load(); }, [load]);
 
   const save = async (key) => {
     if (!(key in edits)) return;
-    await api(`/api/settings/${encodeURIComponent(key)}`, { method: "PUT", body: JSON.stringify({ value: edits[key] }) });
+    const r = await api(`/api/settings/${encodeURIComponent(key)}`, {
+      method: "PUT", body: JSON.stringify({ value: edits[key] }) });
     const next = { ...edits }; delete next[key]; setEdits(next);
     await load();
-    alert("저장했습니다.");
+    if (r && r.openwebui_default_model) {
+      alert(`저장했습니다.\nOpen WebUI 기본 모델을 "${r.openwebui_default_model}"(으)로 지정했습니다.`);
+    } else if (r && r.openwebui_sync_error) {
+      alert(`저장했습니다.\n기본 모델 지정은 실패했습니다: ${r.openwebui_sync_error}`);
+    } else {
+      alert("저장했습니다.");
+    }
   };
 
-  // DB DSN/시크릿(.env 관리)은 콘솔에서 바꿔도 아무 효과가 없어서 아예 화면에 안 보여준다.
-  const editable = settings.filter(s => !s.env_managed);
+  const byKey = {};
+  settings.filter(s => !s.env_managed).forEach(s => { byKey[s.key] = s; });
 
-  const grouped = {
-    "LLM": editable.filter(s => s.key === "vllm_llm_base_url" || s.key === "vllm_llm_model"),
-    "임베딩": editable.filter(s =>
-      s.key === "vllm_embed_base_url" || s.key === "vllm_embed_model"
-      || s.key === "embed_dim" || s.key === "embed_cache_ttl_seconds"),
-    "리랭커": editable.filter(s => s.key.startsWith("rerank_")),
-    "검색 품질 / 업로드": editable.filter(s =>
-      s.key === "clean_policy_version" || s.key.startsWith("search_") || s.key.startsWith("upload_")),
-    "MCP 엔드포인트": editable.filter(s => s.key.endsWith("_mcp_url")),
-    "SSH 실행 (System/Command MCP)": editable.filter(s => s.key === "scheduler_login_host"),
-    "Open WebUI 연동": editable.filter(s => s.key.startsWith("openwebui_")),
-    "에이전트 지시문": editable.filter(s => s.key === "agent_system_instruction"),
+  const field = (s) => {
+    const isLong = s.key === "agent_system_instruction";
+    const val = s.key in edits ? edits[s.key] : (s.is_secret ? "" : s.value);
+    const dirty = s.key in edits;
+    return (
+      <div key={s.key} style={{marginBottom: 12}}>
+        <div style={{fontSize: 12.5, marginBottom: 4, display: "flex", gap: 8, alignItems: "center"}}>
+          <span style={{fontFamily: "var(--mono)"}}>{s.key}</span>
+          {!s.hot_reload && <span className="badge disabled">재시작 필요</span>}
+        </div>
+        <div style={{display: "flex", gap: 8, alignItems: "flex-start"}}>
+          {isLong
+            ? <textarea style={{flex: 1}} rows={10} value={val}
+                        onChange={e => setEdits({ ...edits, [s.key]: e.target.value })} />
+            : <input style={{flex: 1}}
+                     placeholder={s.is_secret ? `(마스킹됨: ${s.value})` : ""}
+                     value={val}
+                     onChange={e => setEdits({ ...edits, [s.key]: e.target.value })} />}
+          <button className="primary" disabled={!dirty} onClick={() => save(s.key)}>저장</button>
+        </div>
+      </div>
+    );
   };
-  const shown = new Set(Object.values(grouped).flat().map(s => s.key));
-  const others = editable.filter(s => !shown.has(s.key));
-  if (others.length) grouped["기타"] = others;
 
   return (
     <div>
       <h2>설정</h2>
-      <div className="subtitle">
-        LLM·리랭커·스케줄러 주소, MCP 엔드포인트, 에이전트 지시문을 여기서 관리합니다(런타임 단일 소스).
-        <span className="badge enabled" style={{marginLeft: 8}}>즉시 반영</span>은 재시작 없이 적용,
-        <span className="badge disabled" style={{marginLeft: 6}}>재시작 필요</span>는 해당 서비스 재시작 후 반영됩니다.
-        DB DSN·시크릿류는 <code>.env</code>로만 관리되어(콘솔에서 바꿔도 반영 안 됨) 여기서는 표시하지 않습니다.
-      </div>
 
-      {Object.entries(grouped).map(([group, rows]) => rows.length > 0 && (
-        <div className="card" key={group}>
-          <div style={{marginBottom: 10}}><strong>{group}</strong></div>
-          {group === "MCP 엔드포인트" && (
-            <div style={{fontSize: 12.5, color: "var(--warn)", marginBottom: 10,
-                         padding: "8px 10px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4}}>
-              ⚠️ 이 값들은 외부 IP가 아니라 <strong>같은 docker compose 스택 안 컨테이너 이름</strong>입니다
-              (예: <code>http://command-mcp:8002/mcp</code>). agent-server가 이 이름으로 내부망에서 MCP에
-              접속하며, 외부 서버 IP로 바꾸면 연결이 끊깁니다. 여러 물리 서버에 MCP를 나눠 배포하는
-              경우가 아니라면 건드리지 마세요.
+      {SETTING_GROUPS.map(g => {
+        const rows = g.keys.map(k => byKey[k]).filter(Boolean);
+        if (!rows.length) return null;
+        return (
+          <div className="card" key={g.title}>
+            <div className="toolbar" style={{justifyContent: "space-between", marginBottom: 10}}>
+              <strong>{g.title}</strong>
+              {g.service && (
+                <button onClick={() => restartService(g.service)}>{g.service} 재시작</button>
+              )}
             </div>
-          )}
-          {group === "LLM" && (
-            <div style={{fontSize: 12.5, color: "var(--muted)", marginBottom: 10,
-                         padding: "8px 10px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4}}>
-              Open WebUI는 여기 값을 바꿔도 새 채팅의 기본 모델을 자동으로 맞추지 않습니다(브라우저별
-              마지막 선택을 따로 기억함). 아래 버튼으로 Open WebUI의 기본 모델을 지금 노출 중인 모델로
-              맞출 수 있습니다(<code>openwebui_admin_api_key</code> 설정 필요 — Open WebUI 로그인 →
-              설정 → 계정 → API 키 발급 후 아래 "Open WebUI 연동" 그룹에서 저장).
-              <div style={{marginTop: 6}}>
-                <button onClick={syncOpenWebUIModel}>Open WebUI 기본 모델 동기화</button>
+            {g.title === "Open WebUI" && (
+              <div style={{fontSize: 12.5, color: "var(--muted)", marginBottom: 10}}>
+                API 키를 저장하면 기본 모델이 자동으로 지정됩니다(따로 누를 버튼 없음).
+                키는 Open WebUI 로그인 → 설정 → 계정 → API 키에서 발급합니다.
               </div>
-            </div>
-          )}
-          {group === "SSH 실행 (System/Command MCP)" && (
-            <div style={{fontSize: 12.5, color: "var(--muted)", marginBottom: 10,
-                         padding: "8px 10px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4}}>
-              System/Command MCP가 job 조회 등에 ssh할 로그인 서버 이름(호스트의 <code>/etc/hosts</code>에
-              등록된 이름이어야 함). System MCP의 <code>disk_free</code> 등 개별 툴의 <code>host</code>
-              파라미터와는 별개 설정 — 그쪽은 에이전트 지시문에서 기본 호스트를 알려줘야 함.
-            </div>
-          )}
-          {rows.map(s => {
-            const isLong = s.key === "agent_system_instruction";
-            const val = s.key in edits ? edits[s.key] : (s.is_secret ? "" : s.value);
-            return (
-              <div key={s.key} style={{marginBottom: 14}}>
-                <div style={{fontSize: 12.5, marginBottom: 4}}>
-                  <span style={{fontFamily: "var(--mono)"}}>{s.key}</span>
-                  <span className={`badge ${s.hot_reload ? "enabled" : "disabled"}`} style={{marginLeft: 8}}>
-                    {s.hot_reload ? "즉시 반영" : "재시작 필요"}
-                  </span>
-                  {!s.hot_reload && RESTART_SERVICE_FOR_KEY[s.key] && (
-                    <button style={{marginLeft: 8, fontSize: 11.5, padding: "1px 6px"}}
-                      onClick={() => restartService(RESTART_SERVICE_FOR_KEY[s.key])}>
-                      {RESTART_SERVICE_FOR_KEY[s.key]} 재시작
-                    </button>
-                  )}
-                  {s.description && <span style={{color: "var(--muted)", marginLeft: 8}}>{s.description}</span>}
-                </div>
-                {isInternalMcpUrl(s.key) && INTERNAL_MCP_URL_RE.test(val) ? (
-                  (() => {
-                    const m = val.match(INTERNAL_MCP_URL_RE);
-                    const [, prefix, port, suffix] = m;
-                    return (
-                      <div style={{display: "flex", gap: 8, alignItems: "center"}}>
-                        <span style={{fontFamily: "var(--mono)", fontSize: 12.5, color: "var(--muted)"}}>{prefix}</span>
-                        <input type="number" style={{width: 90}} value={port}
-                          onChange={e => setEdits({ ...edits, [s.key]: `${prefix}${e.target.value}${suffix || ""}` })} />
-                        <span style={{fontFamily: "var(--mono)", fontSize: 12.5, color: "var(--muted)"}}>{suffix}</span>
-                        <button className="primary" disabled={!(s.key in edits)} onClick={() => save(s.key)}>저장</button>
-                      </div>
-                    );
-                  })()
-                ) : (
-                  <div style={{display: "flex", gap: 8, alignItems: "flex-start"}}>
-                    {isLong ? (
-                      <textarea
-                        style={{flex: 1}} rows={10}
-                        placeholder={s.is_secret ? `(현재: ${s.value})` : ""}
-                        value={val}
-                        onChange={e => setEdits({ ...edits, [s.key]: e.target.value })}
-                      />
-                    ) : (
-                      <input
-                        style={{flex: 1}}
-                        placeholder={s.is_secret ? `(마스킹됨: ${s.value})` : ""}
-                        value={val}
-                        onChange={e => setEdits({ ...edits, [s.key]: e.target.value })}
-                      />
-                    )}
-                    <button className="primary" disabled={!(s.key in edits)} onClick={() => save(s.key)}>저장</button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      ))}
+            )}
+            {rows.map(field)}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1680,7 +1611,7 @@ function AccountsPanel() {
   return (
     <div>
       <h2>계정 관리</h2>
-      <div className="subtitle">관리자 콘솔 로그인 계정(HTTP Basic)을 관리합니다. `.env`의 기본 계정은 잠금 방지용이라 여기서 지울 수 없습니다.</div>
+      <div className="subtitle">관리자 콘솔 로그인 계정. `.env`의 기본 계정은 지울 수 없습니다.</div>
 
       <div className="card">
         <div style={{fontWeight: 600, marginBottom: 8}}>새 계정 추가</div>
