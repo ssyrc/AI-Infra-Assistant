@@ -22,7 +22,9 @@ from config_store import get_config  # noqa: E402
 from mcp_caller import (  # noqa: E402
     get_caller, CallerContextMiddleware, load_overrides_sync, tool_description, build_wrapped,
 )
-from ssh_exec import run_ssh_as_user  # noqa: E402
+from ssh_exec import (  # noqa: E402
+    run_ssh_as_user, warm_master, start_master_keepalive,
+)
 from catalog_exec import DEFAULT_DENY_CSV, build_catalog_argv, deny_set  # noqa: E402
 from retrieval import (  # noqa: E402
     ts_or_query, expand_query, has_trgm, mmr_dedup, trgm_min_similarity,
@@ -304,5 +306,20 @@ if __name__ == "__main__":
     import uvicorn
 
     port = int(os.environ.get("MCP_PORT", 8002))
-    app = CallerContextMiddleware(mcp.streamable_http_app())
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    inner = mcp.streamable_http_app()
+
+    # 기동하자마자 로그인 서버로 ssh 마스터 연결을 열어 둔다. 사용자가 첫 질문을 던질 때
+    # 이미 연결이 서 있으므로 커맨드가 곧바로 실행된다(첫 접속 비용이 체감 지연의 대부분).
+    # 이후 ControlPersist가 끊기지 않게 주기적으로 다시 예열한다.
+    async def _warm_ssh():
+        try:
+            host = await get_config("scheduler_login_host", "202.20.185.100")
+        except Exception as e:  # noqa: BLE001
+            print(f"[command-mcp] 로그인 서버 설정을 읽지 못해 예열을 건너뜁니다: {{e}}")
+            return
+        if host:
+            await warm_master(host)
+        start_master_keepalive(lambda: get_config("scheduler_login_host", host))
+
+    inner.add_event_handler("startup", _warm_ssh)
+    uvicorn.run(CallerContextMiddleware(inner), host="0.0.0.0", port=port)

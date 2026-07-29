@@ -153,15 +153,9 @@ def _remote_command(user: str, argv: list) -> str:
     return f"su - {user} -c {shlex.quote(inner)}"            # root 셸 파싱용 (user는 정규식 검증됨)
 
 
-async def run_ssh_as_user(host: str, user_id: str, argv: list,
-                          timeout: int = DEFAULT_TIMEOUT, max_output: int = MAX_OUTPUT) -> dict:
-    """host(=/etc/hosts 등록)로 ssh(root) 후 user_id 권한으로 argv를 실행한다(셸 주입 불가)."""
-    ip = resolve_host(host)
-    user = validate_user(user_id)
-    remote_cmd = _remote_command(user, argv)
-
-    ssh_argv = [
-        "ssh",
+def _base_ssh_opts() -> list[str]:
+    """모든 ssh 호출이 공유하는 옵션(다중화 포함)."""
+    opts = [
         "-o", "BatchMode=yes",
         "-o", "PasswordAuthentication=no",
         "-o", f"StrictHostKeyChecking={SSH_STRICT_HOST_KEY}",
@@ -170,21 +164,84 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
     ]
     if SSH_MULTIPLEX and _ensure_control_dir():
         # 소켓 경로는 %C(호스트·포트·사용자 해시)로 만들어 길이 제한(보통 108바이트)을 피한다.
-        ssh_argv += [
+        opts += [
             "-o", "ControlMaster=auto",
             "-o", f"ControlPath={os.path.join(SSH_CONTROL_DIR, 'cm-%C')}",
             "-o", f"ControlPersist={SSH_CONTROL_PERSIST}",
         ]
-    if SSH_FORCE_TTY:
-        ssh_argv.append("-tt")
-    # SSH_KEY 경로가 '파일'일 때만 -i로 넘긴다. compose가 없는 경로를 bind mount하면 도커가
-    # 그 자리에 '빈 디렉토리'를 만들어 버리는데, 그걸 -i로 주면 ssh가 무조건 인증 실패한다
-    # (서버에서 직접 ssh하면 되는데 에이전트로만 안 되는 전형적인 원인).
     if SSH_KEY and os.path.isfile(SSH_KEY):
-        ssh_argv += ["-i", SSH_KEY]
-    elif SSH_KEY:
+        opts += ["-i", SSH_KEY]
+    return opts
+
+
+async def warm_master(host: str) -> bool:
+    """대상 호스트로의 ssh 마스터 연결을 미리 열어 둔다(다중화 전제).
+
+    커맨드 실행의 체감 지연은 대부분 '첫 접속'이다 - TCP + 키 교환 + 원격 셸 기동.
+    사용자가 무언가를 물어보기 전에 마스터를 띄워 두면, 실제 커맨드는 이미 열려 있는
+    연결에 채널만 얹으므로 곧바로 실행된다. 실패해도 조용히 넘긴다(다음 커맨드가
+    평소대로 직접 접속하면 되고, 여기서 서비스를 막을 이유가 없다).
+    """
+    if not SSH_MULTIPLEX:
+        return False
+    try:
+        ip = resolve_host(host)
+    except Exception as e:  # noqa: BLE001
+        print(f"[ssh_exec] 예열 대상 호스트를 해석하지 못했습니다({host}): {e}")
+        return False
+    argv = ["ssh", *_base_ssh_opts(), f"{SSH_ROOT_USER}@{ip}", "true"]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv, stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+        _, err = await asyncio.wait_for(proc.communicate(), timeout=SSH_CONNECT_TIMEOUT + 5)
+    except (asyncio.TimeoutError, OSError) as e:
+        print(f"[ssh_exec] 연결 예열 실패({host}): {type(e).__name__}: {e}")
+        return False
+    if proc.returncode != 0:
+        print(f"[ssh_exec] 연결 예열 실패({host}, 코드 {proc.returncode}): "
+              f"{err.decode('utf-8', 'replace').strip()[:200]}")
+        return False
+    return True
+
+
+def start_master_keepalive(host_getter, interval: int = 240):
+    """마스터 연결이 끊기지 않게 주기적으로 예열한다(ControlPersist보다 짧은 주기).
+
+    host_getter는 매번 호출되는 async 함수다 - 관리자가 콘솔에서 로그인 서버를 바꾸면
+    다음 주기부터 새 주소를 예열한다.
+    """
+    async def _loop():
+        while True:
+            try:
+                host = await host_getter()
+                if host:
+                    await warm_master(host)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                print(f"[ssh_exec] 연결 예열 루프 오류(무시하고 계속): {type(e).__name__}: {e}")
+            await asyncio.sleep(interval)
+
+    return asyncio.create_task(_loop())
+
+
+async def run_ssh_as_user(host: str, user_id: str, argv: list,
+                          timeout: int = DEFAULT_TIMEOUT, max_output: int = MAX_OUTPUT) -> dict:
+    """host(=/etc/hosts 등록)로 ssh(root) 후 user_id 권한으로 argv를 실행한다(셸 주입 불가)."""
+    ip = resolve_host(host)
+    user = validate_user(user_id)
+    remote_cmd = _remote_command(user, argv)
+
+    # SSH_KEY 경로가 '파일'일 때만 -i로 넘긴다(_base_ssh_opts에서 처리). compose가 없는
+    # 경로를 bind mount하면 도커가 그 자리에 '빈 디렉토리'를 만들어 버리는데, 그걸 -i로 주면
+    # ssh가 무조건 인증 실패한다(서버에서 직접 ssh하면 되는데 에이전트로만 안 되는 원인).
+    if SSH_KEY and not os.path.isfile(SSH_KEY):
         print(f"[ssh_exec] SSH_KEY가 파일이 아니라 무시합니다: {SSH_KEY} "
               "(docker가 빈 디렉토리를 만든 상태일 수 있음 - .env의 SSH_KEY_PATH 확인)")
+    ssh_argv = ["ssh", *_base_ssh_opts()]
+    if SSH_FORCE_TTY:
+        ssh_argv.append("-tt")
     ssh_argv += [f"{SSH_ROOT_USER}@{ip}", remote_cmd]
 
     try:
