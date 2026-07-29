@@ -177,7 +177,11 @@ def test_clamp_top_k(monkeypatch):
     assert asyncio.run(db.clamp_candidates(500)) == 100
 
 
-# --- 7번: System MCP 툴 스키마에 실제 파라미터가 노출되어야 한다 -------------------
+# --- 7번: MCP 툴 스키마에 실제 파라미터가 노출되어야 한다 -------------------------
+# 래퍼가 인자를 **kwargs로 뭉개면 LLM이 무엇을 넣어야 할지 알 수 없다.
+# 반대로 user_id는 **노출되면 안 된다** - 호출자 헤더에서 강제 주입해 남의 자원 접근을 막는다
+# (user_scoped=True). 예전 이 테스트는 system_mcp에 있지도 않은 툴 이름을 보고 있어서
+# 계속 실패하고 있었고, user_id가 노출돼야 한다고 거꾸로 단언하고 있었다.
 def test_system_mcp_tool_schema_preserves_params():
     os.environ.setdefault("CONFIG_DB_DSN", "postgresql://x:x@localhost/x")
     sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "system_mcp"))
@@ -188,7 +192,33 @@ def test_system_mcp_tool_schema_preserves_params():
     spec.loader.exec_module(m)
     tools = asyncio.run(m.mcp.list_tools())
     by_name = {t.name: t for t in tools}
-    schema = by_name["get_scheduler_job_info"].inputSchema
-    assert "user_id" in schema["properties"], "user_id가 스키마에 노출되어야 함"
-    assert "kwargs" not in schema["properties"], "kwargs가 노출되면 안 됨"
-    assert "user_id" in schema.get("required", [])
+
+    # gpu_status(user_id, host) - host는 LLM이 정하고 user_id는 시스템이 고정한다.
+    props = by_name["gpu_status"].inputSchema["properties"]
+    assert "host" in props, "실제 파라미터(host)가 스키마에 있어야 함"
+    assert "kwargs" not in props, "kwargs로 뭉개지면 안 됨"
+    assert "user_id" not in props, "user_id는 LLM에 노출되면 안 됨(호출자 신원에서 주입)"
+
+    # list_dir은 로그인 서버 고정이라 host까지 감춘다. path/show_hidden은 보여야 한다.
+    props = by_name["list_dir"].inputSchema["properties"]
+    assert "path" in props and "show_hidden" in props
+    assert "user_id" not in props and "host" not in props, \
+        "로그인 서버 고정 툴은 host도 감춘다"
+
+
+# --- 7-1번: Command MCP에는 실행 툴이 run_command 하나뿐이어야 한다 ----------------
+# job 조회처럼 특정 커맨드를 코드/설정에 박아 둔 전용 툴을 두면, 관리자가 커맨드 탭에서
+# 고쳐도 반영되지 않는다. 커맨드의 출처는 카탈로그 하나로 유지한다.
+def test_command_mcp_has_no_hardcoded_command_tool():
+    os.environ.setdefault("CONFIG_DB_DSN", "postgresql://x:x@localhost/x")
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "cmdmcp_test", os.path.join(ROOT, "mcp_servers", "command_mcp", "server.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    assert set(m.EXEC_TOOLS) == {"run_command"}, \
+        f"실행 툴은 run_command 하나여야 함(현재: {sorted(m.EXEC_TOOLS)})"
+
+    props = {t.name: t.inputSchema["properties"] for t in asyncio.run(m.mcp.list_tools())}
+    assert "user_id" not in props["run_command"], "user_id는 LLM에 노출되면 안 됨"
+    assert "command" in props["run_command"]
