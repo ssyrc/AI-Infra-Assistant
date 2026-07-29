@@ -161,14 +161,18 @@ function ManualsPanel() {
     if (!confirm("현재 임베딩 설정으로 다시 임베딩할까요? 청크 수에 따라 시간이 걸립니다.")) return;
     setReembedBusy(true);
     try {
-      let total = 0;
+      let total = 0, failed = 0;
       for (let i = 0; i < 200; i++) {
         const r = await api("/api/manuals/reembed", { method: "POST" });
         total += r.processed;
-        if (r.remaining === 0 || r.processed === 0) break;
+        failed += (r.embed_failed || 0);
+        // processed가 0인데 남은 게 있으면 전부 임베딩 실패한 것 — 무한 루프를 막는다.
+        if (r.remaining === 0 || (r.processed === 0 && !r.embed_failed)) break;
+        if (r.processed === 0 && r.embed_failed) break;
       }
       await loadEmbStatus();
-      alert(`재임베딩 완료 · ${total}개 처리`);
+      alert(`재임베딩 완료 · ${total}개 처리`
+        + (failed ? `\n임베딩 실패 ${failed}개(내용은 남아 있고 키워드 검색에는 잡힙니다).` : ""));
     } catch (e) { alert("재임베딩 실패: " + e.message); }
     setReembedBusy(false);
   };
@@ -292,7 +296,20 @@ function ManualsPanel() {
     await load();
     alert("문서 위치를 저장했습니다(같은 제목의 모든 버전에 적용).");
   };
-  const publish = async (id) => { await api(`/api/manuals/${id}/publish`, { method: "POST" }); await load(); openDetail(id); };
+  // 큰 문서는 청크가 수천 개라 발행에 시간이 걸린다. 진행 표시가 없으면 "버튼이 안 눌린다"로
+  // 보이므로, 누르는 즉시 상태를 바꾸고 끝나면 결과(임베딩 실패 수 포함)를 알린다.
+  const [publishBusy, setPublishBusy] = useState(false);
+  const publish = async (id) => {
+    setPublishBusy(true);
+    try {
+      const r = await api(`/api/manuals/${id}/publish`, { method: "POST" });
+      await load(); await openDetail(id); await loadEmbStatus();
+      alert(`발행 완료 · 임베딩 ${r.embedded_chunks}개`
+        + (r.embed_failed ? `\n임베딩 실패 ${r.embed_failed}개(내용은 남아 있고 키워드 검색에는 잡힙니다). `
+                            + `"현재 설정으로 다시 임베딩"으로 채울 수 있습니다.` : ""));
+    } catch (e) { alert("발행 실패: " + e.message); }
+    setPublishBusy(false);
+  };
   const unpublish = async (id) => {
     if (!confirm("발행을 취소하면 즉시 검색·조회에서 제외됩니다. 계속할까요?")) return;
     try { await api(`/api/manuals/${id}/unpublish`, { method: "POST" }); await load(); openDetail(id); }
@@ -513,7 +530,11 @@ function ManualsPanel() {
           <div className="toolbar" style={{justifyContent: "space-between"}}>
             <div><strong>{detail.file.title}</strong> · v{detail.file.version} <Badge value={detail.file.status} /></div>
             <div className="row-actions">
-              {detail.file.status !== "published" && <button className="primary" onClick={() => publish(detail.file.id)}>발행</button>}
+              {detail.file.status !== "published" && (
+                <button className="primary" disabled={publishBusy} onClick={() => publish(detail.file.id)}>
+                  {publishBusy ? "발행 중… (청크가 많으면 몇 분 걸립니다)" : "발행"}
+                </button>
+              )}
               {detail.file.status === "published" && <button className="danger" onClick={() => unpublish(detail.file.id)}>발행취소</button>}
               {detail.file.status !== "published" && <button className="danger" onClick={() => remove(detail.file.id)}>삭제</button>}
               <button onClick={() => setDetail(null)}>닫기</button>

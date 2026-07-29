@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from auth import require_admin
 from config_store import get_config
-from db import get_pool, embed_text, vector_literal
+from db import get_pool, embed_text, embed_texts, vector_literal
 from cleaning import clean_text, clean_options_from_dict
 from spreadsheet import TABLE_EXTS, read_table_meta, load_table_rows
 from uploads import (
@@ -190,11 +190,23 @@ async def commit_command_excel(body: CommandExcelCommitIn, admin: str = Depends(
         raise HTTPException(422, "등록할 커맨드가 없습니다. 이름/설명 열 선택을 확인하세요.")
 
     pool = await get_pool(_DSN)
+    # 큰 엑셀은 수천 행이다. 행마다 임베딩을 호출하면 요청도 수천 번이라 몇 분씩 걸린다.
+    # 묶어서 한 번에 만들어 두고 저장만 순회한다. 실패한 행은 embedding=NULL로 저장해
+    # (키워드·3gram 검색에는 잡힌다) 전체가 실패하지 않게 한다.
+    embed_model = await get_config("vllm_embed_model", "bge-m3")
+    try:
+        vectors = await embed_texts([f"{n}\n{d}" for n, d, _e in items])
+    except Exception as e:  # noqa: BLE001
+        print(f"[commands] 임베딩 일괄 실패, 전부 NULL로 저장: {type(e).__name__}: {e}")
+        vectors = [None] * len(items)
+
     inserted = updated = 0
     async with pool.acquire() as conn:
         async with conn.transaction():
-            for name, desc, exec_command in items:
-                emb, model, dim = await _embed(f"{name}\n{desc}")
+            for (name, desc, exec_command), vec in zip(items, vectors):
+                emb = vector_literal(vec) if vec else None
+                model = embed_model if vec else None
+                dim = len(vec) if vec else None
                 res = await conn.fetchrow(
                     """
                     INSERT INTO command_catalog (name, description, exec_command,

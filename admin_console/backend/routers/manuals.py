@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from auth import require_admin
 from config_store import get_config
-from db import get_pool, embed_text, vector_literal, get_http_client
+from db import get_pool, embed_text, embed_texts, vector_literal, get_http_client
 from parser import parse_file, SUPPORTED_EXTS
 from cleaning import clean_text, clean_options_from_dict, CleanOptions
 from spreadsheet import TABLE_EXTS, read_table_meta, load_table_rows
@@ -385,28 +385,44 @@ async def publish_manual(manual_id: int, admin: str = Depends(require_admin)):
         "WHERE manual_file_id = $1 AND embedding IS NULL",
         manual_id,
     )
-    embedded_count = 0
-    for c in unembedded:
+    # 큰 문서는 청크가 수천 개다. 하나씩 임베딩하면 요청도 수천 번이라 몇 분씩 걸리고,
+    # 그동안 화면에 아무 반응이 없어 "발행 버튼이 안 눌린다"로 보인다. 묶어서 보낸다.
+    # 다만 전부를 한 번에 메모리에 들고 있으면 안 된다 - 1만 청크면 벡터만 수백 MB다.
+    # PUBLISH_WINDOW 단위로 "임베딩 → 저장"을 반복해 메모리를 일정하게 유지한다.
+    PUBLISH_WINDOW = 200
+    embedded_count, failed = 0, 0
+    for start in range(0, len(unembedded), PUBLISH_WINDOW):
+        window = unembedded[start:start + PUBLISH_WINDOW]
         try:
-            vec = await embed_text(_embed_input(
-                file_row["title"], c["doc_title"], c["section_title"], c["chunk_text"]))
+            vectors = await embed_texts([
+                _embed_input(file_row["title"], c["doc_title"], c["section_title"], c["chunk_text"])
+                for c in window
+            ])
         except Exception as e:  # noqa: BLE001
             raise HTTPException(
                 503,
-                f"임베딩 서버 오류로 발행을 중단했습니다({embedded_count}/{len(unembedded)}개 완료). "
-                f"서버 상태를 확인한 뒤 다시 발행하세요. 원인: {e}",
+                f"임베딩 서버 오류로 발행을 중단했습니다"
+                f"({embedded_count}/{len(unembedded)}개 완료). "
+                f"서버 상태를 확인한 뒤 다시 발행하세요(이미 처리된 청크는 건너뜁니다). 원인: {e}",
             )
-        if len(vec) != embed_dim:
-            raise HTTPException(
-                500,
-                f"임베딩 차원이 맞지 않습니다(모델 {len(vec)} vs 스키마 {embed_dim}). "
-                "설정의 embed_dim과 임베딩 모델을 확인하세요.",
+        for c, vec in zip(window, vectors):
+            if vec is None:
+                # 그 청크만 임베딩 없이 남긴다 - 키워드·3gram 검색에는 잡히므로 문서를 못 쓰게
+                # 만들지 않는다. 나중에 "다시 임베딩"으로 채울 수 있다.
+                failed += 1
+                continue
+            if len(vec) != embed_dim:
+                raise HTTPException(
+                    500,
+                    f"임베딩 차원이 맞지 않습니다(모델 {len(vec)} vs 스키마 {embed_dim}). "
+                    "설정의 embed_dim과 임베딩 모델을 확인하세요.",
+                )
+            await pool.execute(
+                "UPDATE manual_chunks SET embedding = $1::vector, embed_model = $2, "
+                "embed_dim = $3 WHERE id = $4",
+                vector_literal(vec), embed_model, embed_dim, c["id"],
             )
-        await pool.execute(
-            "UPDATE manual_chunks SET embedding = $1::vector, embed_model = $2, embed_dim = $3 WHERE id = $4",
-            vector_literal(vec), embed_model, embed_dim, c["id"],
-        )
-        embedded_count += 1
+            embedded_count += 1
 
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -421,7 +437,7 @@ async def publish_manual(manual_id: int, admin: str = Depends(require_admin)):
                 "UPDATE manual_files SET status = 'published', published_at = now() WHERE id = $1",
                 manual_id,
             )
-    return {"ok": True, "embedded_chunks": embedded_count}
+    return {"ok": True, "embedded_chunks": embedded_count, "embed_failed": failed}
 
 
 @router.post("/{manual_id}/unpublish")
@@ -503,13 +519,19 @@ async def reembed(limit: int = 300, admin: str = Depends(require_admin)):
         "ORDER BY c.id LIMIT $3",
         model, dim, max(1, min(int(limit), 1000)),
     )
-    done = 0
-    for c in rows:
-        try:
-            vec = await embed_text(_embed_input(
-                c["title"], c["doc_title"], c["section_title"], c["chunk_text"]))
-        except Exception as e:  # noqa: BLE001
-            raise HTTPException(503, f"임베딩 서버 오류로 중단했습니다({done}개 완료). 원인: {e}")
+    try:
+        vectors = await embed_texts([
+            _embed_input(c["title"], c["doc_title"], c["section_title"], c["chunk_text"])
+            for c in rows
+        ])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(503, f"임베딩 서버 오류로 중단했습니다. 원인: {e}")
+
+    done, failed = 0, 0
+    for c, vec in zip(rows, vectors):
+        if vec is None:
+            failed += 1
+            continue
         if len(vec) != dim:
             raise HTTPException(
                 500, f"임베딩 차원이 맞지 않습니다(모델 {len(vec)} vs 스키마 {dim}). "
@@ -520,7 +542,7 @@ async def reembed(limit: int = 300, admin: str = Depends(require_admin)):
         done += 1
     remaining = await pool.fetchval(
         f"SELECT count(*) FROM manual_chunks WHERE {_stale_where()}", model, dim)
-    return {"processed": done, "remaining": remaining}
+    return {"processed": done, "remaining": remaining, "embed_failed": failed}
 
 
 # ---------------------------------------------------------------- 검색 진단
