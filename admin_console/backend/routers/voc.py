@@ -1,6 +1,8 @@
 """
 VOC(사용자/운영자 질의응답 이력) 관리 API.
-개별 등록/수정/삭제와, 엑셀(question/answer/department/resolved 컬럼) 일괄 업로드를 지원한다.
+개별 등록/수정/삭제와, 엑셀·CSV·TSV 열 매핑 일괄 업로드를 지원한다.
+질문/답변만 다룬다 - 부서·해결여부는 실제로 쓰이지 않아 화면과 API에서 제외했다
+(DB 컬럼은 기존 데이터를 위해 남겨 두고 새 등록 시 기본값이 들어간다).
 """
 import tempfile
 import uuid
@@ -12,7 +14,7 @@ from pydantic import BaseModel
 
 from auth import require_admin
 from cleaning import clean_text
-from db import get_pool, embed_text, vector_literal
+from db import get_pool, embed_text, embed_texts, vector_literal
 from server_files import read_upload_or_server_file
 from spreadsheet import TABLE_EXTS, read_table_meta, load_table_rows
 from uploads import (
@@ -32,10 +34,9 @@ _EXCLUDED_SATISFACTION = {"불만족", "매우불만족"}
 
 
 class VocIn(BaseModel):
+    # 부서/해결 여부는 실제로 쓰이지 않아 화면과 API에서 뺐다(DB 컬럼은 기존 데이터를 위해 유지).
     question: str
     answer: str
-    department: str | None = None
-    resolved: bool = True
 
 
 @router.get("")
@@ -57,8 +58,7 @@ async def list_voc(q: str | None = None, batch_id: str | None = None,
     )
     rows = await pool.fetch(
         """
-        SELECT id, question, answer, department, resolved, created_at,
-               batch_id, source_file
+        SELECT id, question, answer, created_at, batch_id, source_file
         FROM voc_records
         WHERE ($1::text IS NULL OR question ILIKE '%' || $1 || '%')
           AND ($2::text IS NULL OR batch_id = $2)
@@ -121,13 +121,11 @@ async def create_voc(body: VocIn, admin: str = Depends(require_admin)):
     pool = await get_pool("voc_db_dsn")
     row_id = await pool.fetchval(
         """
-        INSERT INTO voc_records (question, answer, department, resolved, embedding)
-        VALUES ($1, $2, $3, $4, $5::vector) RETURNING id
+        INSERT INTO voc_records (question, answer, embedding)
+        VALUES ($1, $2, $3::vector) RETURNING id
         """,
         body.question,
         body.answer,
-        body.department,
-        body.resolved,
         vector_literal(vec),
     )
     return {"id": row_id}
@@ -139,13 +137,11 @@ async def update_voc(voc_id: int, body: VocIn, admin: str = Depends(require_admi
     pool = await get_pool("voc_db_dsn")
     row = await pool.fetchrow(
         """
-        UPDATE voc_records SET question=$1, answer=$2, department=$3, resolved=$4, embedding=$5::vector
-        WHERE id=$6 RETURNING id
+        UPDATE voc_records SET question=$1, answer=$2, embedding=$3::vector
+        WHERE id=$4 RETURNING id
         """,
         body.question,
         body.answer,
-        body.department,
-        body.resolved,
         vector_literal(vec),
         voc_id,
     )
@@ -197,30 +193,28 @@ async def _insert_many(pool, items, batch: dict) -> tuple[int, int, list[str]]:
     """일괄 등록((question, answer, department, resolved) 튜플들). 한 건이 실패해도
     전체를 버리지 않는다.
 
-    행마다 임베딩 서버를 호출하므로 특정 행에서만 실패할 수 있다(예: 본문이 너무 긴 건).
-    예전에는 그 한 건에서 예외가 위로 튀어 **나머지 수백 건이 통째로 날아갔다**
-    (333건 중 16건만 등록되고 500). 이제 실패한 행은 임베딩 없이 저장하고 계속 진행한다
-    - 벡터 검색에서만 빠지고 키워드·3gram 검색에는 잡히므로 데이터를 잃지 않는다.
-    다만 임베딩 서버 자체가 죽은 경우까지 수백 건을 밀어 넣으면 안 되므로,
-    연속 실패가 이어지면 중단한다.
+    특정 행에서만 임베딩이 실패할 수 있다(예: 본문이 유난히 긴 건). 예전에는 그 한 건에서
+    예외가 위로 튀어 **나머지 수백 건이 통째로 날아갔다**(333건 중 16건만 등록되고 500).
+    지금은 실패한 행을 임베딩 없이 저장하고 계속 진행한다 - 벡터 검색에서만 빠지고
+    키워드·3gram 검색에는 잡히므로 데이터를 잃지 않는다.
+    임베딩 서버 자체가 죽은 경우는 embed_texts가 연속 실패를 감지해 예외를 던진다.
     """
+    # 임베딩은 **묶어서** 한 번에 처리한다. 행마다 호출하면 2천 행 = 요청 2천 번이라
+    # 몇 분씩 걸리고, 그동안 화면이 멈춘 것처럼 보인다.
+    try:
+        vectors = await embed_texts([f"{q}\n{a}" for q, a, _d, _r in items])
+    except Exception as e:  # noqa: BLE001
+        # 연속 실패 = 임베딩 서버 자체 문제. 아무것도 넣지 않고 중단한다.
+        raise HTTPException(
+            503,
+            f"임베딩 서버 오류로 등록을 중단했습니다(저장된 행 없음). "
+            f"임베딩 서버를 확인한 뒤 다시 등록하세요. 원인: {e}")
+
     inserted, skipped, failures = 0, 0, []
-    consecutive = 0
-    for i, (q, a, dept, resolved) in enumerate(items, start=1):
-        vec = None
-        try:
-            vec = await embed_text(f"{q}\n{a}")
-            consecutive = 0
-        except Exception as e:  # noqa: BLE001
-            consecutive += 1
-            failures.append(f"{i}행: {str(e)[:120]}")
-            if consecutive >= 5:
-                raise HTTPException(
-                    503,
-                    f"임베딩 서버 오류가 {consecutive}건 연속 발생해 중단했습니다"
-                    f"({len(items)}건 중 {inserted}건 등록됨). "
-                    f"VOC 탭 '업로드 묶음'에서 이번 묶음을 삭제하고, 임베딩 서버를 확인한 뒤 "
-                    f"다시 등록하세요. 마지막 오류: {e}")
+    for i, ((q, a, dept, resolved), vec) in enumerate(zip(items, vectors), start=1):
+        if vec is None:
+            # 그 행만 임베딩 없이 저장한다 - 벡터 검색에서만 빠지고 키워드·3gram에는 잡힌다.
+            failures.append(f"{i}행: 임베딩 실패(본문이 너무 길거나 형식이 특이한 행)")
         if await _insert_voc(pool, q, a, dept, resolved, batch, embedding=vec):
             inserted += 1
         else:
@@ -372,23 +366,16 @@ async def preview_voc_table(
         "suggest": {
             "question_column": _guess(header, ["의뢰내용", "question", "문의", "질문", "요청"]),
             "answer_column": _guess(header, ["처리내용", "answer", "답변", "조치", "회신"]),
-            "department_column": _guess(header, ["department", "부서", "팀"]),
-            "exclude_column": _guess(header, ["만족도", "satisfaction"]),
         },
     }
 
 
 class VocTableCommitIn(BaseModel):
-    """exclude_column/exclude_values: 특정 열의 값이 이 목록에 있으면 건너뛴다
-    (사내 표준 포맷의 '만족도=불만족/매우불만족' 제외 규칙을 일반화한 것).
-    require_columns: 이 열들이 비어 있는 행은 건너뛴다(예: 조치일이 없는 미처리 건)."""
+    """require_columns: 이 열들이 비어 있는 행은 건너뛴다(예: 조치일이 없는 미처리 건)."""
     upload_id: str
     header_row: int | None = None
     question_column: str
     answer_column: str
-    department_column: str | None = None
-    exclude_column: str | None = None
-    exclude_values: list[str] = []
     require_columns: list[str] = []
 
 
@@ -401,7 +388,7 @@ async def commit_voc_table(body: VocTableCommitIn, admin: str = Depends(require_
         for label, col in (("질문", body.question_column), ("답변", body.answer_column)):
             if col not in col_idx:
                 raise ValueError(f"{label} 열이 파일에 없습니다: {col}")
-        for col in [body.department_column, body.exclude_column, *body.require_columns]:
+        for col in body.require_columns:
             if col and col not in col_idx:
                 raise ValueError(f"존재하지 않는 열입니다: {col}")
 
@@ -411,21 +398,16 @@ async def commit_voc_table(body: VocTableCommitIn, admin: str = Depends(require_
             v = row[col_idx[col]]
             return None if v is None else str(v).strip()
 
-        excluded = {v.strip() for v in body.exclude_values if v.strip()}
         built, skipped = [], 0
         for row in rows:
             if any(not cell(row, c) for c in body.require_columns):
-                skipped += 1
-                continue
-            if body.exclude_column and (cell(row, body.exclude_column) or "") in excluded:
                 skipped += 1
                 continue
             q, a = cell(row, body.question_column), cell(row, body.answer_column)
             if not q or not a:
                 skipped += 1
                 continue
-            built.append((clean_text(q), clean_text(a),
-                          cell(row, body.department_column), True))
+            built.append((clean_text(q), clean_text(a), None, True))
         return built, skipped
 
     # 실패해도 세션을 지우지 않는다. 예전에는 finally로 무조건 지워서, 등록이 한 번

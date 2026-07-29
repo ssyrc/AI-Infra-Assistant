@@ -41,20 +41,15 @@ def classify_handling(answer: str | None) -> str:
 
 
 @mcp.tool()
-async def search_voc(
-    query: str,
-    top_k: int = 5,
-    department: str | None = None,
-    resolved_only: bool = True,
-) -> list[dict]:
+async def search_voc(query: str, top_k: int = 5) -> list[dict]:
     """과거 VOC(사용자/운영자 질의응답) 이력에서 유사 사례와 해결 방법을 검색한다.
 
     사용할 때: "예전에 이런 문제 어떻게 해결했나", 오류/증상 기반으로 선례를 찾을 때.
     쓰지 말 것: 공식 사용법·절차만 물은 경우(→ 매뉴얼 검색). 매뉴얼과 선례가 모두 유용할 것
       같으면 두 툴을 함께 호출해 종합한다.
 
-    의미+키워드 하이브리드 검색이라 정확한 문구가 아니어도 된다. 결과는 **확정된 절차가 아니라
-    과거 사례**이므로 그렇게 드러나게 답한다.
+    의미+키워드+3gram 하이브리드 검색이라 정확한 문구가 아니어도 된다. 결과는 **확정된 절차가
+    아니라 과거 사례**이므로 그렇게 드러나게 답한다.
 
     각 항목의 handled_by로 답변 방식을 정한다.
       "user" — 매뉴얼/단순 안내로 해결된 건. 그 방법을 지금 질문에 맞게 정리해 안내한다.
@@ -64,14 +59,13 @@ async def search_voc(
 
     개인·조직 식별 정보(계정/이메일/이름/부서)는 이미 자리표시자로 치환되어 반환된다.
     자리표시자를 실제 값처럼 추측해 채우지 않는다.
+    본문이 길면 앞부분만 실려 온다(뒤가 잘렸으면 "…(이하 생략)"이 보인다).
 
     Args:
         query: 사용자 질문 또는 증상/오류 메시지. 예: "로그인 시 500 오류"
         top_k: 반환할 최대 건수(기본 5)
-        department: 특정 부서로 한정(없으면 전체). 확실치 않으면 지정하지 않는다.
-        resolved_only: True면 해결 완료 사례만(기본 True). 미해결 사례도 보려면 False.
     Returns:
-        사례 리스트. 각 항목에 question, answer, department, resolved, created_at,
+        사례 리스트. 각 항목에 question, answer, created_at,
         handled_by("user"|"operator")가 있다.
     """
     if not query or not query.strip():
@@ -93,16 +87,14 @@ async def search_voc(
     if vec is None:
         rows = await pool.fetch(
             """
-            SELECT id, question, answer, department, resolved, created_at,
+            SELECT id, question, answer, created_at,
                    ts_rank(tsv, to_tsquery('simple', $1)) AS score
             FROM voc_records
-            WHERE ($2::text IS NULL OR department = $2)
-              AND ($3::boolean IS FALSE OR resolved = true)
-              AND tsv @@ to_tsquery('simple', $1)
+            WHERE tsv @@ to_tsquery('simple', $1)
             ORDER BY score DESC
-            LIMIT $4
+            LIMIT $2
             """,
-            ts_query, department, resolved_only, candidate_k,
+            ts_query, candidate_k,
         )
     elif use_trgm:
         # 3축 RRF: 벡터(의미) + 키워드(정확 일치) + 3-gram(한국어 부분 일치)
@@ -110,31 +102,22 @@ async def search_voc(
             """
             WITH vector_search AS (
                 SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> $1::vector) AS rank
-                FROM voc_records
-                WHERE ($2::text IS NULL OR department = $2)
-                  AND ($3::boolean IS FALSE OR resolved = true)
-                  AND embedding IS NOT NULL
+                FROM voc_records WHERE embedding IS NOT NULL
                 ORDER BY embedding <=> $1::vector LIMIT 50
             ),
             keyword_search AS (
                 SELECT id, ROW_NUMBER() OVER (
-                    ORDER BY ts_rank(tsv, to_tsquery('simple', $4)) DESC) AS rank
-                FROM voc_records
-                WHERE ($2::text IS NULL OR department = $2)
-                  AND ($3::boolean IS FALSE OR resolved = true)
-                  AND tsv @@ to_tsquery('simple', $4)
-                LIMIT 50
+                    ORDER BY ts_rank(tsv, to_tsquery('simple', $2)) DESC) AS rank
+                FROM voc_records WHERE tsv @@ to_tsquery('simple', $2) LIMIT 50
             ),
             trgm_search AS (
-                -- similarity()가 아니라 word_similarity()를 쓴다. similarity는 문자열
-                -- '전체'의 3-gram 자카드라 문의 본문이 길수록 0에 수렴해(500자면 0.04)
-                -- 임계값 0.3을 절대 못 넘겼다 = 이 축이 항상 0건이었다.
+                -- similarity()가 아니라 word_similarity(). similarity는 문자열 '전체'의
+                -- 3-gram 자카드라 본문이 길수록 0에 수렴해 임계값을 못 넘는다
+                -- (= 이 축이 항상 0건이었다).
                 SELECT id, ROW_NUMBER() OVER (
-                    ORDER BY word_similarity($5, question || ' ' || answer) DESC) AS rank
+                    ORDER BY word_similarity($3, question || ' ' || answer) DESC) AS rank
                 FROM voc_records
-                WHERE ($2::text IS NULL OR department = $2)
-                  AND ($3::boolean IS FALSE OR resolved = true)
-                  AND word_similarity($5, question || ' ' || answer) >= $6
+                WHERE word_similarity($3, question || ' ' || answer) >= $4
                 LIMIT 50
             ),
             fused AS (
@@ -145,52 +128,39 @@ async def search_voc(
                 FULL OUTER JOIN keyword_search k ON v.id = k.id
                 FULL OUTER JOIN trgm_search t ON COALESCE(v.id, k.id) = t.id
             )
-            SELECT r.id, r.question, r.answer, r.department, r.resolved, r.created_at,
-                   fused.rrf_score AS score
+            SELECT r.id, r.question, r.answer, r.created_at, fused.rrf_score AS score
             FROM fused
             JOIN voc_records r ON r.id = fused.id
             ORDER BY fused.rrf_score DESC
-            LIMIT $7
+            LIMIT $5
             """,
-            vector_literal(vec), department, resolved_only, ts_query, query,
-            await trgm_min_similarity(), candidate_k,
+            vector_literal(vec), ts_query, query, await trgm_min_similarity(), candidate_k,
         )
     else:
         rows = await pool.fetch(
             """
             WITH vector_search AS (
                 SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> $1::vector) AS rank
-                FROM voc_records
-                WHERE ($2::text IS NULL OR department = $2)
-                  AND ($3::boolean IS FALSE OR resolved = true)
-                  AND embedding IS NOT NULL
-                ORDER BY embedding <=> $1::vector
-                LIMIT 50
+                FROM voc_records WHERE embedding IS NOT NULL
+                ORDER BY embedding <=> $1::vector LIMIT 50
             ),
             keyword_search AS (
                 SELECT id, ROW_NUMBER() OVER (
-                    ORDER BY ts_rank(tsv, to_tsquery('simple', $4)) DESC
-                ) AS rank
-                FROM voc_records
-                WHERE ($2::text IS NULL OR department = $2)
-                  AND ($3::boolean IS FALSE OR resolved = true)
-                  AND tsv @@ to_tsquery('simple', $4)
-                LIMIT 50
+                    ORDER BY ts_rank(tsv, to_tsquery('simple', $2)) DESC) AS rank
+                FROM voc_records WHERE tsv @@ to_tsquery('simple', $2) LIMIT 50
             ),
             fused AS (
                 SELECT COALESCE(v.id, k.id) AS id,
-                       COALESCE(1.0 / (60 + v.rank), 0) + COALESCE(1.0 / (60 + k.rank), 0) AS rrf_score
-                FROM vector_search v
-                FULL OUTER JOIN keyword_search k ON v.id = k.id
+                       COALESCE(1.0/(60+v.rank),0) + COALESCE(1.0/(60+k.rank),0) AS rrf_score
+                FROM vector_search v FULL OUTER JOIN keyword_search k ON v.id = k.id
             )
-            SELECT r.id, r.question, r.answer, r.department, r.resolved, r.created_at,
-                   fused.rrf_score AS score
+            SELECT r.id, r.question, r.answer, r.created_at, fused.rrf_score AS score
             FROM fused
             JOIN voc_records r ON r.id = fused.id
             ORDER BY fused.rrf_score DESC
-            LIMIT $5
+            LIMIT $3
             """,
-            vector_literal(vec), department, resolved_only, ts_query, candidate_k,
+            vector_literal(vec), ts_query, candidate_k,
         )
 
     candidates = [dict(r) for r in rows]
@@ -220,7 +190,7 @@ async def search_voc(
         item["question"] = clip(item.get("question"))
         item["answer"] = clip(item.get("answer"))
         # 개인·조직 식별 정보는 에이전트에 넘기기 전에 지운다(프롬프트에 원문이 들어가지 않게).
-        item = mask_record(item, ("question", "answer", "department"))
+        item = mask_record(item, ("question", "answer"))
         item["rerank_score"] = rr_score
         result.append(item)
 

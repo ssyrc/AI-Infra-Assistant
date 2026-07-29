@@ -573,7 +573,7 @@ function ManualsPanel() {
 function VocPanel() {
   const [items, setItems] = useState([]);
   const [q, setQ] = useState("");
-  const [form, setForm] = useState({ question: "", answer: "", department: "", resolved: true });
+  const [form, setForm] = useState({ question: "", answer: "" });
   const [editingId, setEditingId] = useState(null);
   const [showBrowser, setShowBrowser] = useState(false);
 
@@ -632,18 +632,17 @@ function VocPanel() {
     } else {
       await api("/api/voc", { method: "POST", body: JSON.stringify(form) });
     }
-    setForm({ question: "", answer: "", department: "", resolved: true });
+    setForm({ question: "", answer: "" });
     setEditingId(null);
     load();
   };
 
-  const edit = (row) => { setForm(row); setEditingId(row.id); };
+  const edit = (row) => { setForm({ question: row.question, answer: row.answer }); setEditingId(row.id); };
   const remove = async (id) => { if (confirm("삭제할까요?")) { await api(`/api/voc/${id}`, { method: "DELETE" }); load(); } };
 
   // 엑셀/CSV: 헤더 행을 자동으로 찾고 열을 골라 등록한다(형식 고정 없음).
   const [tbl, setTbl] = useState(null);   // {upload_id, columns, sample_rows, header_row, ...}
-  const [map, setMap] = useState({ question_column: "", answer_column: "", department_column: "",
-                                   exclude_column: "", exclude_values: "", require_columns: [] });
+  const [map, setMap] = useState({ question_column: "", answer_column: "", require_columns: [] });
   const [busy, setBusy] = useState(false);
   const [lastFile, setLastFile] = useState(null);
 
@@ -661,9 +660,6 @@ function VocPanel() {
       setMap({
         question_column: data.suggest.question_column,
         answer_column: data.suggest.answer_column,
-        department_column: data.suggest.department_column,
-        exclude_column: data.suggest.exclude_column,
-        exclude_values: data.suggest.exclude_column ? "불만족, 매우불만족" : "",
         require_columns: [],
       });
     } catch (e) { alert("전처리 실패: " + e.message); }
@@ -681,9 +677,6 @@ function VocPanel() {
           header_row: tbl.header_row,
           question_column: map.question_column,
           answer_column: map.answer_column,
-          department_column: map.department_column || null,
-          exclude_column: map.exclude_column || null,
-          exclude_values: map.exclude_values.split(",").map(v => v.trim()).filter(Boolean),
           require_columns: map.require_columns,
         }),
       });
@@ -716,13 +709,11 @@ function VocPanel() {
       <div className="card">
         <div className="toolbar">
           <input placeholder="질문" value={form.question} onChange={e => setForm({...form, question: e.target.value})} style={{flex: 1}} />
-          <input placeholder="부서(선택)" value={form.department || ""} onChange={e => setForm({...form, department: e.target.value})} style={{width: 140}} />
-          <label style={{fontSize: 12.5}}><input type="checkbox" checked={form.resolved} onChange={e => setForm({...form, resolved: e.target.checked})} /> 해결됨</label>
         </div>
         <textarea placeholder="답변" value={form.answer} onChange={e => setForm({...form, answer: e.target.value})} rows={3} style={{width: "100%", marginTop: 8}} />
         <div className="toolbar" style={{marginTop: 8}}>
           <button className="primary" onClick={submit}>{editingId ? "수정 저장" : "등록"}</button>
-          {editingId && <button onClick={() => { setEditingId(null); setForm({ question: "", answer: "", department: "", resolved: true }); }}>취소</button>}
+          {editingId && <button onClick={() => { setEditingId(null); setForm({ question: "", answer: "" }); }}>취소</button>}
           <span style={{marginLeft: "auto", display: "flex", alignItems: "center", gap: 6}}>
             <input type="file" accept=".xlsx,.xls,.csv,.tsv" disabled={busy}
                    onChange={e => { importFile(e.target.files[0]); e.target.value = ""; }} />
@@ -752,15 +743,6 @@ function VocPanel() {
           <div style={{display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12}}>
             {colSel("question_column", "질문(question) *")}
             {colSel("answer_column", "답변(answer) *")}
-            {colSel("department_column", "부서(선택)")}
-            {colSel("exclude_column", "제외 기준 열(선택)")}
-            {map.exclude_column && (
-              <label style={{fontSize: 12.5, display: "flex", flexDirection: "column", gap: 4}}>
-                <span style={{color: "var(--muted)"}}>이 값이면 제외(콤마 구분)</span>
-                <input value={map.exclude_values} style={{width: 180}}
-                       onChange={e => setMap({...map, exclude_values: e.target.value})} />
-              </label>
-            )}
           </div>
           <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 10}}>
             비어 있으면 그 행을 건너뛸 열(선택):{" "}
@@ -788,7 +770,12 @@ function VocPanel() {
           )}
           <div className="row-actions">
             <button className="primary" disabled={busy} onClick={commitTable}>매핑대로 일괄 등록</button>
-            <button onClick={() => setTbl(null)}>취소</button>
+            <button disabled={busy} onClick={() => setTbl(null)}>취소</button>
+            {busy && (
+              <span style={{fontSize: 12.5, color: "var(--muted)"}}>
+                등록 중입니다… {tbl.total_rows}행을 임베딩하고 저장하는 중이니 창을 닫지 마세요.
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -853,7 +840,7 @@ function VocPanel() {
             <input type="checkbox" checked={allChecked} onChange={toggleAll}
                    title="이 페이지 전체 선택" />
           </th>
-          <th>질문</th><th>답변</th><th>부서</th><th>해결</th><th>출처 파일</th><th>등록일</th><th></th>
+          <th>질문</th><th>답변</th><th>출처 파일</th><th>등록일</th><th></th>
         </tr></thead>
         <tbody>
           {items.map(v => (
@@ -861,8 +848,6 @@ function VocPanel() {
               <td><input type="checkbox" checked={selected.includes(v.id)} onChange={() => toggleOne(v.id)} /></td>
               <td style={{maxWidth: 260}}>{v.question}</td>
               <td style={{maxWidth: 320}}>{v.answer}</td>
-              <td>{v.department || "-"}</td>
-              <td><Badge value={v.resolved} /></td>
               <td style={{fontSize: 12, color: "var(--muted)", maxWidth: 160}}>{v.source_file || "-"}</td>
               <td>{new Date(v.created_at).toLocaleDateString()}</td>
               <td className="row-actions">
@@ -871,7 +856,7 @@ function VocPanel() {
               </td>
             </tr>
           ))}
-          {items.length === 0 && <tr><td colSpan="8" className="empty">기록이 없습니다.</td></tr>}
+          {items.length === 0 && <tr><td colSpan="6" className="empty">기록이 없습니다.</td></tr>}
         </tbody>
       </table>
     </div>

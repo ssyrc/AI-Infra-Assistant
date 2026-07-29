@@ -142,6 +142,114 @@ async def embed_text(text: str) -> list[float]:
     return vec
 
 
+async def embed_texts(texts: list[str], batch_size: int = 32,
+                      max_consecutive_failures: int = 5) -> list[list[float] | None]:
+    """여러 건을 **한 번의 요청에 묶어서** 임베딩한다. 실패한 자리는 None으로 채운다.
+
+    왜 필요한가: 일괄 등록에서 행마다 embed_text()를 부르면 수천 번 왕복한다.
+    2천 행이면 요청도 2천 번이라 몇 분이 걸리고, 그동안 화면에는 아무 변화가 없어
+    "등록 버튼을 눌러도 아무 일도 안 일어난다"로 보인다.
+    OpenAI 호환 임베딩 API는 input에 배열을 받으므로 묶어 보내면 왕복이 수십 번으로 준다.
+
+    한 배치가 통째로 실패하면(입력 하나가 너무 길거나 형식이 이상한 경우) 그 배치만
+    한 건씩 다시 시도해 **문제 있는 행만 골라낸다.** 서버 자체가 죽은 경우까지 계속
+    두드리지 않도록, 연속 실패가 이어지면 예외를 던진다.
+    """
+    if not texts:
+        return []
+    out: list[list[float] | None] = []
+    consecutive = 0
+    for start in range(0, len(texts), max(1, batch_size)):
+        chunk = texts[start:start + max(1, batch_size)]
+        try:
+            vecs = await _embed_batch(chunk)
+            out.extend(vecs)
+            consecutive = 0
+            continue
+        except Exception as e:  # noqa: BLE001
+            print(f"[db] 임베딩 배치 실패({start}~{start + len(chunk) - 1}), "
+                  f"한 건씩 재시도: {type(e).__name__}: {e}")
+        for text in chunk:
+            try:
+                out.append(await embed_text(text))
+                consecutive = 0
+            except Exception as e:  # noqa: BLE001
+                out.append(None)
+                consecutive += 1
+                print(f"[db] 임베딩 실패(건너뜀): {type(e).__name__}: {e}")
+                if consecutive >= max_consecutive_failures:
+                    raise RuntimeError(
+                        f"임베딩이 {consecutive}건 연속 실패해 중단했습니다"
+                        f"({len(out)}/{len(texts)}건 처리). 마지막 오류: {e}")
+    return out
+
+
+async def _embed_batch(texts: list[str]) -> list[list[float]]:
+    """여러 입력을 한 요청으로 임베딩한다(캐시된 것은 건너뛴다)."""
+    model = await get_config("vllm_embed_model", "bge-m3")
+    try:
+        max_chars = int(await get_config("embed_max_chars", str(DEFAULT_EMBED_MAX_CHARS)))
+    except (TypeError, ValueError):
+        max_chars = DEFAULT_EMBED_MAX_CHARS
+    prepared = [(t or "")[:max_chars] if max_chars > 0 else (t or "") for t in texts]
+
+    redis = await _get_redis()
+    keys: list[str | None] = [None] * len(prepared)
+    result: list[list[float] | None] = [None] * len(prepared)
+    todo: list[int] = []
+    for i, t in enumerate(prepared):
+        if redis is not None:
+            keys[i] = await _cache_key(t, model)
+            try:
+                cached = await redis.get(keys[i])
+                if cached:
+                    result[i] = json.loads(cached)
+                    continue
+            except Exception as e:  # noqa: BLE001
+                print(f"[db] 캐시 조회 실패(무시): {e}")
+        todo.append(i)
+
+    if todo:
+        base_url = await get_config("vllm_embed_base_url")
+        if not base_url:
+            raise RuntimeError(
+                "vllm_embed_base_url이 설정되지 않았습니다. 관리자 콘솔 > 설정에서 등록하세요.")
+        client = await get_http_client()
+        resp = await client.post(
+            f"{base_url.rstrip('/')}/embeddings",
+            json={"model": model, "input": [prepared[i] for i in todo]},
+            timeout=httpx.Timeout(120.0, connect=5.0),   # 묶어 보내므로 넉넉히
+        )
+        if resp.status_code >= 400:
+            raise RuntimeError(
+                f"임베딩 서버가 {resp.status_code}를 반환했습니다(모델 {model}, {len(todo)}건): "
+                f"{resp.text[:300]}")
+        data = resp.json().get("data", [])
+        if len(data) != len(todo):
+            raise RuntimeError(
+                f"임베딩 응답 개수가 맞지 않습니다(요청 {len(todo)}건, 응답 {len(data)}건).")
+        # index가 있으면 그대로 쓰고(순서 보장이 명시되지 않은 서버 대비), 없으면 순서대로.
+        for pos, item in enumerate(data):
+            idx = item.get("index", pos) if isinstance(item, dict) else pos
+            if not isinstance(idx, int) or not (0 <= idx < len(todo)):
+                idx = pos
+            result[todo[idx]] = item["embedding"]
+
+        if redis is not None:
+            try:
+                ttl = int(await get_config("embed_cache_ttl_seconds", "86400"))
+                for i in todo:
+                    if keys[i] and result[i] is not None:
+                        await redis.set(keys[i], json.dumps(result[i]), ex=ttl)
+            except Exception as e:  # noqa: BLE001
+                print(f"[db] 캐시 저장 실패(무시): {e}")
+
+    missing = [i for i, v in enumerate(result) if v is None]
+    if missing:
+        raise RuntimeError(f"임베딩 결과가 비어 있는 항목이 있습니다: {missing[:5]}")
+    return result  # type: ignore[return-value]
+
+
 async def rerank(query: str, documents: list[str], top_k: int) -> list[tuple[int, float]]:
     """리랭커로 (원본인덱스, 점수) 상위 top_k를 반환한다.
 
