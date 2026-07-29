@@ -8,6 +8,7 @@
 DB가 필요한 테스트는 TEST_PG_DSN 환경변수가 있을 때만 실행된다.
 """
 import os
+import re
 import sys
 import asyncio
 
@@ -222,3 +223,31 @@ def test_command_mcp_has_no_hardcoded_command_tool():
     props = {t.name: t.inputSchema["properties"] for t in asyncio.run(m.mcp.list_tools())}
     assert "user_id" not in props["run_command"], "user_id는 LLM에 노출되면 안 됨"
     assert "command" in props["run_command"]
+    # 카탈로그 검색(RAG)은 걷어냈다 - 카탈로그는 툴로 노출한다(System MCP와 동일 방식).
+    assert "search_commands" not in props, "커맨드 검색 툴이 다시 생기면 안 됨"
+
+
+# --- 7-2번: 카탈로그 툴 이름은 ASCII이고, 재시작해도 바뀌지 않아야 한다 -------------
+# OpenAI 호환 함수 이름 규칙은 [a-zA-Z0-9_-]{1,64}라 한글 이름을 그대로 쓸 수 없다.
+# 또 파이썬 hash()는 프로세스마다 값이 달라져 이름이 매번 바뀌므로 고정 해시를 써야 한다.
+def test_catalog_tool_names_are_ascii_and_stable():
+    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "command_mcp"))
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "cattools_test", os.path.join(ROOT, "mcp_servers", "command_mcp", "catalog_tools.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+
+    cases = [("myquota", "myquota"), ("phd info", "phd info -u {user_id}"),
+             ("내 작업 조회", "phd info -u {user_id}"), ("작업목록", ""), ("작업이력", "")]
+    taken, names = set(), []
+    for name, exe in cases:
+        n = m.tool_name_for(name, taken, exe)
+        taken.add(n)
+        names.append(n)
+    assert len(set(names)) == len(cases), f"툴 이름이 겹침: {names}"
+    for n in names:
+        assert re.fullmatch(r"[A-Za-z0-9_-]{1,64}", n), f"ASCII 규칙 위반: {n}"
+
+    # 같은 입력은 언제 불러도 같은 이름 (hash() 랜덤화에 영향받지 않아야)
+    assert m.tool_name_for("작업목록", set(), "") == m.tool_name_for("작업목록", set(), "")

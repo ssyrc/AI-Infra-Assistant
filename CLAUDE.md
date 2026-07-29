@@ -113,8 +113,10 @@ docker compose -f docker-compose.dev.yml up -d --no-build
 
 ## 4. MCP 역할 분담 (사용자 결정 사항)
 
-- **Command MCP**: 커맨드 카탈로그 **조회 + 실행**. 화이트리스트 없음 — 카탈로그에 등록된 커맨드는
-  전부 실행 가능(`run_command`). 카탈로그 등록 자체가 승인. host 미지정 시 로그인 서버에서 실행.
+- **Command MCP**: 커맨드 카탈로그의 행 하나 = **MCP 툴 하나**(RAG 검색 안 씀. #105).
+  에이전트가 툴 목록·설명을 보고 고른다. 카탈로그 등록 자체가 승인이고 화이트리스트는 없다.
+  미등록 커맨드(매뉴얼에서 찾은 것)는 `run_command`로 실행. 로그인 서버에서 실행.
+  **카탈로그를 고치면 command-mcp 재시작 필요**(툴 목록이 기동 시 1회 구성됨).
 - **System MCP**: 화이트리스트 관리는 **여기서만**. 항목별 on/off, 필요 역할,
   "분류"(`host_mode`: `login_server` 고정 실행 / `target_server` LLM이 서버 지정),
   콘솔에서 등록하는 커스텀 커맨드(argv_template).
@@ -126,6 +128,7 @@ docker compose -f docker-compose.dev.yml up -d --no-build
 |---|---|
 | 새 설정 키 / 마이그레이션 | `db-init` 재실행 필수 |
 | MCP 툴 추가·설명·`host_mode`·커스텀 커맨드 | 해당 MCP 컨테이너 재시작 |
+| **커맨드 카탈로그(커맨드 탭) 추가·수정** | `command-mcp` 재시작(툴 목록 재구성) |
 | `enabled` / `required_roles` | 실시간 반영(재시작 불필요) |
 | `agent_system_instruction` | non-force 시드라 **기존 DB에 자동 반영 안 됨** → 콘솔 설정 탭에 직접 붙여넣고 agent-server 재시작 |
 | `hot_reload=false` 설정값 | 해당 서비스 재시작(콘솔에 "지금 재시작" 버튼 있음) |
