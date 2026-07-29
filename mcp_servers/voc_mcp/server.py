@@ -197,12 +197,28 @@ async def search_voc(
     if not candidates:
         return []
 
-    docs = [f"{c['question']}\n{c['answer']}" for c in candidates]
+    # VOC 한 건이 수십만 자인 경우가 있다(긴 처리내용을 통째로 붙여 넣은 문의).
+    # 그대로 넘기면 리랭커 입력 한도를 넘기고, 에이전트 컨텍스트도 몇 건 만에 가득 찬다.
+    # 판단에 필요한 앞부분만 잘라서 쓴다(원문은 DB에 그대로 남아 있다).
+    try:
+        max_chars = int(await get_config("voc_result_max_chars", "2000"))
+    except (TypeError, ValueError):
+        max_chars = 2000
+
+    def clip(text):
+        t = text or ""
+        if max_chars > 0 and len(t) > max_chars:
+            return t[:max_chars] + "\n…(이하 생략)"
+        return t
+
+    docs = [f"{clip(c['question'])}\n{clip(c['answer'])}" for c in candidates]
     ranked = await rerank(query, docs, top_k * 2)   # MMR로 걸러질 것을 감안해 여유 있게
     result = []
     for idx, rr_score in ranked:
         item = candidates[idx]
         item["handled_by"] = classify_handling(item.get("answer"))
+        item["question"] = clip(item.get("question"))
+        item["answer"] = clip(item.get("answer"))
         # 개인·조직 식별 정보는 에이전트에 넘기기 전에 지운다(프롬프트에 원문이 들어가지 않게).
         item = mask_record(item, ("question", "answer", "department"))
         item["rerank_score"] = rr_score

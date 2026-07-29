@@ -440,6 +440,10 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
         # 보낸다. 0이면 자르지 않음(모델 한도가 더 큰 경우에만).
         ("embed_max_chars", "4000",
          "임베딩에 보낼 최대 글자 수(초과분은 잘림, 0이면 자르지 않음)", True, False, False),
+        # VOC 한 건이 수십만 자인 경우가 있어, 검색 결과로 넘길 때 앞부분만 자른다
+        # (원문은 DB에 그대로 남는다). 0이면 자르지 않음.
+        ("voc_result_max_chars", "2000",
+         "VOC 검색 결과에서 질문/답변 하나당 넘길 최대 글자 수(0이면 자르지 않음)", True, False, False),
         ("embed_cache_ttl_seconds", "86400", "쿼리 임베딩 캐시 TTL(초)", True, False, False),
         ("clean_policy_version", "1", "정제 정책 버전(캐시 키에 포함)", True, False, False),
         ("search_max_top_k", "20", "검색 top_k 상한", True, False, False),

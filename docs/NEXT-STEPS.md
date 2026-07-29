@@ -15,7 +15,7 @@ rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker compose -f docker-compose.dev.yml run --rm db-init   # embed_max_chars 키 추가
+docker compose -f docker-compose.dev.yml run --rm db-init   # embed_max_chars, voc_result_max_chars 키 추가
 bash scripts/restart-mounted.sh
 ```
 
@@ -24,9 +24,10 @@ bash scripts/restart-mounted.sh
 333행 중 16행만 들어간 상태입니다. 위쪽 **업로드 묶음**에서 그 묶음을 삭제하세요.
 (묶음 표에 없으면 목록에서 체크박스로 골라 **선택 삭제**)
 
-## 4. [웹] VOC 탭 — TSV 다시 등록
+## 4. [웹] VOC 탭 — TSV/CSV 다시 등록
 
 - 이제 **긴 행 하나 때문에 전체가 죽지 않습니다.** 끝까지 돌아갑니다.
+- `field larger than field limit`도 해결됐습니다(한 칸 상한 128KB → 64MB).
 - 등록이 끝나면 `N건 등록 · M건 제외` 뒤에 **임베딩 실패 건수와 사유**가 함께 뜹니다.
   그 내용을 그대로 전달해 주세요(0건이면 안 뜹니다).
 - 333행이면 몇 분 걸립니다. 창을 닫지 마세요.

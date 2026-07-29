@@ -11,6 +11,7 @@ CSV/TSV는 엑셀과 완전히 같은 "열 매핑" 흐름을 타도록 여기서
 """
 import csv
 import os
+import sys
 
 import openpyxl
 
@@ -21,6 +22,24 @@ EXCEL_EXTS = {".xlsx", ".xls"}
 TABLE_EXTS = EXCEL_EXTS | TEXT_TABLE_EXTS
 
 _CSV_ENCODINGS = ("utf-8-sig", "cp949", "utf-8", "latin-1")
+
+# csv 모듈의 기본 필드 상한은 128KB라, 셀 하나가 그보다 크면
+# `field larger than field limit (131072)`로 파일 전체를 읽지 못한다.
+# VOC 처리내용처럼 긴 본문 한 칸이 이 한도를 넘는 경우가 실제로 있다.
+# 업로드 자체가 upload_max_mb(기본 50MB)로 제한되므로, 그보다 넉넉한 값으로 올려 둔다
+# (플랫폼에 따라 C long을 넘으면 OverflowError가 나므로 절반씩 낮추며 시도).
+def _raise_field_size_limit(target: int = 64 * 1024 * 1024) -> int:
+    limit = target
+    while limit > 128 * 1024:
+        try:
+            csv.field_size_limit(limit)
+            return limit
+        except (OverflowError, ValueError):
+            limit //= 2
+    return csv.field_size_limit()
+
+
+CSV_FIELD_SIZE_LIMIT = _raise_field_size_limit()
 
 
 def _read_csv_all(path: str) -> list[list[str]]:
@@ -44,8 +63,21 @@ def _read_csv_all(path: str) -> list[list[str]]:
         except UnicodeDecodeError as e:
             last_err = e
             continue
+        except csv.Error as e:
+            # 인코딩 문제가 아니라 형식 문제이므로 다른 인코딩으로 재시도해도 소용없다.
+            raise _friendly_csv_error(e)
     raise ValueError(
         f"파일 인코딩을 인식할 수 없습니다(UTF-8 또는 CP949로 저장해 주세요): {last_err}")
+
+
+def _friendly_csv_error(e: csv.Error) -> ValueError:
+    msg = str(e)
+    if "field larger than field limit" in msg:
+        return ValueError(
+            f"한 칸의 내용이 너무 커서 읽지 못했습니다(현재 상한 {CSV_FIELD_SIZE_LIMIT:,}자). "
+            "따옴표가 짝이 맞지 않아 여러 행이 한 칸으로 붙었을 가능성이 큽니다 - "
+            f"원본 파일의 따옴표(\")를 확인해 주세요. 원인: {msg}")
+    return ValueError(f"파일을 파싱하지 못했습니다: {msg}")
 
 
 def _is_csv(path: str) -> bool:
