@@ -177,12 +177,14 @@ async def commit_command_excel(body: CommandExcelCommitIn, admin: str = Depends(
             built.append((name.strip(), desc, exec_command.strip() if exec_command else None))
         return built
 
+    # 실패해도 세션을 지우지 않는다(성공 시에만 정리). 무조건 지우면 등록이 한 번
+    # 실패했을 때 재시도가 404 '업로드 세션이 없거나 만료되었습니다'로 막혀
+    # 진짜 원인이 가려진다. 실패한 세션은 TTL(기본 60분)이 정리한다.
     try:
         items = await run_in_threadpool(_build, session["saved_path"])
     except ValueError as e:
         raise HTTPException(422, str(e))
-    finally:
-        await delete_upload_session(_DSN, body.upload_id)
+    await delete_upload_session(_DSN, body.upload_id)
 
     if not items:
         raise HTTPException(422, "등록할 커맨드가 없습니다. 이름/설명 열 선택을 확인하세요.")

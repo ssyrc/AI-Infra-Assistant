@@ -197,12 +197,13 @@ async def commit_document(body: DocCommitIn, uploaded_by: str = Depends(require_
     saved_options = load_options(session)
     opts = clean_options_from_dict(saved_options)
 
-    try:
-        parsed = await run_in_threadpool(
-            parse_file, session["saved_path"], opts,
-            bool(saved_options.get("include_speaker_notes", False)))
-    finally:
-        await delete_upload_session(_DSN, body.upload_id)
+    # 실패해도 세션을 지우지 않는다(성공 시에만 정리). 무조건 지우면 등록이 한 번
+    # 실패했을 때 재시도가 404 '업로드 세션이 없거나 만료되었습니다'로 막혀
+    # 진짜 원인이 가려진다. 실패한 세션은 TTL(기본 60분)이 정리한다.
+    parsed = await run_in_threadpool(
+        parse_file, session["saved_path"], opts,
+        bool(saved_options.get("include_speaker_notes", False)))
+    await delete_upload_session(_DSN, body.upload_id)
 
     if not parsed:
         raise HTTPException(422, "문서에서 추출된 내용이 없습니다.")
@@ -302,12 +303,14 @@ async def commit_excel(body: ExcelCommitIn, uploaded_by: str = Depends(require_a
             built.append((doc_title or None, section_title or None, page_no, content))
         return built
 
+    # 실패해도 세션을 지우지 않는다(성공 시에만 정리). 무조건 지우면 등록이 한 번
+    # 실패했을 때 재시도가 404 '업로드 세션이 없거나 만료되었습니다'로 막혀
+    # 진짜 원인이 가려진다. 실패한 세션은 TTL(기본 60분)이 정리한다.
     try:
         chunks = await run_in_threadpool(_build, session["saved_path"])
     except ValueError as e:
         raise HTTPException(422, str(e))
-    finally:
-        await delete_upload_session(_DSN, body.upload_id)
+    await delete_upload_session(_DSN, body.upload_id)
 
     if not chunks:
         raise HTTPException(422, "선택한 컬럼으로 만들어진 내용이 없습니다.")

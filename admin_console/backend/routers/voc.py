@@ -260,7 +260,7 @@ async def import_voc_excel(
     (1) 1행 헤더 Question/Answer(대소문자 무관, department/resolved 선택) — 이미 정제된 데이터용.
     (2) 사내 VOC 표준 포맷 — 4행 헤더(의뢰내용/조치일/처리내용/만족도), 조치일·처리내용 있는 행만,
         만족도 불만족/매우불만족 제외, 본문은 HTML 태그만 벗기고 그대로 보존."""
-    filename, content, _ = await read_upload_or_server_file(file, server_path, {".xlsx"})
+    _, content, filename = await read_upload_or_server_file(file, server_path, {".xlsx"})
     # 이 업로드에서 들어간 행들을 하나로 묶는다(콘솔에서 파일 단위로 보고 되돌리기 위함).
     batch = {"batch_id": uuid.uuid4().hex, "source_file": filename, "uploaded_by": admin}
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
@@ -390,12 +390,14 @@ async def commit_voc_table(body: VocTableCommitIn, admin: str = Depends(require_
             built.append((clean_text(q), clean_text(a), cell(row, body.department_column)))
         return built, skipped
 
+    # 실패해도 세션을 지우지 않는다. 예전에는 finally로 무조건 지워서, 등록이 한 번
+    # 실패하면(열 선택 오류·임베딩 서버 오류 등) 재시도할 때 "업로드 세션이 없거나
+    # 만료되었습니다"(404)가 떠 **진짜 원인이 404로 덮였다.** 성공했을 때만 정리하고,
+    # 실패한 세션은 TTL(기본 60분)이 알아서 치운다.
     try:
         items, skipped = await run_in_threadpool(_build, session["saved_path"])
     except ValueError as e:
         raise HTTPException(422, str(e))
-    finally:
-        await delete_upload_session(_DSN_VOC, body.upload_id)
 
     if not items:
         raise HTTPException(422, "등록할 행이 없습니다. 열 선택과 제외 조건을 확인하세요.")
@@ -406,9 +408,21 @@ async def commit_voc_table(body: VocTableCommitIn, admin: str = Depends(require_
              "source_file": session["filename"], "uploaded_by": admin}
     inserted = 0
     for q, a, dept in items:
-        if await _insert_voc(pool, q, a, dept, True, batch):
+        try:
+            ok = await _insert_voc(pool, q, a, dept, True, batch)
+        except Exception as e:  # noqa: BLE001
+            # 행마다 임베딩 서버를 호출하므로 도중에 끊길 수 있다. 몇 건까지 들어갔는지와
+            # 되돌리는 방법을 알려 준다(묶음 삭제 후 재시도하면 중복 없이 다시 올릴 수 있다).
+            raise HTTPException(
+                503,
+                f"{len(items)}건 중 {inserted}건을 넣은 뒤 임베딩 서버 오류로 중단했습니다. "
+                f"VOC 탭의 '업로드 묶음'에서 이번 묶음({batch['source_file']}, {inserted}건)을 "
+                f"삭제한 뒤 다시 등록하세요. 원인: {type(e).__name__}: {e}")
+        if ok:
             inserted += 1
         else:
             skipped += 1
+
+    await delete_upload_session(_DSN_VOC, body.upload_id)
     return {"inserted": inserted, "skipped": skipped, "total": len(items),
             "batch_id": batch["batch_id"], "source_file": session["filename"]}
