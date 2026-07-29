@@ -72,6 +72,18 @@ async def build_agent(caller_headers: dict | None = None,
         # 요청별 컨텍스트(예: 사용자 장기 메모리)를 시스템 지시문 뒤에 덧붙인다.
         instruction = f"{instruction}\n{extra_instruction}"
 
+    # ADK는 **문자열** instruction 안의 `{...}`를 세션 상태 변수로 보고 치환을 시도한다.
+    # 우리 지시문에는 개인정보 자리표시자(`{사업부명}` `{팀명}` 등)가 들어 있고, 한글은
+    # 파이썬 식별자로 인정되므로(`'사업부명'.isidentifier() == True`) 상태에 없는 변수로
+    # 판정돼 첫 요청부터 `Context variable not found: 사업부명.`으로 죽는다.
+    # (`{사용자 id}`처럼 공백이 든 것은 식별자가 아니라 그냥 통과했다 — 그래서 단어 하나짜리
+    #  자리표시자만 터졌다.)
+    # instruction을 콜러블(InstructionProvider)로 넘기면 ADK가 치환 단계를 통째로 건너뛴다
+    # (llm_agent.canonical_instruction의 bypass_state_injection=True).
+    # 장기 메모리로 붙는 사용자 대화 내용에 중괄호가 섞여도 같은 이유로 안전해진다.
+    def instruction_provider(_ctx=None, _text=instruction) -> str:
+        return _text
+
     urls = {
         "manual": await get_config("manual_mcp_url"),
         "command": await get_config("command_mcp_url"),
@@ -93,7 +105,7 @@ async def build_agent(caller_headers: dict | None = None,
     agent = Agent(
         model=LiteLlm(model=f"openai/{llm_model}", api_base=llm_base_url, api_key="not-needed"),
         name="ops_assistant",
-        instruction=instruction,
+        instruction=instruction_provider,
         generate_content_config=types.GenerateContentConfig(temperature=temperature),
         tools=list(toolsets),
     )

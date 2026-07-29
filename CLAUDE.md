@@ -94,7 +94,7 @@ docker compose -f docker-compose.dev.yml up -d --no-build
 | `rerank_base_url` | `http://75.23.32.41:8020/v1` (`tei`면 `/v1` 없이) |
 | `rerank_model` | `bge-reranker-v2-m3` |
 | `scheduler_login_host` | `login07` |
-| `agent_system_instruction` | `docs/NEXT-STEPS.md`의 전문 |
+| `agent_system_instruction` | `docs/NEXT-STEPS.md` **부록**의 전문 |
 
 - **왜 초기화되나**: `docker-compose.dev.yml`의 `dev-config` 서비스가 `up` 할 때마다 vLLM 주소를
   mock으로 되돌린다. 콘솔에서 저장한 값(`updated_by`가 관리자 계정)과 `.env`에 실제 주소를 넣은

@@ -1198,6 +1198,45 @@ gpfs.gpu1     yr9.choi          10,555           0   4,202,829           0
 `<details open>` 블록은 그대로다(Open WebUI가 답변 전에 펼친 채로 보여준다). 실패 시 사유가
 이 블록에 남으므로 디버깅용으로도 계속 쓸 수 있다.
 
+## 71. `Context variable not found: 사업부명` — ADK가 지시문의 `{...}`를 상태 변수로 치환한다 (완료)
+
+**증상.** "안녕" 한 마디에도 `[오류가 발생했습니다: 'Context variable not found: 사업부명.']`.
+질문 내용과 무관하게 **모든 요청**이 실패했다.
+
+**원인.** ADK는 `instruction`이 **문자열**이면 매 LLM 호출 전에
+`inject_session_state()`로 `{...}`를 세션 상태 변수로 치환한다
+(`google/adk/utils/instructions_utils.py`). 정규식 `r'{+[^{}]*}+'`로 잡은 뒤,
+이름이 유효한 식별자인데 상태에 없으면 `KeyError`를 던진다.
+
+우리가 #66에서 넣은 개인정보 자리표시자가 여기 걸렸다.
+```python
+'사업부명'.isidentifier()   # True  ← 한글도 파이썬 식별자다 → 상태 조회 → KeyError
+'사용자 id'.isidentifier()  # False ← 공백이 있어 식별자가 아님 → 그대로 통과
+```
+그래서 `{사업부명}` `{팀명}` `{센터명}` `{그룹명}` `{파트명}` 처럼 **한 단어짜리 한글
+자리표시자만** 터졌고, `{사용자 id}` `{사용자 이름}`은 멀쩡했다. 에러가 하필 `사업부명`을
+가리킨 것도 이 때문이다(앞에서부터 처음 걸린 것).
+
+**조치.** `instruction`을 문자열 대신 **콜러블(InstructionProvider)** 로 넘긴다.
+`LlmAgent.canonical_instruction()`이 문자열이 아니면 `bypass_state_injection=True`를 반환해
+치환 단계를 통째로 건너뛴다.
+
+```python
+def instruction_provider(_ctx=None, _text=instruction) -> str:
+    return _text
+agent = Agent(..., instruction=instruction_provider, ...)
+```
+
+설치된 ADK로 재현·검증했다 — 문자열이면 `KeyError: 'Context variable not found: \`사업부명\`.'`,
+콜러블이면 `bypass_state_injection=True`에 자리표시자가 원문 그대로 유지된다.
+
+**부수 효과(의도한 것).** 장기 메모리(`extra_instruction`)로 붙는 **사용자 대화 내용에
+중괄호가 섞여도** 이제 안전하다. 예전 방식이었다면 사용자가 `{foo}`를 한 번 말하는 순간
+그 대화는 영구히 죽었을 것이다. 자리표시자를 다른 기호로 바꾸는 대신 콜러블을 택한 이유가 이것이다.
+
+**교훈.** 지시문은 우리가 쓰는 평범한 텍스트가 아니라 **ADK의 템플릿**이다.
+지시문에 리터럴 중괄호를 넣어야 하면 반드시 콜러블로 넘긴다.
+
 ---
 
 ## 다음 항목은 이어서 여기 아래에 추가
