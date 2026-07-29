@@ -9,7 +9,9 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../../shared"))
 from db import get_pool, embed_text, vector_literal, rerank, clamp_top_k, clamp_candidates  # noqa: E402
 from pii import mask_record  # noqa: E402
 from config_store import get_config  # noqa: E402
-from retrieval import ts_or_query, expand_query, has_trgm, mmr_dedup  # noqa: E402
+from retrieval import (  # noqa: E402
+    ts_or_query, expand_query, has_trgm, mmr_dedup, trgm_min_similarity,
+)
 
 from mcp.server.fastmcp import FastMCP
 
@@ -124,12 +126,15 @@ async def search_voc(
                 LIMIT 50
             ),
             trgm_search AS (
+                -- similarity()가 아니라 word_similarity()를 쓴다. similarity는 문자열
+                -- '전체'의 3-gram 자카드라 문의 본문이 길수록 0에 수렴해(500자면 0.04)
+                -- 임계값 0.3을 절대 못 넘겼다 = 이 축이 항상 0건이었다.
                 SELECT id, ROW_NUMBER() OVER (
-                    ORDER BY similarity(question || ' ' || answer, $5) DESC) AS rank
+                    ORDER BY word_similarity($5, question || ' ' || answer) DESC) AS rank
                 FROM voc_records
                 WHERE ($2::text IS NULL OR department = $2)
                   AND ($3::boolean IS FALSE OR resolved = true)
-                  AND (question || ' ' || answer) % $5
+                  AND word_similarity($5, question || ' ' || answer) >= $6
                 LIMIT 50
             ),
             fused AS (
@@ -145,9 +150,10 @@ async def search_voc(
             FROM fused
             JOIN voc_records r ON r.id = fused.id
             ORDER BY fused.rrf_score DESC
-            LIMIT $6
+            LIMIT $7
             """,
-            vector_literal(vec), department, resolved_only, ts_query, query, candidate_k,
+            vector_literal(vec), department, resolved_only, ts_query, query,
+            await trgm_min_similarity(), candidate_k,
         )
     else:
         rows = await pool.fetch(

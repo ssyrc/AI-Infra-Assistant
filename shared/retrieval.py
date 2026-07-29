@@ -83,6 +83,27 @@ def expand_query(query: str, max_variants: int = 3) -> list[str]:
 
 _TRGM_CACHE: dict[str, bool] = {}
 
+# 3-gram 축 임계값. word_similarity(질의, 문서) 기준이라 문서 길이에 휘둘리지 않는다.
+DEFAULT_TRGM_MIN_SIM = 0.3
+
+
+async def trgm_min_similarity() -> float:
+    """3-gram 축에서 후보로 받아들일 최소 word_similarity(설정 키로 조정 가능).
+
+    주의 - similarity()가 아니라 word_similarity()를 쓴다.
+    similarity(문서, 질의)는 두 문자열 '전체'의 3-gram 자카드라, 문서가 길수록 값이 0으로
+    수렴한다. 500자 청크 대 15자 질의면 질의의 3-gram이 전부 들어 있어도 0.04 수준이라
+    기본 임계값 0.3(pg_trgm.similarity_threshold)을 절대 넘지 못한다 - 즉 `문서 % 질의`
+    조건은 **항상 거짓**이고 3-gram 축이 통째로 죽어 있었다.
+    word_similarity(질의, 문서)는 '문서 안에서 질의와 가장 잘 맞는 구간'을 보므로
+    문서 길이와 무관하게 의미 있는 값이 나온다(같은 예에서 0.37).
+    """
+    from config_store import get_config
+    try:
+        return float(await get_config("trgm_min_similarity", str(DEFAULT_TRGM_MIN_SIM)))
+    except (TypeError, ValueError):
+        return DEFAULT_TRGM_MIN_SIM
+
 
 async def has_trgm(pool, key: str) -> bool:
     """pg_trgm 확장이 설치돼 있는지(1회 확인 후 캐시).

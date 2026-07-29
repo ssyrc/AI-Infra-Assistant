@@ -174,15 +174,20 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
         "stderr": _clip(err),
     }
     # 실패 원인을 에이전트가 엉뚱하게 해석하지 않도록, 흔한 두 가지는 명시적으로 알려준다.
+    # **어느 IP로 붙었는지를 반드시 함께 적는다** - 손으로 IP를 직접 넣으면 되는데 에이전트만
+    # 실패하는 경우, 원인은 거의 항상 "이름이 /etc/hosts에서 다른 IP로 풀렸다"이기 때문이다.
     low = result["stderr"].lower()
+    # ssh가 남긴 진짜 사유 한 줄(디버그 잡음은 빼고). 추측 대신 이걸 보여준다.
+    reason = next((ln.strip() for ln in result["stderr"].split("\n")
+                   if ln.strip() and not ln.startswith("debug")), "")
+    where = f"'{host}'({ip})"
     if proc.returncode == 255 and "host key verification" in low:
         result["error"] = (
-            f"'{host}'의 ssh 호스트 키 확인에 실패해 커맨드가 실행되지 않았습니다"
+            f"{where}의 ssh 호스트 키 확인에 실패해 커맨드가 실행되지 않았습니다"
             f"(인증서/계정 문제가 아님). known_hosts({SSH_KNOWN_HOSTS})에 다른 키가 등록돼 "
             f"있거나 StrictHostKeyChecking={SSH_STRICT_HOST_KEY} 설정이 막고 있습니다. "
             "컨테이너에서 해당 호스트 키를 지우거나(.env에 SSH_STRICT_HOST_KEY=no) 재시도하세요.")
     elif proc.returncode == 255 and ("permission denied" in low or "publickey" in low):
-        detail = ""
         if not SSH_KEY:
             detail = "SSH_KEY가 설정되지 않았습니다."
         elif not os.path.isfile(SSH_KEY):
@@ -190,9 +195,17 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
                       "빈 디렉토리가 생긴 상태일 수 있습니다 - .env의 SSH_KEY_PATH를 실제 개인키 "
                       "파일로 지정하세요.")
         else:
-            detail = f"마운트된 키({SSH_KEY})가 대상 서버에 등록돼 있지 않을 수 있습니다."
-        result["error"] = (f"'{host}'에 ssh 인증이 실패해 커맨드가 실행되지 않았습니다"
-                           f"(사용자 권한 문제가 아님). {detail}")
+            # 키 파일은 멀쩡한데 거부당했다면, 키가 아니라 '접속한 서버'가 다를 가능성이 크다.
+            detail = (f"키 파일({SSH_KEY})은 정상입니다. '{host}'가 {HOSTS_FILE}에서 {ip}로 "
+                      f"풀렸는데, 이 키가 등록된 서버가 {ip}가 맞는지 확인하세요"
+                      "(이름이 의도한 서버가 아닌 다른 IP로 풀리는 경우가 가장 흔합니다).")
+        result["error"] = (f"{where}에 ssh 인증이 실패해 커맨드가 실행되지 않았습니다"
+                           f"(사용자 권한 문제가 아님). {detail}"
+                           + (f" ssh 메시지: {reason}" if reason else ""))
+    elif proc.returncode == 255:
+        # 위 두 갈래에 안 걸리는 접속 실패(네트워크 불가, 타임아웃 등)도 그냥 넘기지 않는다.
+        result["error"] = (f"{where}에 ssh 접속 자체가 실패했습니다."
+                           + (f" ssh 메시지: {reason}" if reason else ""))
     elif proc.returncode != 0 and any(m in low for m in _NO_SUCH_USER):
         result["error"] = (
             f"서버 '{host}'에 '{user}' 계정이 없어 실행하지 못했습니다(권한 문제가 아님). "

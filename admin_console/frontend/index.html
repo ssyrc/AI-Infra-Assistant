@@ -133,6 +133,7 @@ function ManualsPanel() {
   const [embStatus, setEmbStatus] = useState(null);
   const [reembedBusy, setReembedBusy] = useState(false);
 
+  const [refPath, setRefPath] = useState("");
   const load = useCallback(async () => setManuals(await api("/api/manuals")), []);
   const loadEmbStatus = useCallback(async () => {
     try { setEmbStatus(await api("/api/manuals/embedding-status")); } catch (e) { setEmbStatus(null); }
@@ -172,7 +173,9 @@ function ManualsPanel() {
   };
 
   const openDetail = async (id) => {
-    setDetail(await api(`/api/manuals/${id}`));
+    const d = await api(`/api/manuals/${id}`);
+    setDetail(d);
+    setRefPath(d.file.reference_path || "");
     setVersions(await api(`/api/manuals/${id}/versions`));
   };
 
@@ -273,6 +276,15 @@ function ManualsPanel() {
   const deleteChunk = async (chunkId) => {
     await api(`/api/manuals/chunks/${chunkId}`, { method: "DELETE" });
     openDetail(detail.file.id);
+  };
+  const saveRefPath = async () => {
+    if (!detail) return;
+    await api(`/api/manuals/${detail.file.id}/reference-path`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reference_path: refPath }),
+    });
+    await load();
+    alert("문서 위치를 저장했습니다(같은 제목의 모든 버전에 적용).");
   };
   const publish = async (id) => { await api(`/api/manuals/${id}/publish`, { method: "POST" }); await load(); openDetail(id); };
   const unpublish = async (id) => {
@@ -493,6 +505,17 @@ function ManualsPanel() {
               {detail.file.status === "published" && <button className="danger" onClick={() => unpublish(detail.file.id)}>발행취소</button>}
               {detail.file.status !== "published" && <button className="danger" onClick={() => remove(detail.file.id)}>삭제</button>}
               <button onClick={() => setDetail(null)}>닫기</button>
+            </div>
+          </div>
+          <div style={{margin: "10px 0"}}>
+            <label style={{fontSize: 12.5, color: "var(--muted)"}}>
+              문서 위치(참고 경로) — 답변에서 "이 문서를 보세요"라고 안내할 때 그대로 쓰입니다.
+            </label>
+            <div className="toolbar" style={{marginTop: 6}}>
+              <input style={{flex: 1}} value={refPath}
+                     onChange={e => setRefPath(e.target.value)}
+                     placeholder="예: 슈퍼컴 Portal (https://…) > USEFUL INFO. > 활용 가이드 > GPU 서버 활용 가이드" />
+              <button onClick={saveRefPath} disabled={busy}>경로 저장</button>
             </div>
           </div>
           {versions.length > 1 && (

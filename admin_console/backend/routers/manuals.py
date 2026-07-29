@@ -19,6 +19,8 @@ from db import get_pool, embed_text, vector_literal, get_http_client
 from parser import parse_file, SUPPORTED_EXTS
 from cleaning import clean_text, clean_options_from_dict, CleanOptions
 from spreadsheet import TABLE_EXTS, read_table_meta, load_table_rows
+from manual_search import search_manual_chunks, with_context
+from retrieval import trgm_min_similarity
 from uploads import (
     create_upload_session, get_upload_session,
     delete_upload_session, load_options,
@@ -45,12 +47,36 @@ async def list_manuals(admin: str = Depends(require_admin)):
     pool = await get_pool(_DSN)
     rows = await pool.fetch(
         """
-        SELECT id, title, filename, source_type, version, status, uploaded_by, uploaded_at, published_at
+        SELECT id, title, filename, source_type, version, status, uploaded_by, uploaded_at,
+               published_at, reference_path
         FROM manual_files
         ORDER BY title, version DESC
         """
     )
     return [dict(r) for r in rows]
+
+
+class ReferencePathIn(BaseModel):
+    reference_path: str = ""
+
+
+@router.patch("/{manual_id}/reference-path")
+async def set_reference_path(manual_id: int, body: ReferencePathIn,
+                             admin: str = Depends(require_admin)):
+    """문서가 실제로 있는 위치(포탈 경로 등)를 저장한다.
+
+    에이전트가 "OO 문서를 참고하세요"라고만 하면 사용자는 그 문서를 찾을 수 없다.
+    여기에 전체 경로를 넣어 두면 검색 결과에 함께 실려 답변에 그대로 인용된다.
+    같은 title의 모든 버전에 함께 적용한다(버전이 올라가도 경로는 그대로이므로).
+    """
+    pool = await get_pool(_DSN)
+    title = await pool.fetchval("SELECT title FROM manual_files WHERE id = $1", manual_id)
+    if title is None:
+        raise HTTPException(404, "문서를 찾을 수 없습니다.")
+    path = (body.reference_path or "").strip() or None
+    await pool.execute(
+        "UPDATE manual_files SET reference_path = $1 WHERE title = $2", path, title)
+    return {"ok": True, "title": title, "reference_path": path}
 
 
 @router.get("/{manual_id}")
@@ -532,56 +558,22 @@ async def search_test(body: SearchTestIn, admin: str = Depends(require_admin)):
         "SELECT count(*) FROM manual_chunks c JOIN manual_files f ON f.id = c.manual_file_id "
         "WHERE f.status = 'published' AND c.embedding IS NOT NULL")
 
-    if vec is None:
-        mode = "키워드 전용(임베딩 실패)"
-        rows = await pool.fetch(
-            """
-            SELECT c.id, c.section_title, c.chunk_text, f.title,
-                   ts_rank(c.tsv, plainto_tsquery('simple', $1)) AS score
-            FROM manual_chunks c JOIN manual_files f ON f.id = c.manual_file_id
-            WHERE f.status = 'published' AND c.tsv @@ plainto_tsquery('simple', $1)
-            ORDER BY score DESC LIMIT $2
-            """, query, top_k)
-    else:
-        mode = "하이브리드(의미+키워드)"
-        rows = await pool.fetch(
-            """
-            WITH vector_search AS (
-                SELECT c.id, ROW_NUMBER() OVER (ORDER BY c.embedding <=> $1::vector) AS rank
-                FROM manual_chunks c JOIN manual_files f ON f.id = c.manual_file_id
-                WHERE f.status = 'published' AND c.embedding IS NOT NULL
-                ORDER BY c.embedding <=> $1::vector LIMIT 50
-            ),
-            keyword_search AS (
-                SELECT c.id, ROW_NUMBER() OVER (
-                    ORDER BY ts_rank(c.tsv, plainto_tsquery('simple', $2)) DESC) AS rank
-                FROM manual_chunks c JOIN manual_files f ON f.id = c.manual_file_id
-                WHERE f.status = 'published' AND c.tsv @@ plainto_tsquery('simple', $2) LIMIT 50
-            ),
-            fused AS (
-                SELECT COALESCE(v.id, k.id) AS id, v.rank AS vrank, k.rank AS krank,
-                       COALESCE(1.0/(60+v.rank),0) + COALESCE(1.0/(60+k.rank),0) AS rrf
-                FROM vector_search v FULL OUTER JOIN keyword_search k ON v.id = k.id
-            )
-            SELECT c.id, c.section_title, c.chunk_text, f.title,
-                   fused.rrf AS score, fused.vrank, fused.krank
-            FROM fused JOIN manual_chunks c ON c.id = fused.id
-            JOIN manual_files f ON f.id = c.manual_file_id
-            ORDER BY fused.rrf DESC LIMIT $3
-            """, vector_literal(vec), query, top_k)
+    # 검색 자체는 Manual MCP와 **같은 코드**를 호출한다. 예전에는 여기서 자기만의 SQL을
+    # (plainto_tsquery 2축) 돌려서 "콘솔에선 나오는데 챗봇은 못 찾는다"를 진단할 수 없었다.
+    mode, hits = await search_manual_chunks(query, top_k, with_neighbors=False)
 
-    hits = [dict(r) for r in rows]
-    docs = [(f"{h['section_title']}\n{h['chunk_text']}" if h.get("section_title")
-             else h["chunk_text"]) for h in hits]
+    docs = [with_context(h) for h in hits]
     rerank_info = await _rerank_probe(query, docs) if docs else {"used": False, "reason": "후보 없음"}
 
     for h in hits:
         h["chunk_text"] = (h["chunk_text"] or "")[:300]
-        h["score"] = float(h["score"]) if h["score"] is not None else None
+        for k in ("score", "vrrf", "krrf", "trrf", "rerank_score"):
+            if h.get(k) is not None:
+                h[k] = float(h[k])
     try:
         min_score = float(await get_config("rerank_min_score", "0.05"))
     except (TypeError, ValueError):
         min_score = 0.05
     return {"mode": mode, "embedding": embed_info, "rerank": rerank_info,
-            "min_score": min_score,
+            "min_score": min_score, "trgm_min_similarity": await trgm_min_similarity(),
             "published_chunks": published, "chunks_with_embedding": with_vec, "hits": hits}

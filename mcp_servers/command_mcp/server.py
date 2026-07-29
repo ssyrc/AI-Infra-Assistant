@@ -24,7 +24,9 @@ from mcp_caller import (  # noqa: E402
 )
 from ssh_exec import run_ssh_as_user  # noqa: E402
 from catalog_exec import DEFAULT_DENY_CSV, build_catalog_argv, deny_set  # noqa: E402
-from retrieval import ts_or_query, expand_query, has_trgm, mmr_dedup  # noqa: E402
+from retrieval import (  # noqa: E402
+    ts_or_query, expand_query, has_trgm, mmr_dedup, trgm_min_similarity,
+)
 
 from mcp.server.fastmcp import FastMCP
 
@@ -96,9 +98,15 @@ async def search_commands(query: str, top_k: int = 10) -> list[dict]:
                 FROM command_catalog WHERE tsv @@ to_tsquery('simple', $2) LIMIT 50
             ),
             trgm_search AS (
+                -- similarity()가 아니라 word_similarity(). similarity는 두 문자열 '전체'의
+                -- 3-gram 자카드라 설명이 길수록 0에 수렴해 임계값 0.3을 넘지 못한다
+                -- (= 이 축이 항상 0건이었다). word_similarity는 '설명 안에서 질의와 가장
+                -- 잘 맞는 구간'을 보므로 길이에 휘둘리지 않는다.
                 SELECT id, ROW_NUMBER() OVER (
-                    ORDER BY similarity(name || ' ' || description, $3) DESC) AS rank
-                FROM command_catalog WHERE (name || ' ' || description) % $3 LIMIT 50
+                    ORDER BY word_similarity($3, name || ' ' || description) DESC) AS rank
+                FROM command_catalog
+                WHERE word_similarity($3, name || ' ' || description) >= $4
+                LIMIT 50
             ),
             fused AS (
                 SELECT COALESCE(v.id, k.id, t.id) AS id,
@@ -110,9 +118,9 @@ async def search_commands(query: str, top_k: int = 10) -> list[dict]:
             )
             SELECT c.id, c.name, c.description, c.exec_command, fused.rrf_score AS score
             FROM fused JOIN command_catalog c ON c.id = fused.id
-            ORDER BY fused.rrf_score DESC LIMIT $4
+            ORDER BY fused.rrf_score DESC LIMIT $5
             """,
-            vector_literal(vec), ts_query, query, candidate_k,
+            vector_literal(vec), ts_query, query, await trgm_min_similarity(), candidate_k,
         )
     else:
         rows = await pool.fetch(
