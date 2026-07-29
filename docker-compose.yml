@@ -64,7 +64,7 @@ services:
       RERANK_PROVIDER: ${RERANK_PROVIDER:-tei}
       RERANK_BASE_URL: ${RERANK_BASE_URL:-}
       RERANK_MODEL: ${RERANK_MODEL:-bge-reranker-v2-m3}
-      SCHEDULER_LOGIN_HOST: ${SCHEDULER_LOGIN_HOST:-login05}
+      SCHEDULER_LOGIN_HOST: ${SCHEDULER_LOGIN_HOST:-202.20.185.100}
     depends_on:
       postgres:
         condition: service_healthy

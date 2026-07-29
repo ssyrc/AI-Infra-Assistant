@@ -221,7 +221,7 @@ async def run_command(user_id: str, command: str, args: list[str] | None = None,
         # 카탈로그에 없는 커맨드(매뉴얼/VOC에서 찾은 것 등)도 그대로 실행한다.
         source = "직접 지정"
         argv = build_catalog_argv(command, command, args, user_id, deny)
-    target = (host or "").strip() or await get_config("scheduler_login_host", "login05")
+    target = (host or "").strip() or await get_config("scheduler_login_host", "202.20.185.100")
 
     result = await run_ssh_as_user(target, user_id, argv)
     result["source"] = source
@@ -233,7 +233,7 @@ async def get_scheduler_job_info(user_id: str) -> dict:
     로그인 서버(scheduler_login_host)에 ssh(root) 후 `su - <user_id>`로 강등해
     `phd info -u <user_id>`를 실행한다. user_id는 호출자 신원에서 강제 주입되므로
     남의 job을 조회할 수 없다. 결과에 실행한 커맨드(command)도 함께 반환한다."""
-    login_host = await get_config("scheduler_login_host", "login05")
+    login_host = await get_config("scheduler_login_host", "202.20.185.100")
     return await run_ssh_as_user(login_host, user_id, ["phd", "info", "-u", user_id])
 
 

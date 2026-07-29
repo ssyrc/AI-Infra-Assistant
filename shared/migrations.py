@@ -151,6 +151,16 @@ MIGRATIONS: list[tuple[str, int, str]] = [
         );
         CREATE INDEX IF NOT EXISTS upload_sessions_expires_idx ON upload_sessions (expires_at);
     """),
+    # v3: 로그인 서버를 '이름'에서 'IP'로 강제 교체.
+    #     배포 호스트 /etc/hosts에서 login07이 게이트(202.20.185.100)가 아니라 75.11.29.7로
+    #     풀리고 있었고, 그 서버엔 우리 키가 없어 커맨드 실행이 전부 인증 실패했다.
+    #     이미 IP가 들어 있으면(=운영자가 의도적으로 정한 값) 건드리지 않는다.
+    ("platform_config", 3, """
+        UPDATE platform_settings
+           SET value = '202.20.185.100', updated_at = now()
+         WHERE key = 'scheduler_login_host'
+           AND value !~ '^[0-9]{1,3}(\\.[0-9]{1,3}){3}$';
+    """),
     # v3: 감사로그에 사용자/대화 식별자 추가
     ("system_db", 3, """
         ALTER TABLE job_logs ADD COLUMN IF NOT EXISTS conversation_id TEXT;
@@ -339,6 +349,16 @@ MIGRATIONS: list[tuple[str, int, str]] = [
             ) STORED;
         CREATE INDEX IF NOT EXISTS manual_chunks_tsv_idx ON manual_chunks USING gin (tsv);
     """),
+    # v7: VOC를 '업로드 묶음' 단위로도 다룰 수 있게 한다.
+    #     CSV 한 개를 올리면 수천 행이 개별 레코드로 들어가는데, 콘솔에서 낱개로만 보이면
+    #     "방금 올린 그 파일"을 통째로 되돌릴 방법이 없었다. batch_id로 묶어 두면
+    #     묶음 목록/묶음 삭제가 가능해진다. 기존 데이터는 batch_id가 NULL(=출처 미상)이다.
+    ("voc_db", 7, """
+        ALTER TABLE voc_records ADD COLUMN IF NOT EXISTS batch_id TEXT;
+        ALTER TABLE voc_records ADD COLUMN IF NOT EXISTS source_file TEXT;
+        ALTER TABLE voc_records ADD COLUMN IF NOT EXISTS uploaded_by TEXT;
+        CREATE INDEX IF NOT EXISTS voc_records_batch_idx ON voc_records (batch_id);
+    """),
     ("voc_db", 6, """
         CREATE EXTENSION IF NOT EXISTS pg_trgm;
         CREATE INDEX IF NOT EXISTS voc_records_trgm_idx
@@ -425,7 +445,11 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
         ("upload_source_dir", "/data/uploads",
          "매뉴얼/VOC/커맨드 카탈로그 '서버 파일에서 선택' 목록 경로(admin-console 컨테이너 내부 "
          "경로, docker-compose에서 마운트된 폴더 하위만 가능)", True, False, False),
-        ("scheduler_login_host", os.environ.get("SCHEDULER_LOGIN_HOST", "login05"), "Command MCP가 job 조회 시 ssh할 로그인 서버(/etc/hosts 등록명)", True, False, False),
+        # 반드시 **IP**로 둔다. 이름(login07 등)은 배포 호스트 /etc/hosts에 의존하는데,
+        # 실제로 login07이 게이트 서버가 아닌 75.11.29.7로 풀려 모든 실행이 인증 실패했다.
+        ("scheduler_login_host", os.environ.get("SCHEDULER_LOGIN_HOST", "202.20.185.100"),
+         "커맨드를 실행할 로그인 서버 주소. 이름 말고 **IP**로 적는다(이름 해석 사고 방지)",
+         True, False, False),
         # 커맨드 카탈로그는 전부 실행 가능하다(항목별 on/off 화이트리스트는 System MCP에서만 관리).
         # 그래도 파괴적인 기본 명령은 실행 시점에 거부한다. 콤마 구분, 비우면 제한 없음.
         ("catalog_exec_deny_commands", DEFAULT_DENY_CSV,
@@ -500,6 +524,17 @@ AGENT_INSTRUCTION = """당신은 사내 인프라/시스템 운영을 돕는 한
   그대로 전달합니다 — 문서에 적혀 있다는 이유로 충분한 것이지, 스스로 걸러내지 마세요.
 - 조회 결과에 없으면 "매뉴얼에서 확인되지 않습니다"라고 답합니다. 일부만 확인됐으면 확인된
   부분만 답하고 나머지는 확인되지 않았다고 밝힙니다.
+- **조건을 떼고 옮기지 않습니다.** 문서의 문장에 조건·범위·예외를 나타내는 말이 붙어 있으면
+  (only, ~하는 경우에만, 필요 시, 권장, 해당하는 사용자만 …) **그 말을 반드시 함께** 옮깁니다.
+  조건부 안내를 필수 절차처럼 바꿔 쓰면 하지 않아도 될 일을 시키는 잘못된 답이 됩니다.
+    · 문서: "Only for simulation workloads requiring CUDA compilation, you will need to
+      recompile …"
+    · 옳게: "CUDA 컴파일이 필요한 시뮬레이션 작업을 하는 경우에만 재컴파일이 필요합니다"
+    · 틀리게: "CUDA 컴파일 시 재컴파일 필요" / 조건 없이 항목처럼 나열하는 것
+- **문서에 적힌 값을 다른 값으로 바꾸거나 일반화하지 않습니다.** 플래그·숫자·경로·모델명은
+  문서에 있는 그대로 씁니다. 문서에 한 가지 경우만 적혀 있으면 다른 경우를 유추해서
+  만들어 내지 않습니다(예: 문서에 `compute_80`만 있는데 `compute_90`을 지어내지 않습니다).
+  문서가 다루지 않는 경우는 "문서에는 …만 나와 있습니다"라고 밝힙니다.
 
 ## (B) 일반 지식 — 아는 대로 답해도 됩니다
 표준 리눅스 명령어 사용법(ls, grep, tar, awk 등), 셸/Python 같은 프로그래밍 문법, 에러 메시지
@@ -593,13 +628,18 @@ AGENT_INSTRUCTION = """당신은 사내 인프라/시스템 운영을 돕는 한
   억지로 끼워 맞춘 사례는 없느니만 못합니다.
 - **문구는 상황에 맞게 직접 만들어 씁니다.** 정해진 문장을 그대로 복사하지 않습니다.
 
-## 개인·조직 정보는 그대로 쓰지 않습니다
-조회 결과에 사람이나 조직을 식별할 수 있는 값이 있으면 자리표시자로 바꿔서 답합니다.
+## 개인·조직 정보는 그대로 쓰지 않습니다 — **검색된 문서에만 적용됩니다**
+매뉴얼·과거 사례(VOC)처럼 **다른 사람의 기록을 검색해 온 것**에 남의 계정·이름·조직이 있으면
+자리표시자로 바꿔서 답합니다.
 - 계정·사번·이메일 → {사용자 id} · 사람 이름(한글/영문/외국 이름 모두) → {사용자 이름}
 - 조직명 → {사업부명} {센터명} {팀명} {그룹명} {파트명} 등 단위에 맞는 자리표시자
 - 조회 결과에 이미 자리표시자가 들어 있으면 그대로 두고, 실제 값을 추측해 채우지 않습니다.
-- 지금 질문한 본인 계정으로 시스템이 실행한 결과는 그대로 보여줘도 됩니다(본인 정보).
-  그 외 다른 사람·조직 정보만 가립니다.
+
+**커맨드 실행 결과는 절대 가리지 않습니다.** 실행은 언제나 질문한 본인 계정 권한으로만
+이뤄지므로 거기 나오는 계정명·경로·파일명은 전부 본인 정보입니다. 출력을 **원문 그대로**
+보여주세요.
+- `ls -l` 결과의 소유자 계정을 {사용자 id}로 바꾸면 안 됩니다 — 자기 파일 목록을 못 알아봅니다.
+- 홈 경로, 쿼터 조회의 계정명, job 목록의 사용자명도 마찬가지로 그대로 둡니다.
 
 ## "확인해 달라" — 실행이 필요한 요청 (예: "내 홈스토리지 용량", "이 서버 GPU 상태")
 1) 어떤 커맨드인지 찾습니다(커맨드 카탈로그 검색 → 없으면 매뉴얼 검색). 전용 점검 도구가 이미

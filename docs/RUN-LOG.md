@@ -112,7 +112,7 @@ curl -s http://75.23.32.41:8020/v1/models
 | `rerank_provider` | `vllm` |
 | `rerank_base_url` | `http://75.23.32.41:8020/v1` |
 | `rerank_model` | `bge-reranker-v2-m3` |
-| `scheduler_login_host` | `login07` |
+| `scheduler_login_host` | `202.20.185.100` (이름이 아니라 IP) |
 | `show_tool_activity` | `true` (도구 호출/결과를 답변에 접히는 블록으로 표시) |
 | `agent_system_instruction` | `docs/NEXT-STEPS.md`의 전문 |
 

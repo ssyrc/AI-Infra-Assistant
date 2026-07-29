@@ -3,8 +3,10 @@
 
 토폴로지:
 - 이 agent 호스트(예: 202.20.183.30)는 root로 뜬다. 대상 서버들에 root로 ssh 할 수 있다.
-- 대상 서버의 IP는 이 호스트의 /etc/hosts에 등록돼 있다(예: `202.20.185.100  login05`).
-  => 등록된 호스트만 접근 가능(화이트리스트). 미등록 이름은 거부한다.
+- 대상은 **IP로 직접 지정**하는 것을 원칙으로 한다(설정 `scheduler_login_host`).
+  이름을 쓰면 이 호스트의 /etc/hosts에서 찾는다. 미등록 이름은 거부한다.
+  이름 해석은 우리가 통제하지 못하는 파일에 의존해, 같은 이름이 다른 서버로 풀리면
+  키가 등록되지 않은 곳에 붙어 전부 인증 실패한다(실제로 login07이 그랬다).
 - 실행: ssh root@<ip> 로 접속한 뒤, 원격에서 `su - <user_id> -c ...`로 '사용자 권한'으로 강등해
   명령을 실행한다. 남의 권한으로 실행할 수 없다.
 
@@ -25,6 +27,7 @@ import os
 import re
 import shlex
 import asyncio
+import ipaddress
 
 HOSTS_FILE = os.environ.get("HOSTS_FILE", "/etc/hosts")
 SSH_ROOT_USER = os.environ.get("SSH_ROOT_USER", "root")
@@ -69,9 +72,22 @@ _NO_SUCH_USER = ("does not exist", "no passwd entry", "unknown id", "user not fo
 
 
 def resolve_host(name: str) -> str:
-    """호스트명(또는 IP)을 HOSTS_FILE에서 찾아 IP를 돌려준다.
-    등록되지 않은 호스트는 거부한다(= /etc/hosts가 접근 대상 화이트리스트)."""
+    """접속할 대상의 IP를 돌려준다.
+
+    **IP를 직접 주면 그 IP로 그대로 붙는다.** 이름은 HOSTS_FILE에서 찾는다.
+
+    왜 IP를 우선하나: 배포 호스트의 /etc/hosts에서 `login07`이 게이트 서버가 아니라
+    전혀 다른 서버(75.11.29.7)로 풀리고 있었고, 그 서버에는 우리 키가 등록돼 있지 않아
+    모든 커맨드 실행이 인증 실패했다. 이름 해석은 우리가 통제할 수 없는 파일에 의존하므로,
+    로그인 서버는 설정에 **IP로** 박아 두고 이름 해석 자체를 타지 않게 한다.
+    """
     target = (name or "").strip()
+    try:
+        # IPv4/IPv6 리터럴이면 이름 해석을 건너뛴다(/etc/hosts에 없어도 된다).
+        ipaddress.ip_address(target)
+        return target
+    except ValueError:
+        pass
     if not _HOSTNAME_RE.match(target):
         raise ValueError(f"잘못된 호스트명입니다: {name!r}")
     try:
@@ -87,7 +103,9 @@ def resolve_host(name: str) -> str:
         ip, names = parts[0], parts[1:]
         if target == ip or target in names:
             return ip
-    raise ValueError(f"/etc/hosts에 등록되지 않은 서버입니다: {target} (등록된 서버만 접근 가능)")
+    raise ValueError(
+        f"{HOSTS_FILE}에 등록되지 않은 서버 이름입니다: {target}. "
+        "이름 대신 IP로 지정하면 이름 해석을 타지 않습니다(예: 202.20.185.100).")
 
 
 def validate_user(user_id: str) -> str:

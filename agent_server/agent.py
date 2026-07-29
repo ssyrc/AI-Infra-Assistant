@@ -59,13 +59,14 @@ async def build_agent(caller_headers: dict | None = None,
     except (TypeError, ValueError):
         temperature = 0.2
     instruction = await get_config("agent_system_instruction", DEFAULT_INSTRUCTION)
-    # 로그인 서버 이름은 설정 탭에서 바뀔 수 있으므로 지시문에 하드코딩하지 않고 매 요청 주입한다
+    # 로그인 서버 주소는 설정 탭에서 바뀔 수 있으므로 지시문에 하드코딩하지 않고 매 요청 주입한다
     # (System MCP의 "로그인 서버 실행" 툴은 host를 자동 고정하지만, disk_free처럼 host가
     # 노출된 툴에서 에이전트가 로그인 서버를 직접 지정해야 하는 경우를 위함).
-    login_host = await get_config("scheduler_login_host", "login05")
+    # 이름이 아니라 **IP**다 - 이름 해석(/etc/hosts)이 엉뚱한 서버를 가리킨 사고가 있었다.
+    login_host = await get_config("scheduler_login_host", "202.20.185.100")
     # 운영팀 접수 경로도 설정에서 읽어 붙인다(포탈 메뉴가 바뀌어도 지시문을 고칠 필요 없음).
     voc_intake = (await get_config("voc_intake_guide", "") or "").strip()
-    instruction = f"{instruction}\n\n(참고: 현재 로그인 서버 이름은 '{login_host}'입니다.)"
+    instruction = f"{instruction}\n\n(참고: 커맨드를 실행할 로그인 서버 주소는 '{login_host}'입니다.)"
     if voc_intake:
         instruction = f"{instruction}\n(참고: 운영팀 접수 경로는 '{voc_intake}'입니다.)"
     if extra_instruction:

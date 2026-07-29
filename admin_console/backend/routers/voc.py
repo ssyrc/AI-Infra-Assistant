@@ -3,6 +3,7 @@ VOC(사용자/운영자 질의응답 이력) 관리 API.
 개별 등록/수정/삭제와, 엑셀(question/answer/department/resolved 컬럼) 일괄 업로드를 지원한다.
 """
 import tempfile
+import uuid
 
 import openpyxl
 from fastapi import APIRouter, Depends, Form, UploadFile, File, HTTPException
@@ -38,20 +39,80 @@ class VocIn(BaseModel):
 
 
 @router.get("")
-async def list_voc(q: str | None = None, admin: str = Depends(require_admin)):
+async def list_voc(q: str | None = None, batch_id: str | None = None,
+                   offset: int = 0, limit: int = 100,
+                   admin: str = Depends(require_admin)):
+    """VOC 목록. 수천 건이 올라가므로 반드시 페이지 단위로 준다.
+    batch_id를 주면 그 업로드 묶음의 행만 본다."""
     pool = await get_pool("voc_db_dsn")
-    if q:
-        rows = await pool.fetch(
-            "SELECT id, question, answer, department, resolved, created_at FROM voc_records "
-            "WHERE question ILIKE '%' || $1 || '%' ORDER BY created_at DESC LIMIT 200",
-            q,
-        )
-    else:
-        rows = await pool.fetch(
-            "SELECT id, question, answer, department, resolved, created_at FROM voc_records "
-            "ORDER BY created_at DESC LIMIT 200"
-        )
-    return [dict(r) for r in rows]
+    offset = max(0, int(offset))
+    limit = max(1, min(int(limit), 500))
+    total = await pool.fetchval(
+        """
+        SELECT count(*) FROM voc_records
+        WHERE ($1::text IS NULL OR question ILIKE '%' || $1 || '%')
+          AND ($2::text IS NULL OR batch_id = $2)
+        """,
+        q or None, batch_id or None,
+    )
+    rows = await pool.fetch(
+        """
+        SELECT id, question, answer, department, resolved, created_at,
+               batch_id, source_file
+        FROM voc_records
+        WHERE ($1::text IS NULL OR question ILIKE '%' || $1 || '%')
+          AND ($2::text IS NULL OR batch_id = $2)
+        ORDER BY created_at DESC, id DESC
+        OFFSET $3 LIMIT $4
+        """,
+        q or None, batch_id or None, offset, limit,
+    )
+    return {"total": total or 0, "offset": offset, "limit": limit,
+            "items": [dict(r) for r in rows]}
+
+
+@router.get("/batches")
+async def list_voc_batches(admin: str = Depends(require_admin)):
+    """업로드(파일) 단위 묶음 목록. CSV 하나가 여기서는 한 줄로 보인다."""
+    pool = await get_pool("voc_db_dsn")
+    rows = await pool.fetch(
+        """
+        SELECT batch_id, max(source_file) AS source_file, max(uploaded_by) AS uploaded_by,
+               count(*) AS record_count, min(created_at) AS uploaded_at
+        FROM voc_records
+        WHERE batch_id IS NOT NULL
+        GROUP BY batch_id
+        ORDER BY min(created_at) DESC
+        """
+    )
+    orphan = await pool.fetchval(
+        "SELECT count(*) FROM voc_records WHERE batch_id IS NULL")
+    return {"batches": [dict(r) for r in rows], "unbatched": orphan or 0}
+
+
+@router.delete("/batches/{batch_id}")
+async def delete_voc_batch(batch_id: str, admin: str = Depends(require_admin)):
+    """업로드 묶음을 통째로 삭제한다(잘못 올린 파일 되돌리기)."""
+    pool = await get_pool("voc_db_dsn")
+    result = await pool.execute("DELETE FROM voc_records WHERE batch_id = $1", batch_id)
+    deleted = int(result.rsplit(" ", 1)[-1]) if result else 0
+    return {"ok": True, "deleted": deleted}
+
+
+class VocBulkDeleteIn(BaseModel):
+    ids: list[int]
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_voc(body: VocBulkDeleteIn, admin: str = Depends(require_admin)):
+    """체크한 행들을 한 번에 삭제한다."""
+    ids = [int(i) for i in (body.ids or [])]
+    if not ids:
+        raise HTTPException(422, "삭제할 항목을 선택하세요.")
+    pool = await get_pool("voc_db_dsn")
+    result = await pool.execute("DELETE FROM voc_records WHERE id = ANY($1::int[])", ids)
+    deleted = int(result.rsplit(" ", 1)[-1]) if result else 0
+    return {"ok": True, "deleted": deleted}
 
 
 @router.post("")
@@ -105,21 +166,27 @@ def _header_row(ws, row_num: int) -> list[str]:
     return [str(c.value).strip() if c.value else "" for c in row]
 
 
-async def _insert_voc(pool, question: str, answer: str, department: str | None, resolved: bool) -> bool:
+async def _insert_voc(pool, question: str, answer: str, department: str | None, resolved: bool,
+                      batch: dict | None = None) -> bool:
+    """VOC 한 건을 저장한다. batch가 주어지면 어느 업로드에서 왔는지도 함께 남긴다
+    (묶음 단위 조회·삭제용)."""
     if not question or not answer:
         return False
     vec = await embed_text(f"{question}\n{answer}")
+    b = batch or {}
     await pool.execute(
         """
-        INSERT INTO voc_records (question, answer, department, resolved, embedding)
-        VALUES ($1, $2, $3, $4, $5::vector)
+        INSERT INTO voc_records (question, answer, department, resolved, embedding,
+                                 batch_id, source_file, uploaded_by)
+        VALUES ($1, $2, $3, $4, $5::vector, $6, $7, $8)
         """,
         question, answer, department, resolved, vector_literal(vec),
+        b.get("batch_id"), b.get("source_file"), b.get("uploaded_by"),
     )
     return True
 
 
-async def _import_raw_format(ws, header: list[str], pool) -> tuple[int, int]:
+async def _import_raw_format(ws, header: list[str], pool, batch: dict) -> tuple[int, int]:
     """사내 VOC 표준 엑셀: 4행 헤더, 의뢰내용/조치일/처리내용/만족도만 사용."""
     col_idx = {name: i for i, name in enumerate(header)}
 
@@ -143,14 +210,14 @@ async def _import_raw_format(ws, header: list[str], pool) -> tuple[int, int]:
 
         question = clean_text(str(request_content))
         answer = clean_text(str(resolution))
-        if await _insert_voc(pool, question, answer, None, True):
+        if await _insert_voc(pool, question, answer, None, True, batch):
             inserted += 1
         else:
             skipped += 1
     return inserted, skipped
 
 
-async def _import_simple_format(ws, header: list[str], pool) -> tuple[int, int]:
+async def _import_simple_format(ws, header: list[str], pool, batch: dict) -> tuple[int, int]:
     """1행 헤더 Question/Answer(대소문자 무관) + department/resolved(선택), 2행부터 데이터.
     이미 정제된 텍스트로 취급하되 혹시 남은 HTML은 안전하게 걷어낸다."""
     lower_idx = {h.lower(): i for i, h in enumerate(header)}
@@ -176,7 +243,7 @@ async def _import_simple_format(ws, header: list[str], pool) -> tuple[int, int]:
 
         question = clean_text(str(question_raw))
         answer = clean_text(str(answer_raw))
-        if await _insert_voc(pool, question, answer, department, resolved):
+        if await _insert_voc(pool, question, answer, department, resolved, batch):
             inserted += 1
         else:
             skipped += 1
@@ -193,7 +260,9 @@ async def import_voc_excel(
     (1) 1행 헤더 Question/Answer(대소문자 무관, department/resolved 선택) — 이미 정제된 데이터용.
     (2) 사내 VOC 표준 포맷 — 4행 헤더(의뢰내용/조치일/처리내용/만족도), 조치일·처리내용 있는 행만,
         만족도 불만족/매우불만족 제외, 본문은 HTML 태그만 벗기고 그대로 보존."""
-    _, content, _ = await read_upload_or_server_file(file, server_path, {".xlsx"})
+    filename, content, _ = await read_upload_or_server_file(file, server_path, {".xlsx"})
+    # 이 업로드에서 들어간 행들을 하나로 묶는다(콘솔에서 파일 단위로 보고 되돌리기 위함).
+    batch = {"batch_id": uuid.uuid4().hex, "source_file": filename, "uploaded_by": admin}
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
         tmp.write(content)
         tmp_path = tmp.name
@@ -204,11 +273,12 @@ async def import_voc_excel(
 
     row1 = _header_row(ws, 1)
     if {"question", "answer"}.issubset({h.lower() for h in row1}):
-        inserted, skipped = await _import_simple_format(ws, row1, pool)
+        inserted, skipped = await _import_simple_format(ws, row1, pool, batch)
     elif ws.max_row >= _VOC_HEADER_ROW and {
         _COL_REQUEST, _COL_ACTION_DATE, _COL_RESOLUTION, _COL_SATISFACTION
     }.issubset(set(_header_row(ws, _VOC_HEADER_ROW))):
-        inserted, skipped = await _import_raw_format(ws, _header_row(ws, _VOC_HEADER_ROW), pool)
+        inserted, skipped = await _import_raw_format(
+            ws, _header_row(ws, _VOC_HEADER_ROW), pool, batch)
     else:
         raise HTTPException(
             422,
@@ -218,7 +288,7 @@ async def import_voc_excel(
             f"{_COL_RESOLUTION}/{_COL_SATISFACTION} 컬럼이 모두 있는 사내 표준 포맷.",
         )
 
-    return {"inserted": inserted, "skipped": skipped}
+    return {"inserted": inserted, "skipped": skipped, "batch_id": batch["batch_id"]}
 
 
 # ---------------------------------------------------------------- 열 매핑 업로드(형식 자유)
@@ -331,10 +401,14 @@ async def commit_voc_table(body: VocTableCommitIn, admin: str = Depends(require_
         raise HTTPException(422, "등록할 행이 없습니다. 열 선택과 제외 조건을 확인하세요.")
 
     pool = await get_pool(_DSN_VOC)
+    # 이 업로드에서 들어간 행들을 하나로 묶는다(콘솔에서 파일 단위로 보고 되돌리기 위함).
+    batch = {"batch_id": uuid.uuid4().hex,
+             "source_file": session["filename"], "uploaded_by": admin}
     inserted = 0
     for q, a, dept in items:
-        if await _insert_voc(pool, q, a, dept, True):
+        if await _insert_voc(pool, q, a, dept, True, batch):
             inserted += 1
         else:
             skipped += 1
-    return {"inserted": inserted, "skipped": skipped, "total": len(items)}
+    return {"inserted": inserted, "skipped": skipped, "total": len(items),
+            "batch_id": batch["batch_id"], "source_file": session["filename"]}

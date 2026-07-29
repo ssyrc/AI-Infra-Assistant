@@ -93,7 +93,7 @@ docker compose -f docker-compose.dev.yml up -d --no-build
 | `rerank_provider` | `vllm` (vLLM으로 리랭커를 띄웠을 때. TEI면 `tei`) |
 | `rerank_base_url` | `http://75.23.32.41:8020/v1` (`tei`면 `/v1` 없이) |
 | `rerank_model` | `bge-reranker-v2-m3` |
-| `scheduler_login_host` | `login07` |
+| `scheduler_login_host` | `202.20.185.100` (**이름 금지 — IP로**. login07은 /etc/hosts에서 75.11.29.7로 풀려 전부 실패했다) |
 | `agent_system_instruction` | `docs/NEXT-STEPS.md` **부록**의 전문 |
 
 - **왜 초기화되나**: `docker-compose.dev.yml`의 `dev-config` 서비스가 `up` 할 때마다 vLLM 주소를

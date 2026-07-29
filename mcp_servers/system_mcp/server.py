@@ -44,7 +44,7 @@ for _name in _CODE_WHITELIST:
 
 
 async def _login_host() -> str:
-    return await get_config("scheduler_login_host", "login05")
+    return await get_config("scheduler_login_host", "202.20.185.100")
 
 
 async def _log_execution(tool_name: str, params: dict, status: str, result):

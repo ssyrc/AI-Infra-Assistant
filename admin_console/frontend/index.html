@@ -576,11 +576,53 @@ function VocPanel() {
   const [editingId, setEditingId] = useState(null);
   const [showBrowser, setShowBrowser] = useState(false);
 
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [batches, setBatches] = useState([]);
+  const [unbatched, setUnbatched] = useState(0);
+  const [batchId, setBatchId] = useState("");     // "" = 전체
+  const [selected, setSelected] = useState([]);   // 체크한 행 id들
+  const PAGE = 100;
+
   const load = useCallback(async () => {
-    const qs = q ? `?q=${encodeURIComponent(q)}` : "";
-    setItems(await api(`/api/voc${qs}`));
-  }, [q]);
+    const p = new URLSearchParams({ offset: String(offset), limit: String(PAGE) });
+    if (q) p.set("q", q);
+    if (batchId) p.set("batch_id", batchId);
+    const data = await api(`/api/voc?${p}`);
+    setItems(data.items);
+    setTotal(data.total);
+    setSelected([]);
+  }, [q, offset, batchId]);
+  const loadBatches = useCallback(async () => {
+    const data = await api("/api/voc/batches");
+    setBatches(data.batches); setUnbatched(data.unbatched);
+  }, []);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadBatches(); }, [loadBatches]);
+  // 검색어·묶음을 바꾸면 첫 페이지로 되돌린다(빈 페이지가 뜨는 걸 막는다).
+  useEffect(() => { setOffset(0); }, [q, batchId]);
+
+  const allChecked = items.length > 0 && selected.length === items.length;
+  const toggleAll = () => setSelected(allChecked ? [] : items.map(v => v.id));
+  const toggleOne = (id) => setSelected(
+    selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id]);
+
+  const deleteSelected = async () => {
+    if (selected.length === 0) return;
+    if (!confirm(`선택한 ${selected.length}건을 삭제할까요? 되돌릴 수 없습니다.`)) return;
+    const r = await api("/api/voc/bulk-delete", {
+      method: "POST", body: JSON.stringify({ ids: selected }) });
+    await load(); await loadBatches();
+    alert(`${r.deleted}건 삭제했습니다.`);
+  };
+
+  const deleteBatch = async (b) => {
+    if (!confirm(`"${b.source_file || b.batch_id}" 업로드 ${b.record_count}건을 통째로 삭제할까요?`)) return;
+    const r = await api(`/api/voc/batches/${b.batch_id}`, { method: "DELETE" });
+    if (batchId === b.batch_id) setBatchId("");
+    await load(); await loadBatches();
+    alert(`${r.deleted}건 삭제했습니다.`);
+  };
 
   const submit = async () => {
     if (!form.question || !form.answer) return alert("질문/답변을 입력하세요.");
@@ -645,7 +687,7 @@ function VocPanel() {
         }),
       });
       setTbl(null);
-      await load();
+      await load(); await loadBatches();
       alert(`${data.inserted}건 등록 · ${data.skipped}건 제외`);
     } catch (e) { alert("등록 실패: " + e.message); }
     setBusy(false);
@@ -753,19 +795,70 @@ function VocPanel() {
         />
       )}
 
+      <div className="card">
+        <div style={{marginBottom: 8}}><strong>업로드 묶음</strong>
+          <span className="subtitle" style={{marginLeft: 8}}>
+            파일 하나가 한 줄입니다. 잘못 올렸으면 묶음째 되돌리세요.
+          </span>
+        </div>
+        <table>
+          <thead><tr><th>파일</th><th>건수</th><th>올린 사람</th><th>등록일</th><th></th></tr></thead>
+          <tbody>
+            {batches.map(b => (
+              <tr key={b.batch_id} style={{background: batchId === b.batch_id ? "rgba(125,125,125,.12)" : undefined}}>
+                <td>{b.source_file || b.batch_id.slice(0, 8)}</td>
+                <td>{b.record_count}</td>
+                <td style={{fontSize: 12}}>{b.uploaded_by || "-"}</td>
+                <td style={{fontSize: 12}}>{new Date(b.uploaded_at).toLocaleString()}</td>
+                <td className="row-actions">
+                  <button onClick={() => setBatchId(batchId === b.batch_id ? "" : b.batch_id)}>
+                    {batchId === b.batch_id ? "필터 해제" : "이 묶음만 보기"}
+                  </button>
+                  <button className="danger" onClick={() => deleteBatch(b)}>묶음 삭제</button>
+                </td>
+              </tr>
+            ))}
+            {batches.length === 0 && <tr><td colSpan="5" className="empty">업로드 묶음이 없습니다.</td></tr>}
+          </tbody>
+        </table>
+        {unbatched > 0 && (
+          <div style={{fontSize: 12, color: "var(--muted)", marginTop: 6}}>
+            출처 기록이 없는 기존 데이터 {unbatched}건이 더 있습니다(묶음 기능 추가 이전에 올린 것).
+            아래 목록에서 선택 삭제할 수 있습니다.
+          </div>
+        )}
+      </div>
+
       <div className="toolbar">
         <input placeholder="질문 검색..." value={q} onChange={e => setQ(e.target.value)} style={{width: 260}} />
+        {batchId && <button onClick={() => setBatchId("")}>묶음 필터 해제</button>}
+        <button className="danger" disabled={selected.length === 0} onClick={deleteSelected}>
+          선택 삭제{selected.length > 0 ? ` (${selected.length}건)` : ""}
+        </button>
+        <span style={{marginLeft: "auto", fontSize: 12.5, color: "var(--muted)"}}>
+          총 {total}건 · {total === 0 ? 0 : offset + 1}–{Math.min(offset + PAGE, total)} 표시
+        </span>
+        <button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>이전</button>
+        <button disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>다음</button>
       </div>
 
       <table>
-        <thead><tr><th>질문</th><th>답변</th><th>부서</th><th>해결</th><th>등록일</th><th></th></tr></thead>
+        <thead><tr>
+          <th style={{width: 32}}>
+            <input type="checkbox" checked={allChecked} onChange={toggleAll}
+                   title="이 페이지 전체 선택" />
+          </th>
+          <th>질문</th><th>답변</th><th>부서</th><th>해결</th><th>출처 파일</th><th>등록일</th><th></th>
+        </tr></thead>
         <tbody>
           {items.map(v => (
             <tr key={v.id}>
+              <td><input type="checkbox" checked={selected.includes(v.id)} onChange={() => toggleOne(v.id)} /></td>
               <td style={{maxWidth: 260}}>{v.question}</td>
               <td style={{maxWidth: 320}}>{v.answer}</td>
               <td>{v.department || "-"}</td>
               <td><Badge value={v.resolved} /></td>
+              <td style={{fontSize: 12, color: "var(--muted)", maxWidth: 160}}>{v.source_file || "-"}</td>
               <td>{new Date(v.created_at).toLocaleDateString()}</td>
               <td className="row-actions">
                 <button onClick={() => edit(v)}>편집</button>
@@ -773,7 +866,7 @@ function VocPanel() {
               </td>
             </tr>
           ))}
-          {items.length === 0 && <tr><td colSpan="6" className="empty">기록이 없습니다.</td></tr>}
+          {items.length === 0 && <tr><td colSpan="8" className="empty">기록이 없습니다.</td></tr>}
         </tbody>
       </table>
     </div>
@@ -1296,7 +1389,7 @@ function SystemPanel() {
             아래 파라미터 값으로 치환됩니다. rm/dd/systemctl 등 위험한 기본 명령은 등록이 거부됩니다.
             아래 "분류"가 <strong>해당 서버 실행</strong>이면 host를 LLM이 지정해야 하고(서버마다 결과가
             다른 커맨드), <strong>로그인 서버 실행</strong>이면 host가 아예 LLM에 안 보이고 로그인 서버
-            (설정 탭 <code>scheduler_login_host</code>)로 자동 고정됩니다.
+            (설정 탭 <code>scheduler_login_host</code>, <strong>IP로 지정</strong>)로 자동 고정됩니다.
             <strong style={{color: "var(--warn)"}}> 등록/수정 후 System MCP 재시작이 필요합니다.</strong>
           </div>
           <div className="toolbar">

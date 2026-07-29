@@ -2,14 +2,14 @@
 # ssh 실행 경로 진단. 폐쇄망 배포 호스트(202.20.183.30)에서 실행한다.
 #
 #   bash scripts/diag-ssh.sh <호스트이름> <계정> [커맨드]
-#   예) bash scripts/diag-ssh.sh login07 yr9.choi myquota
+#   예) bash scripts/diag-ssh.sh 202.20.185.100 yr9.choi myquota
 #
 # "손으로 IP를 넣으면 되는데 에이전트로는 안 된다"의 원인을 한 번에 가른다.
-# 에이전트는 이름(login07)을 /etc/hosts에서 IP로 바꿔 접속하므로, 그 이름이 다른 서버로
-# 풀리면 키가 등록되지 않은 서버에 붙어 인증 실패가 난다.
+# 이제 로그인 서버는 설정에 IP로 박아 두므로 이름 해석을 타지 않는다.
+# 이름을 넣으면 /etc/hosts에서 어떤 IP로 풀리는지도 함께 보여준다.
 set -u
 
-HOST="${1:-login07}"
+HOST="${1:-202.20.185.100}"
 USER_ID="${2:-}"
 CMD="${3:-id}"
 SVC="${SVC:-command-mcp}"
@@ -60,4 +60,4 @@ echo "    (종료코드 $?)"
 echo
 echo "판정: 3번이 실패하고 4번이 성공하면 -> '$HOST'가 잘못된 IP($IP)로 풀리는 것이 원인입니다."
 echo "      배포 호스트 /etc/hosts의 '$HOST' 항목을 202.20.185.100으로 고치거나,"
-echo "      관리자 콘솔 설정의 scheduler_login_host를 올바른 이름으로 바꾸세요."
+echo "      관리자 콘솔 설정의 scheduler_login_host를 202.20.185.100(IP)으로 두세요."
