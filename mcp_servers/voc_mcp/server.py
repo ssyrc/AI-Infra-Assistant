@@ -171,9 +171,9 @@ async def search_voc(query: str, top_k: int = 5) -> list[dict]:
     # 그대로 넘기면 리랭커 입력 한도를 넘기고, 에이전트 컨텍스트도 몇 건 만에 가득 찬다.
     # 판단에 필요한 앞부분만 잘라서 쓴다(원문은 DB에 그대로 남아 있다).
     try:
-        max_chars = int(await get_config("voc_result_max_chars", "2000"))
+        max_chars = int(await get_config("voc_result_max_chars", "1500"))
     except (TypeError, ValueError):
-        max_chars = 2000
+        max_chars = 1500
 
     def clip(text):
         t = text or ""

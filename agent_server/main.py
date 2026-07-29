@@ -174,11 +174,37 @@ def _validate(req: ChatCompletionRequest, model_name: str) -> list[tuple[str, st
     return convo
 
 
+async def _trim_history(history: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """대화 이력을 글자 수 예산 안으로 줄인다(오래된 턴부터 버림).
+
+    Open WebUI는 대화 전체를 매 요청에 실어 보낸다. 검색 결과가 붙은 긴 답변이 몇 번
+    쌓이면 이력만으로 컨텍스트가 가득 차고, 실제로 32768토큰을 넘겨
+    ContextWindowExceededError가 났다. 최근 턴이 가장 중요하므로 뒤에서부터 채운다.
+    """
+    try:
+        budget = int(await get_config("history_max_chars", "8000"))
+    except (TypeError, ValueError):
+        budget = 8000
+    if budget <= 0:
+        return history
+    kept, used = [], 0
+    for role, text in reversed(history):
+        t = text or ""
+        if used + len(t) > budget and kept:
+            break
+        kept.append((role, t))
+        used += len(t)
+    if len(kept) < len(history):
+        print(f"[agent] 대화 이력 {len(history)}턴 중 최근 {len(kept)}턴만 사용"
+              f"(예산 {budget}자)")
+    return list(reversed(kept))
+
+
 async def _create_session(user_id: str, history: list[tuple[str, str]]) -> str:
     session_id = str(uuid.uuid4())
     svc = state["session_service"]
     await svc.create_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
-    for role, text in history:
+    for role, text in await _trim_history(history):
         adk_role = "user" if role == "user" else "model"
         event = Event(author=adk_role,
                       content=types.Content(role=adk_role, parts=[types.Part(text=text)]))
@@ -260,10 +286,16 @@ def _result_phrase(name: str, resp) -> str:
     if isinstance(r, list):
         return f"{len(r)}건 찾음" if r else "찾은 내용 없음"
     if isinstance(r, dict):
+        # 실행 툴이면 '어디서 누구 권한으로' 돌았는지 함께 보여준다.
+        # 출력만 보고는 진짜 실행됐는지, 의도한 서버가 맞는지 알 수 없기 때문이다.
+        where = ""
+        if r.get("ip") or r.get("as_user"):
+            where = " (" + " · ".join(str(x) for x in (r.get("ip"), r.get("as_user")) if x) + ")"
         if r.get("error"):
-            return f"실패 — {str(r['error'])[:60]}"
+            return f"실패{where} — {str(r['error'])[:60]}"
         if "exit_code" in r:
-            return "완료" if r.get("exit_code") == 0 else f"실패(종료코드 {r['exit_code']})"
+            return (f"완료{where}" if r.get("exit_code") == 0
+                    else f"실패{where}(종료코드 {r['exit_code']})")
         return "확인 완료"
     if r is None:
         return "찾은 내용 없음"

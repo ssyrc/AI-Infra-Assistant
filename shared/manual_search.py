@@ -231,8 +231,18 @@ async def search_manual_chunks(query: str, top_k: int = 5, *,
             window = 1
         picked = await _attach_neighbors(pool, picked, max(0, min(window, 3)))
 
+    # 결과 하나가 너무 길면 LLM 컨텍스트가 몇 건 만에 가득 찬다(실제로 32768토큰을 넘겨
+    # ContextWindowExceededError가 났다). 이웃 청크까지 붙은 뒤라 더 길어지므로 여기서 자른다.
+    try:
+        max_chars = int(await get_config("manual_result_max_chars", "1500"))
+    except (TypeError, ValueError):
+        max_chars = 1500
+
     # 메뉴 경로 + 문서 이름을 미리 이어 둔다. LLM이 두 필드를 직접 조합하게 두면
     # 빠뜨리거나 순서를 바꾸기 쉬우므로, 답변에 그대로 옮겨 적을 문자열을 만들어 준다.
     for item in picked:
         item["reference"] = full_reference(item)
+        text = item.get("chunk_text") or ""
+        if max_chars > 0 and len(text) > max_chars:
+            item["chunk_text"] = text[:max_chars] + "\n…(이하 생략, 더 필요하면 get_document)"
     return mode, picked
