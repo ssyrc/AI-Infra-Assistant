@@ -11,22 +11,25 @@ rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
   yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
 ```
 
-## 2. [서버] 콘솔만 재시작 (DB 변경 없음)
+## 2. [서버] 설정 키 추가 + 재시작
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker compose -f docker-compose.dev.yml restart admin-console
+docker compose -f docker-compose.dev.yml run --rm db-init   # embed_max_chars 키 추가
+bash scripts/restart-mounted.sh
 ```
 
-## 3. [웹] VOC 탭 — TSV 다시 등록
+## 3. [웹] VOC 탭 — 먼저 실패한 묶음 지우기
 
-같은 파일을 처음부터 다시 올리고 "매핑대로 일괄 등록"을 누르세요.
+333행 중 16행만 들어간 상태입니다. 위쪽 **업로드 묶음**에서 그 묶음을 삭제하세요.
+(묶음 표에 없으면 목록에서 체크박스로 골라 **선택 삭제**)
 
-- **이제 등록이 실패해도 세션이 살아 있습니다.** 404 대신 **진짜 실패 사유**가 뜹니다.
-  그 메시지를 그대로 전달해 주세요.
-- 임베딩 중간에 끊기면 "N건 중 M건을 넣은 뒤 … 중단했습니다"라고 나옵니다.
-  그때는 위쪽 **업로드 묶음**에서 그 묶음을 삭제하고 다시 등록하면 중복 없이 올라갑니다.
-- 2천 행은 행마다 임베딩을 호출해서 몇 분 걸립니다. 창을 닫지 말고 기다리세요.
+## 4. [웹] VOC 탭 — TSV 다시 등록
+
+- 이제 **긴 행 하나 때문에 전체가 죽지 않습니다.** 끝까지 돌아갑니다.
+- 등록이 끝나면 `N건 등록 · M건 제외` 뒤에 **임베딩 실패 건수와 사유**가 함께 뜹니다.
+  그 내용을 그대로 전달해 주세요(0건이면 안 뜹니다).
+- 333행이면 몇 분 걸립니다. 창을 닫지 마세요.
 
 ---
 

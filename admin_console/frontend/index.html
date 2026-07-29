@@ -689,7 +689,11 @@ function VocPanel() {
       });
       setTbl(null);
       await load(); await loadBatches();
-      alert(`${data.inserted}건 등록 · ${data.skipped}건 제외`);
+      const extra = data.embed_failed
+        ? `\n\n임베딩 실패 ${data.embed_failed}건(내용은 저장됐고 키워드 검색에는 잡힙니다):\n`
+          + (data.embed_errors || []).join("\n")
+        : "";
+      alert(`${data.inserted}건 등록 · ${data.skipped}건 제외${extra}`);
     } catch (e) { alert("등록 실패: " + e.message); }
     setBusy(false);
   };

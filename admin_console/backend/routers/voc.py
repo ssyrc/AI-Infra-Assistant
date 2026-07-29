@@ -166,13 +166,20 @@ def _header_row(ws, row_num: int) -> list[str]:
     return [str(c.value).strip() if c.value else "" for c in row]
 
 
+# "임베딩을 안 넘긴 것"과 "임베딩을 만들지 못해 None으로 넘긴 것"을 구분하기 위한 표식.
+# None을 '미지정'으로 보면, 임베딩에 실패한 행에서 여기서 또 호출해 같은 예외가 난다.
+_NO_EMBEDDING = object()
+
+
 async def _insert_voc(pool, question: str, answer: str, department: str | None, resolved: bool,
-                      batch: dict | None = None) -> bool:
+                      batch: dict | None = None, embedding=_NO_EMBEDDING) -> bool:
     """VOC 한 건을 저장한다. batch가 주어지면 어느 업로드에서 왔는지도 함께 남긴다
-    (묶음 단위 조회·삭제용)."""
+    (묶음 단위 조회·삭제용). embedding을 넘기면 그대로 쓰고(None이면 임베딩 없이 저장),
+    아예 안 넘기면 여기서 만든다."""
     if not question or not answer:
         return False
-    vec = await embed_text(f"{question}\n{answer}")
+    vec = (await embed_text(f"{question}\n{answer}")
+           if embedding is _NO_EMBEDDING else embedding)
     b = batch or {}
     await pool.execute(
         """
@@ -180,10 +187,45 @@ async def _insert_voc(pool, question: str, answer: str, department: str | None, 
                                  batch_id, source_file, uploaded_by)
         VALUES ($1, $2, $3, $4, $5::vector, $6, $7, $8)
         """,
-        question, answer, department, resolved, vector_literal(vec),
+        question, answer, department, resolved, vector_literal(vec) if vec else None,
         b.get("batch_id"), b.get("source_file"), b.get("uploaded_by"),
     )
     return True
+
+
+async def _insert_many(pool, items, batch: dict) -> tuple[int, int, list[str]]:
+    """일괄 등록((question, answer, department, resolved) 튜플들). 한 건이 실패해도
+    전체를 버리지 않는다.
+
+    행마다 임베딩 서버를 호출하므로 특정 행에서만 실패할 수 있다(예: 본문이 너무 긴 건).
+    예전에는 그 한 건에서 예외가 위로 튀어 **나머지 수백 건이 통째로 날아갔다**
+    (333건 중 16건만 등록되고 500). 이제 실패한 행은 임베딩 없이 저장하고 계속 진행한다
+    - 벡터 검색에서만 빠지고 키워드·3gram 검색에는 잡히므로 데이터를 잃지 않는다.
+    다만 임베딩 서버 자체가 죽은 경우까지 수백 건을 밀어 넣으면 안 되므로,
+    연속 실패가 이어지면 중단한다.
+    """
+    inserted, skipped, failures = 0, 0, []
+    consecutive = 0
+    for i, (q, a, dept, resolved) in enumerate(items, start=1):
+        vec = None
+        try:
+            vec = await embed_text(f"{q}\n{a}")
+            consecutive = 0
+        except Exception as e:  # noqa: BLE001
+            consecutive += 1
+            failures.append(f"{i}행: {str(e)[:120]}")
+            if consecutive >= 5:
+                raise HTTPException(
+                    503,
+                    f"임베딩 서버 오류가 {consecutive}건 연속 발생해 중단했습니다"
+                    f"({len(items)}건 중 {inserted}건 등록됨). "
+                    f"VOC 탭 '업로드 묶음'에서 이번 묶음을 삭제하고, 임베딩 서버를 확인한 뒤 "
+                    f"다시 등록하세요. 마지막 오류: {e}")
+        if await _insert_voc(pool, q, a, dept, resolved, batch, embedding=vec):
+            inserted += 1
+        else:
+            skipped += 1
+    return inserted, skipped, failures
 
 
 async def _import_raw_format(ws, header: list[str], pool, batch: dict) -> tuple[int, int]:
@@ -194,7 +236,7 @@ async def _import_raw_format(ws, header: list[str], pool, batch: dict) -> tuple[
         i = col_idx[name]
         return row[i] if i < len(row) else None
 
-    inserted = skipped = 0
+    items, skipped = [], 0
     for row in ws.iter_rows(min_row=_VOC_HEADER_ROW + 1, values_only=True):
         request_content = cell(row, _COL_REQUEST)
         action_date = cell(row, _COL_ACTION_DATE)
@@ -208,13 +250,10 @@ async def _import_raw_format(ws, header: list[str], pool, batch: dict) -> tuple[
             skipped += 1
             continue
 
-        question = clean_text(str(request_content))
-        answer = clean_text(str(resolution))
-        if await _insert_voc(pool, question, answer, None, True, batch):
-            inserted += 1
-        else:
-            skipped += 1
-    return inserted, skipped
+        items.append((clean_text(str(request_content)), clean_text(str(resolution)), None, True))
+
+    ins, more_skipped, _failures = await _insert_many(pool, items, batch)
+    return ins, skipped + more_skipped
 
 
 async def _import_simple_format(ws, header: list[str], pool, batch: dict) -> tuple[int, int]:
@@ -228,7 +267,7 @@ async def _import_simple_format(ws, header: list[str], pool, batch: dict) -> tup
     def cell(row, idx):
         return row[idx] if idx is not None and idx < len(row) else None
 
-    inserted = skipped = 0
+    items, skipped = [], 0
     for row in ws.iter_rows(min_row=2, values_only=True):
         question_raw, answer_raw = cell(row, q_idx), cell(row, a_idx)
         if not question_raw or not answer_raw:
@@ -241,13 +280,11 @@ async def _import_simple_format(ws, header: list[str], pool, batch: dict) -> tup
             if resolved_val is not None else True
         )
 
-        question = clean_text(str(question_raw))
-        answer = clean_text(str(answer_raw))
-        if await _insert_voc(pool, question, answer, department, resolved, batch):
-            inserted += 1
-        else:
-            skipped += 1
-    return inserted, skipped
+        items.append((clean_text(str(question_raw)), clean_text(str(answer_raw)),
+                      department, resolved))
+
+    ins, more_skipped, _failures = await _insert_many(pool, items, batch)
+    return ins, skipped + more_skipped
 
 
 @router.post("/import")
@@ -387,7 +424,8 @@ async def commit_voc_table(body: VocTableCommitIn, admin: str = Depends(require_
             if not q or not a:
                 skipped += 1
                 continue
-            built.append((clean_text(q), clean_text(a), cell(row, body.department_column)))
+            built.append((clean_text(q), clean_text(a),
+                          cell(row, body.department_column), True))
         return built, skipped
 
     # 실패해도 세션을 지우지 않는다. 예전에는 finally로 무조건 지워서, 등록이 한 번
@@ -406,23 +444,10 @@ async def commit_voc_table(body: VocTableCommitIn, admin: str = Depends(require_
     # 이 업로드에서 들어간 행들을 하나로 묶는다(콘솔에서 파일 단위로 보고 되돌리기 위함).
     batch = {"batch_id": uuid.uuid4().hex,
              "source_file": session["filename"], "uploaded_by": admin}
-    inserted = 0
-    for q, a, dept in items:
-        try:
-            ok = await _insert_voc(pool, q, a, dept, True, batch)
-        except Exception as e:  # noqa: BLE001
-            # 행마다 임베딩 서버를 호출하므로 도중에 끊길 수 있다. 몇 건까지 들어갔는지와
-            # 되돌리는 방법을 알려 준다(묶음 삭제 후 재시도하면 중복 없이 다시 올릴 수 있다).
-            raise HTTPException(
-                503,
-                f"{len(items)}건 중 {inserted}건을 넣은 뒤 임베딩 서버 오류로 중단했습니다. "
-                f"VOC 탭의 '업로드 묶음'에서 이번 묶음({batch['source_file']}, {inserted}건)을 "
-                f"삭제한 뒤 다시 등록하세요. 원인: {type(e).__name__}: {e}")
-        if ok:
-            inserted += 1
-        else:
-            skipped += 1
+    inserted, more_skipped, failures = await _insert_many(pool, items, batch)
+    skipped += more_skipped
 
     await delete_upload_session(_DSN_VOC, body.upload_id)
     return {"inserted": inserted, "skipped": skipped, "total": len(items),
+            "embed_failed": len(failures), "embed_errors": failures[:10],
             "batch_id": batch["batch_id"], "source_file": session["filename"]}

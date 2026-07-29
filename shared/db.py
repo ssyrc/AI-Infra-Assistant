@@ -86,9 +86,27 @@ async def _cache_key(text: str, model: str) -> str:
     return "emb:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+# 임베딩 모델의 최대 입력 길이를 넘기면 서버가 400을 돌려준다(bge-m3는 8192 토큰).
+# 매뉴얼 청크는 1500자로 잘라 두지만 VOC는 원문 한 건이 그대로 들어와서 길이 제한이 없었다.
+# 한글은 토크나이저에서 대략 글자당 1~1.5토큰이라 4000자면 넉넉히 한도 안쪽이다.
+DEFAULT_EMBED_MAX_CHARS = 4000
+
+
 async def embed_text(text: str) -> list[float]:
-    """vLLM /v1/embeddings 호출. Redis가 있으면 캐시한다."""
+    """vLLM /v1/embeddings 호출. Redis가 있으면 캐시한다.
+
+    입력이 모델 한도를 넘으면 잘라서 보낸다. 예전에는 그대로 보내다가 400을 받고
+    예외가 위로 튀어, VOC 일괄 등록이 긴 문의 한 건에서 통째로 죽었다(333건 중 16건만 등록).
+    """
     model = await get_config("vllm_embed_model", "bge-m3")
+    try:
+        max_chars = int(await get_config("embed_max_chars", str(DEFAULT_EMBED_MAX_CHARS)))
+    except (TypeError, ValueError):
+        max_chars = DEFAULT_EMBED_MAX_CHARS
+    text = text or ""
+    if max_chars > 0 and len(text) > max_chars:
+        print(f"[db] 임베딩 입력이 {len(text)}자라 {max_chars}자로 잘라서 보냅니다.")
+        text = text[:max_chars]
     redis = await _get_redis()
     key = None
     if redis is not None:
@@ -107,7 +125,12 @@ async def embed_text(text: str) -> list[float]:
     resp = await client.post(
         f"{base_url.rstrip('/')}/embeddings", json={"model": model, "input": text}
     )
-    resp.raise_for_status()
+    if resp.status_code >= 400:
+        # 서버가 왜 거절했는지(길이 초과·모델명 불일치 등)를 그대로 올려 보낸다.
+        # 상태 코드만 던지면 호출부에서 원인을 알 수 없다.
+        raise RuntimeError(
+            f"임베딩 서버가 {resp.status_code}를 반환했습니다(모델 {model}, 입력 {len(text)}자): "
+            f"{resp.text[:300]}")
     vec = resp.json()["data"][0]["embedding"]
 
     if redis is not None and key:

@@ -436,6 +436,10 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
         # 0이면 확장하지 않음. 크게 잡으면 컨텍스트가 길어져 답변이 산만해진다(최대 3).
         ("manual_neighbor_window", "1",
          "매뉴얼 검색 결과에 함께 붙일 앞뒤 청크 수(0이면 붙이지 않음)", True, False, False),
+        # 임베딩 모델 한도(bge-m3 8192토큰)를 넘기면 서버가 400을 돌려준다. 넘는 입력은 잘라서
+        # 보낸다. 0이면 자르지 않음(모델 한도가 더 큰 경우에만).
+        ("embed_max_chars", "4000",
+         "임베딩에 보낼 최대 글자 수(초과분은 잘림, 0이면 자르지 않음)", True, False, False),
         ("embed_cache_ttl_seconds", "86400", "쿼리 임베딩 캐시 TTL(초)", True, False, False),
         ("clean_policy_version", "1", "정제 정책 버전(캐시 키에 포함)", True, False, False),
         ("search_max_top_k", "20", "검색 top_k 상한", True, False, False),
