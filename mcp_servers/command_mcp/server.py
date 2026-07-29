@@ -228,13 +228,23 @@ async def run_command(user_id: str, command: str, args: list[str] | None = None,
     return result
 
 
+DEFAULT_JOB_COMMAND = "phd info -u {user_id}"
+
+
 async def get_scheduler_job_info(user_id: str) -> dict:
     """현재 사용자 '본인'의 스케줄러 job 상태를 조회한다.
-    로그인 서버(scheduler_login_host)에 ssh(root) 후 `su - <user_id>`로 강등해
-    `phd info -u <user_id>`를 실행한다. user_id는 호출자 신원에서 강제 주입되므로
-    남의 job을 조회할 수 없다. 결과에 실행한 커맨드(command)도 함께 반환한다."""
+
+    실행할 커맨드는 **설정값 `scheduler_job_command`** 에서 매 호출마다 읽는다.
+    예전에는 `phd info -u <user>`가 코드에 박혀 있어서, 관리자가 콘솔 커맨드 탭에서
+    아무리 고쳐도 이 툴에는 반영되지 않았다(사용법이 다른 사이트에서 곧바로 실패).
+    `{user_id}`를 쓰면 호출자 계정으로 치환된다. 로그인 서버(scheduler_login_host)에
+    ssh(root) 후 `su - <user_id>`로 강등해 실행하므로 남의 job은 조회할 수 없다."""
     login_host = await get_config("scheduler_login_host", "202.20.185.100")
-    return await run_ssh_as_user(login_host, user_id, ["phd", "info", "-u", user_id])
+    template = (await get_config("scheduler_job_command", DEFAULT_JOB_COMMAND)
+                or DEFAULT_JOB_COMMAND)
+    deny = deny_set(await get_config("catalog_exec_deny_commands", DEFAULT_DENY_CSV))
+    argv = build_catalog_argv(template, "scheduler_job_command", None, user_id, deny)
+    return await run_ssh_as_user(login_host, user_id, argv)
 
 
 # 실행 툴 목록. System MCP의 WHITELIST와 달리 여기 등록된 툴은 항상 실행 가능하다
@@ -261,8 +271,9 @@ EXEC_TOOLS = {
     "get_scheduler_job_info": {
         "handler": get_scheduler_job_info,
         "description": (
-            "현재 로그인한 사용자 '본인'의 스케줄러 job 상태를 조회한다(로그인 서버에서 "
-            "`phd info -u <본인>` 실행). 사용자가 '내 job', '내 작업 상태'를 물을 때 사용한다. "
+            "현재 로그인한 사용자 '본인'의 스케줄러 job 상태를 조회한다(로그인 서버에서 실행). "
+            "실행되는 커맨드는 관리자 설정값이며 사이트마다 다르다. "
+            "사용자가 '내 job', '내 작업 상태'를 물을 때 사용한다. "
             "대상 사용자는 시스템이 본인으로 고정하므로 사용자 id를 지정하지 않는다(남의 job 불가). "
             "커맨드 '사용법'만 궁금하면 이 툴 대신 search_commands를 쓴다."
         ),
