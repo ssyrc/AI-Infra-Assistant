@@ -64,6 +64,10 @@ SSH_CONTROL_PERSIST = os.environ.get("SSH_CONTROL_PERSIST", "3600")
 # 커맨드가 죽은 소켓을 잡고 타임아웃까지 기다린다. keepalive로 살아 있는지 스스로 확인하게 한다.
 SSH_ALIVE_INTERVAL = os.environ.get("SSH_ALIVE_INTERVAL", "30")
 SSH_ALIVE_COUNT = os.environ.get("SSH_ALIVE_COUNT", "3")
+# `su - <user>`(로그인 셸)는 커맨드마다 원격 계정 프로필을 전부 읽는다(실측 약 2초).
+# 기본은 true - 사내 커맨드가 프로필의 PATH/모듈에 의존하는 경우가 많다.
+# 그런 의존이 없다고 확인한 환경에서만 .env에 SSH_SU_LOGIN=false를 넣어 2초를 없앤다.
+SSH_SU_LOGIN = os.environ.get("SSH_SU_LOGIN", "true").strip().lower() != "false"
 
 # LLM에 넘길 출력 상한. **컨텍스트 예산 때문에 반드시 작아야 한다.**
 # 예전엔 64KB였는데, 그 출력이 그대로 다음 요청 프롬프트에 실려 32768 컨텍스트를 넘겼다
@@ -180,9 +184,17 @@ def validate_user(user_id: str) -> str:
 
 def _remote_command(user: str, argv: list) -> str:
     """원격에서 'su - user -c <inner>' 형태로 사용자 권한 실행 명령을 만든다.
-    inner의 동적 인자는 사용자 셸용으로 quote하고, inner 전체는 root 셸용으로 다시 quote한다."""
+    inner의 동적 인자는 사용자 셸용으로 quote하고, inner 전체는 root 셸용으로 다시 quote한다.
+
+    `-`(로그인 셸)는 커맨드마다 원격 계정의 프로필을 전부 읽는다 - 실측 약 2초였고,
+    연결 다중화로는 줄지 않으며 도구 호출 횟수만큼 그대로 곱해진다. 그래도 **기본은 로그인
+    셸이다**: 사내 커맨드가 프로필에서 잡히는 PATH/모듈에 의존하는 경우가 많아, 끄면
+    "command not found"로 바뀔 수 있다. 확인한 환경에서만 SSH_SU_LOGIN=false로 끈다.
+    어느 쪽이든 권한 강등(`su - <user>`)은 그대로다 - 우회 경로가 생기지 않는다.
+    """
     inner = " ".join(shlex.quote(str(a)) for a in argv)     # 사용자 셸 파싱용
-    return f"su - {user} -c {shlex.quote(inner)}"            # root 셸 파싱용 (user는 정규식 검증됨)
+    dash = "- " if SSH_SU_LOGIN else ""
+    return f"su {dash}{user} -c {shlex.quote(inner)}"        # root 셸 파싱용 (user는 정규식 검증됨)
 
 
 def control_path(ip: str) -> str:
@@ -219,6 +231,17 @@ def _base_ssh_opts(ip: str = "") -> list[str]:
         "-o", f"ConnectTimeout={SSH_CONNECT_TIMEOUT}",
         "-o", f"ServerAliveInterval={SSH_ALIVE_INTERVAL}",
         "-o", f"ServerAliveCountMax={SSH_ALIVE_COUNT}",
+        # --- 첫 접속(핸드셰이크)을 늘리는 것들을 끈다 -----------------------------------
+        # 실측: 마스터가 없는 상태의 `ssh … true`가 **17.4초**였다. TCP 연결 자체가 아니라
+        # 인증 협상 단계에서 대부분이 나간다. ConnectTimeout은 TCP 연결에만 걸려서 이걸 못 막는다.
+        #   GSSAPI(커버로스): KDC가 없거나 안 닿는 망에서 조회가 타임아웃까지 매달린다.
+        #     사내 폐쇄망에서 흔한 수 초~수십 초짜리 지연이고, 우리는 공개키만 쓴다.
+        #   여러 키 시도: 에이전트/기본 경로의 키를 차례로 던지면 왕복이 그만큼 늘고,
+        #     MaxAuthTries를 넘기면 진짜 키를 써 보기도 전에 끊긴다.
+        #   IPv6: AAAA를 먼저 시도하다 떨어지면 그만큼 늦는다. 대상은 IPv4로 고정돼 있다.
+        "-o", "GSSAPIAuthentication=no",
+        "-o", "PreferredAuthentications=publickey",
+        "-o", "AddressFamily=inet",
     ]
     if SSH_MULTIPLEX and _ensure_control_dir():
         opts += [
@@ -227,7 +250,8 @@ def _base_ssh_opts(ip: str = "") -> list[str]:
             "-o", f"ControlPersist={SSH_CONTROL_PERSIST}",
         ]
     if SSH_KEY and os.path.isfile(SSH_KEY):
-        opts += ["-i", SSH_KEY]
+        # IdentitiesOnly: 지정한 이 키 **하나만** 시도한다(다른 키를 던져 보는 왕복을 없앤다).
+        opts += ["-i", SSH_KEY, "-o", "IdentitiesOnly=yes"]
     return opts
 
 

@@ -25,6 +25,7 @@ Execution MCP - 커맨드 실행을 담당하는 **단 하나의** MCP. (구 Com
 import sys
 import os
 import json
+import time
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../shared"))
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -34,8 +35,8 @@ from mcp_caller import (  # noqa: E402
     get_caller, CallerContextMiddleware, tool_description, build_wrapped,
 )
 from ssh_exec import (  # noqa: E402
-    master_alive, run_ssh_as_user, set_output_limit_getter, warm_master,
-    start_master_keepalive,
+    master_alive, master_socket_exists, resolve_host, run_ssh_as_user,
+    set_output_limit_getter, warm_master, start_master_keepalive,
 )
 from execution_exec import DEFAULT_DENY_CSV, build_free_argv, deny_set  # noqa: E402
 from registry import (  # noqa: E402
@@ -173,11 +174,36 @@ for _name, _entry in ALL_TOOLS.items():
     )
 
 
+async def warm_endpoint(request):
+    """`GET /warm` — 로그인 서버로의 ssh 마스터 연결을 지금 열어 둔다(이미 서 있으면 즉시 반환).
+
+    왜 HTTP로 노출하나: 사용자가 Open WebUI를 새로 열거나 새 채팅을 시작하는 시점에
+    **연결이 이미 서 있어야** 첫 커맨드가 곧바로 실행된다. 마스터가 없으면 첫 접속에만
+    실측 17초가 들었다(인증 협상). agent-server가 이 주소를 요청 시작 시 한 번 두드린다.
+    MCP 툴이 아니라 평범한 HTTP 라우트라 LLM 프롬프트에는 실리지 않는다.
+    """
+    from starlette.responses import JSONResponse
+
+    host = await _login_host()
+    if not host:
+        return JSONResponse({"ok": False, "reason": "execution_host 미설정"}, status_code=503)
+    ip = resolve_host(host)
+    if master_socket_exists(ip):
+        return JSONResponse({"ok": True, "host": host, "already_warm": True})
+    started = time.monotonic()
+    ok = await warm_master(host)
+    took = int((time.monotonic() - started) * 1000)
+    print(f"[execution-mcp] 요청 시점 ssh 예열 {'성공' if ok else '실패'} ({host} · {took:,}ms)")
+    return JSONResponse({"ok": ok, "host": host, "already_warm": False, "duration_ms": took})
+
+
 if __name__ == "__main__":
     import uvicorn
+    from starlette.routing import Route
 
     port = int(os.environ.get("MCP_PORT", 8002))
     inner = mcp.streamable_http_app()
+    inner.router.routes.append(Route("/warm", warm_endpoint, methods=["GET"]))
 
     # 기동하자마자 로그인 서버로 ssh 마스터 연결을 열어 둔다. 사용자가 첫 질문을 던질 때
     # 이미 연결이 서 있으므로 커맨드가 곧바로 실행된다(첫 접속 비용이 체감 지연의 대부분).

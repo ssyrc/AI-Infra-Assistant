@@ -2,14 +2,16 @@
 # 커맨드 실행이 **어디서** 느린지 초 단위로 쪼개 본다. 폐쇄망 배포 호스트(202.20.183.30)에서 실행.
 #
 #   bash scripts/bench-exec.sh <계정> [커맨드] [호스트IP]
-#   예) bash scripts/bench-exec.sh yr9.choi myquota
+#   예) bash scripts/bench-exec.sh yr9.choi "phd list"
 #
-# 한 번의 커맨드 실행 시간은 세 덩어리로 나뉜다.
-#   (1) 접속        TCP + 키교환. 다중화 마스터가 서 있으면 0에 가깝다.
+# 한 번의 커맨드 실행 시간은 세 덩어리다.
+#   (1) 접속        TCP + 인증 협상. 다중화 마스터가 서 있으면 0에 가깝다.
 #   (2) su - 로그인 셸  원격 계정의 프로필(/etc/profile, .bashrc, 모듈 초기화 …)을 매번 읽는다.
-#                    HPC 로그인 노드에서는 이게 수 초일 수 있고, 다중화로도 줄지 않는다.
+#                    다중화로 줄지 않고, 도구 호출 횟수만큼 그대로 곱해진다.
 #   (3) 커맨드 자체
-# 아래 4개를 재면 (1)(2)(3)이 각각 얼마인지 바로 나온다. 추측하지 말고 이 숫자를 보낸다.
+#
+# 계측은 **컨테이너 안에서 한 번에** 돈다. 단계마다 `docker compose exec`를 새로 띄우면
+# 그 기동 비용(약 1초)이 모든 숫자에 섞여 들어간다 — 첫 판에서 "접속만 1.11초"로 보였던 게 그거다.
 set -u
 
 USER_ID="${1:-}"
@@ -24,49 +26,77 @@ if [ -z "$USER_ID" ]; then
 fi
 
 if [ -z "$HOST" ]; then
-  HOST="$($COMPOSE exec -T "$SVC" sh -c \
-    'python -c "import os,sys;sys.path.insert(0,\"/app/shared\");from config_store import get_config;import asyncio;print(asyncio.run(get_config(\"execution_host\",\"202.20.185.100\")))"' \
-    2>/dev/null | tr -d '\r[:space:]')"
+  HOST="$($COMPOSE exec -T "$SVC" python -c \
+    'import asyncio,sys; sys.path.insert(0,"/app/shared")
+from config_store import get_config
+print(asyncio.run(get_config("execution_host","202.20.185.100")))' 2>/dev/null \
+    | tr -d '\r' | tr -d '[:space:]')"
   HOST="${HOST:-202.20.185.100}"
 fi
 echo "대상: root@$HOST · 실행 계정: $USER_ID · 커맨드: $CMD"
+echo
 
-OPTS="-o BatchMode=yes -o PasswordAuthentication=no -o StrictHostKeyChecking=accept-new \
+# 컨테이너 안에서 전부 실행한다. 우리 코드와 **같은 옵션**을 써야 의미가 있다.
+$COMPOSE exec -T "$SVC" sh -s <<EOF
+set -u
+HOST='$HOST'
+USER_ID='$USER_ID'
+CMD='$CMD'
+SOCK=/tmp/.ssh-mux/bench
+mkdir -p /tmp/.ssh-mux
+
+BASE="-o BatchMode=yes -o PasswordAuthentication=no -o StrictHostKeyChecking=accept-new \
 -o UserKnownHostsFile=/root/.ssh/known_hosts_agent -o ConnectTimeout=8 \
--o ControlMaster=auto -o ControlPath=/tmp/.ssh-mux/bench-%C -o ControlPersist=300 \
+-o GSSAPIAuthentication=no -o PreferredAuthentications=publickey -o AddressFamily=inet \
+-i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+MUX="-o ControlMaster=auto -o ControlPath=\$SOCK -o ControlPersist=300"
+
+# 느린 핸드셰이크의 범인을 가리기 위해, 최적화를 **끈** 조건도 함께 잰다.
+SLOW="-o BatchMode=yes -o PasswordAuthentication=no -o StrictHostKeyChecking=accept-new \
+-o UserKnownHostsFile=/root/.ssh/known_hosts_agent -o ConnectTimeout=8 \
 -i /root/.ssh/id_ed25519"
 
-run() {                     # run <설명> <원격명령>
-  local label="$1" remote="$2" start end
-  start=$(date +%s.%N)
-  $COMPOSE exec -T "$SVC" sh -c \
-    "mkdir -p /tmp/.ssh-mux && ssh $OPTS root@$HOST $(printf '%q' "$remote") >/dev/null 2>&1 </dev/null"
-  local code=$?
-  end=$(date +%s.%N)
-  printf '  %-34s %6.2f초  (종료코드 %d)\n' "$label" "$(echo "$end - $start" | bc)" "$code"
+t() {   # t <라벨> <ssh옵션> <원격명령>
+  label="\$1"; shift
+  opts="\$1"; shift
+  start=\$(date +%s%N)
+  ssh \$opts "root@\$HOST" "\$1" >/dev/null 2>&1 </dev/null
+  code=\$?
+  end=\$(date +%s%N)
+  # dash의 printf에는 부동소수 서식을 맡기지 않는다(밀리초를 정수로 쪼개 찍는다).
+  ms=\$(( (end - start) / 1000000 ))
+  printf '  %-42s %4d.%03d초  (종료코드 %d)\n' "\$label" \$(( ms / 1000 )) \$(( ms % 1000 )) "\$code"
 }
 
-echo
-echo "=== 1회차: 마스터 연결이 없는 상태(첫 커맨드와 같은 조건) ==="
-$COMPOSE exec -T "$SVC" sh -c "rm -f /tmp/.ssh-mux/bench-* 2>/dev/null" >/dev/null 2>&1
-run "접속만 (true)"                       "true"
+ssh \$BASE \$MUX -O exit "root@\$HOST" >/dev/null 2>&1
+rm -f "\$SOCK" 2>/dev/null
+
+echo "=== 1. 첫 접속 (마스터 없음) — 이게 크면 인증 협상이 원인 ==="
+t "최적화 끔 (기존 옵션)"        "\$SLOW" true
+t "최적화 켬 (GSSAPI/키/IPv4)"   "\$BASE" true
 
 echo
-echo "=== 2회차 이후: 마스터 재사용 ==="
-run "접속만 (true)"                       "true"
-run "su - 로그인 셸만 (su - … -c true)"    "su - $USER_ID -c true"
-run "실제 커맨드"                          "su - $USER_ID -c $(printf '%q' "$CMD")"
+echo "=== 2. 마스터를 세운 뒤 ==="
+ssh \$BASE \$MUX "root@\$HOST" true >/dev/null 2>&1 </dev/null
+t "접속만"                         "\$BASE \$MUX" true
+t "su - 로그인 셸 (기본)"          "\$BASE \$MUX" "su - \$USER_ID -c true"
+t "su 비로그인 셸 (SSH_SU_LOGIN=false)" "\$BASE \$MUX" "su \$USER_ID -c true"
+t "실제 커맨드 (su - 로) "         "\$BASE \$MUX" "su - \$USER_ID -c '\$CMD'"
 
-$COMPOSE exec -T "$SVC" sh -c "ssh $OPTS -O exit root@$HOST" >/dev/null 2>&1
+ssh \$BASE \$MUX -O exit "root@\$HOST" >/dev/null 2>&1
+EOF
 
 cat <<'EOF'
 
 읽는 법
-  · 1회차 "접속만"이 크고 2회차가 작다 → 다중화는 동작 중. 기동 로그에서 마스터 예열이
-    성공했는지 확인한다(execution-mcp 로그의 "ssh 다중화 마스터 준비 완료").
-  · 2회차 "접속만"도 크다 → 마스터가 유지되지 않는다. 방화벽이 유휴 연결을 끊는지 확인
-    (.env의 SSH_ALIVE_INTERVAL / SSH_CONTROL_PERSIST).
-  · "su - 로그인 셸만"이 크다 → 원격 계정 프로필이 무겁다. 이건 우리 쪽에서 줄일 수 없고,
-    커맨드를 여러 번 부를수록 그대로 곱해진다(= 도구 호출 횟수를 줄여야 한다).
-  · "실제 커맨드"만 크다 → 커맨드 자체가 느린 것이다(GPFS 쿼터 조회 등). 정상이다.
+  · 1번에서 "최적화 켬"이 확 작아지면 → 인증 협상(GSSAPI/여러 키/IPv6)이 원인이었다.
+    이번 코드에 그 옵션들이 들어갔으니 그대로 좋아진다.
+  · 1번 두 줄이 둘 다 크면 → 게이트 서버 sshd 쪽 지연(역방향 DNS `UseDNS` 등)이다.
+    우리 쪽에서 못 줄이니, 마스터를 항상 세워 두는 것(예열)으로 감춘다.
+  · 2번 "su - 로그인 셸"과 "su 비로그인 셸" 차이가 크면 → 원격 계정 프로필이 무겁다.
+    비로그인으로 바꿔도 커맨드가 정상 동작하면(PATH가 잡히면) .env에 SSH_SU_LOGIN=false를
+    넣어 커맨드마다 그 시간을 없앨 수 있다. 먼저 실제 커맨드로 확인할 것:
+      docker compose -f docker-compose.dev.yml exec -T execution-mcp \
+        ssh -o BatchMode=yes -i /root/.ssh/id_ed25519 root@<IP> "su <계정> -c '<커맨드>'"
+  · "실제 커맨드"만 크면 → 커맨드 자체가 느린 것이다. 정상이다.
 EOF

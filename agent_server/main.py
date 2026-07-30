@@ -115,13 +115,46 @@ class ChatCompletionRequest(BaseModel):
     user: str | None = None
 
 
+# --- ssh 연결 예열 ------------------------------------------------------------------
+# 사용자가 Open WebUI를 새로 열거나(=/v1/models 호출) 질문을 던지는 시점에 로그인 서버로의
+# ssh 마스터가 **이미 서 있어야** 첫 커맨드가 곧바로 실행된다. 없으면 첫 접속에만 17초가
+# 들었다(실측, 인증 협상). Execution MCP의 /warm은 이미 서 있으면 아무것도 하지 않는다.
+# 응답을 기다리지 않는다(예열은 부가 작업이고, 실패해도 커맨드는 평소대로 직접 접속한다).
+_warm_tasks: set = set()
+
+
+def warm_execution_host():
+    async def _run():
+        try:
+            url = (await get_config("execution_mcp_url", "") or "").strip()
+            if not url:
+                return
+            base = url.rstrip("/")
+            for suffix in ("/mcp", "/sse"):        # MCP 엔드포인트 경로를 떼고 /warm으로
+                if base.endswith(suffix):
+                    base = base[: -len(suffix)]
+                    break
+            client = await get_http_client()
+            await client.get(f"{base}/warm", timeout=20)
+        except Exception as e:  # noqa: BLE001
+            print(f"[agent] ssh 예열 요청 실패(무시): {type(e).__name__}: {e}")
+
+    task = asyncio.create_task(_run())
+    _warm_tasks.add(task)
+    task.add_done_callback(_warm_tasks.discard)
+
+
 @app.get("/health")
 async def health():
+    warm_execution_host()
     return {"status": "ok", "model": await _display_model_name()}
 
 
 @app.get("/v1/models")
 async def list_models():
+    # Open WebUI가 페이지를 열거나 새로고침할 때 부르는 엔드포인트다. 여기서 예열하면
+    # 사용자가 첫 질문을 타이핑하는 동안 ssh 세션이 준비된다.
+    warm_execution_host()
     return {"object": "list", "data": [{"id": await _display_model_name(), "object": "model"}]}
 
 
@@ -488,6 +521,7 @@ def _caller_from_request(request: Request, req: ChatCompletionRequest) -> tuple[
 
 @app.post("/v1/chat/completions")
 async def chat_completions(req: ChatCompletionRequest, request: Request):
+    warm_execution_host()          # 답을 만드는 동안 ssh 세션이 준비되게(응답을 막지 않는다)
     model_name = await _display_model_name()
     convo = _validate(req, model_name)
     user_id, user_role, chat_id = _caller_from_request(request, req)

@@ -838,6 +838,47 @@ def test_session_history_is_written_without_reloading_the_session():
     assert "append_event" in body
 
 
+def test_ssh_handshake_options_are_disabled_by_default():
+    """첫 접속이 17.4초였다. TCP가 아니라 **인증 협상**이 원인이라 ConnectTimeout으로는 못 막는다.
+    협상을 늘리는 것들(GSSAPI·여러 키 시도·IPv6)을 끈 상태로 유지한다."""
+    ssh = open(os.path.join(ROOT, "shared", "ssh_exec.py"), encoding="utf-8").read()
+    for opt in ("GSSAPIAuthentication=no", "PreferredAuthentications=publickey",
+                "AddressFamily=inet", "IdentitiesOnly=yes"):
+        assert opt in ssh, f"핸드셰이크 최적화가 빠졌다: {opt}"
+
+
+def test_warm_endpoint_exists_and_is_not_a_tool():
+    """새로고침/새 채팅 시점에 ssh 세션이 서 있어야 한다.
+
+    예열은 HTTP 라우트여야 한다 - MCP 툴로 만들면 설명이 매 요청 프롬프트에 실리고,
+    에이전트가 그걸 골라 호출하는 헛턴도 생긴다.
+    """
+    server = open(os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"),
+                  encoding="utf-8").read()
+    assert "async def warm_endpoint" in server
+    assert 'Route("/warm"' in server
+    assert "mcp.add_tool" not in server.split("def warm_endpoint")[1], \
+        "예열을 MCP 툴로 노출하면 안 된다"
+
+    main = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    assert "def warm_execution_host" in main
+    # Open WebUI가 페이지를 열 때 부르는 경로와 채팅 시작 지점 모두에서 예열한다.
+    assert main.count("warm_execution_host()") >= 3, "예열 호출 지점이 부족하다"
+
+
+def test_su_login_shell_is_switchable_but_defaults_on():
+    """`su -`는 커맨드마다 약 2초를 쓴다. 끌 수 있게 하되, 기본은 유지한다
+    (사내 커맨드가 프로필의 PATH에 의존하면 끄는 순간 command not found가 된다)."""
+    ssh = open(os.path.join(ROOT, "shared", "ssh_exec.py"), encoding="utf-8").read()
+    assert 'os.environ.get("SSH_SU_LOGIN", "true")' in ssh, "기본값이 로그인 셸이 아니다"
+
+    sys.path.insert(0, os.path.join(ROOT, "shared"))
+    import ssh_exec
+    assert ssh_exec.SSH_SU_LOGIN is True
+    cmd = ssh_exec._remote_command("yr9.choi", ["quota", "report"])
+    assert cmd.startswith("su - yr9.choi -c "), cmd
+
+
 def test_instruction_names_no_in_house_command():
     """지시문에 **사내 전용 커맨드 이름을 쓰지 않는다** — 금지 예시로도 쓰지 않는다.
 

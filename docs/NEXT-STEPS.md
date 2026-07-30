@@ -3,6 +3,9 @@
 **[WSL]** `/home/yrc/AI-Infra-Assistant` · **[서버]** 202.20.183.30
 `/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant` · **[웹]** 콘솔 `http://202.20.183.30:8501`
 
+측정값에서 나온 결론: **첫 접속 17.4초가 범인**입니다(TCP가 아니라 ssh 인증 협상).
+그 협상을 끄는 옵션을 넣었고, 새로고침·새 채팅 때 미리 연결을 세우도록 했습니다.
+
 ## 1. [WSL] 코드 반영
 
 ```bash
@@ -14,8 +17,6 @@ rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
 
 ## 2. [서버] 마이그레이션 + 컨테이너 재생성
 
-`SSH_CONTROL_PERSIST`가 바뀌었으니 **restart가 아니라 `up -d`**로 재생성해야 반영됩니다.
-
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
 docker compose -f docker-compose.dev.yml run --rm db-init
@@ -23,31 +24,53 @@ docker compose -f docker-compose.dev.yml up -d --no-build --remove-orphans
 docker compose -f docker-compose.dev.yml ps
 ```
 
-## 3. [웹] 콘솔 실행 탭 — 안 되는 커맨드가 등록돼 있는지 확인
+## 3. [서버] 다시 측정 — 결과를 그대로 보내주세요
 
-`phd info -u {user_id}` 같은 **동작하지 않는 커맨드가 등록돼 있으면 지우거나 고쳐 주세요.**
-등록된 커맨드는 그대로 에이전트 툴이 되므로, 여기 있으면 계속 호출됩니다.
-
-## 4. [서버] 기동 로그 확인 — 이 줄들을 보내주세요
-
-```bash
-docker compose -f docker-compose.dev.yml logs execution-mcp | grep -E "노출된 툴|툴 [0-9]+개|마스터"
-```
-
-- `노출된 툴:` 에 **3번에서 정리한 커맨드들 + run_command** 만 있어야 합니다.
-  (gpu_status·list_dir 같은 코드 내장 커맨드 7개는 삭제했습니다.)
-- `ssh 다중화 마스터 준비 완료` 가 안 보이면 5번을 먼저 하세요.
-
-## 5. [서버] 실행이 어디서 느린지 측정 — 결과를 그대로 보내주세요
+계측 방식을 고쳤습니다(예전 숫자에는 `docker compose exec` 기동 비용 약 1초가 섞여 있었습니다).
+1번 항목에서 **"최적화 켬"이 확 작아지는지**가 이번 핵심입니다.
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-bash scripts/bench-exec.sh yr9.choi myquota
+bash scripts/bench-exec.sh yr9.choi "phd list"
 ```
 
-접속 / `su -` 로그인 셸 / 커맨드 자체를 따로 재서 초로 보여줍니다.
+## 4. [서버] 예열이 실제로 도는지 확인
 
-## 6. [웹] 콘솔 설정 탭 — 값 확인
+```bash
+curl -s http://localhost:8504/warm; echo
+docker compose -f docker-compose.dev.yml logs execution-mcp | grep -E "마스터|예열|노출된 툴"
+```
+
+`{"ok":true,...}` 가 나오고, 두 번째 호출은 `"already_warm":true` 여야 합니다.
+
+## 5. [서버] 로그인 셸 2초를 없앨 수 있는지 확인 — 결과를 보내주세요
+
+`su - <계정>`(로그인 셸)이 커맨드마다 약 2초를 씁니다. 프로필 없이도 커맨드가 도는지 봅니다.
+
+```bash
+docker compose -f docker-compose.dev.yml exec -T execution-mcp \
+  ssh -o BatchMode=yes -o GSSAPIAuthentication=no -i /root/.ssh/id_ed25519 \
+  root@202.20.185.100 "su yr9.choi -c 'phd list'"
+```
+
+정상 출력이 나오면 `.env`에 `SSH_SU_LOGIN=false` 를 넣고 `up -d` 하면 커맨드마다 2초가 사라집니다.
+`command not found` 가 나오면 넣지 마세요(그건 프로필에서 PATH를 잡는다는 뜻입니다).
+
+## 6. [웹] 콘솔 실행 탭 — 안 되는 커맨드 정리
+
+`phd info -u {user_id}` 처럼 **동작하지 않는 커맨드가 등록돼 있으면 지우거나 고쳐 주세요.**
+등록된 커맨드는 그대로 에이전트 툴이 되므로, 여기 있으면 계속 호출됩니다.
+정리 후 4번의 `노출된 툴:` 줄로 확인하세요.
+
+## 7. [웹] 설정 탭 → 지시문 교체
+
+`agent_system_instruction` 에 맨 아래 **부록** 전문을 붙여넣고 저장 → `agent-server 재시작` 버튼.
+
+> 지시문에서 `phd info` 라는 이름을 **완전히 뺐습니다.** 예전 지시문에 그 이름이
+> "이런 걸 지어내지 마세요"라는 금지 예시로 들어 있었는데, 모델이 그걸 아는 커맨드로 읽고
+> 그대로 실행하고 있었습니다. 지시문을 안 바꾸면 증상이 그대로입니다.
+
+같은 화면에서 값도 확인해 주세요.
 
 | key | 값 |
 |---|---|
@@ -55,27 +78,17 @@ bash scripts/bench-exec.sh yr9.choi myquota
 | `openwebui_public_url` | `http://202.20.183.30:8502` |
 | `voc_intake_guide` | 실제 VOC 접수 경로 |
 
-## 7. [웹] 설정 탭 → 지시문 교체
-
-`agent_system_instruction` 에 맨 아래 **부록** 전문을 붙여넣고 저장 → `agent-server 재시작` 버튼.
-
-> 이번 지시문에서 `phd info` 라는 이름을 **완전히 뺐습니다.** 예전 지시문에 그 이름이
-> "이런 걸 지어내지 마세요"라는 금지 예시로 들어 있었는데, 모델이 그걸 아는 커맨드로 읽고
-> 그대로 실행하고 있었습니다. 지시문을 안 바꾸면 증상이 그대로입니다.
-
-## 8. [웹] Open WebUI에서 순서대로 물어보고, **각 항목 소요 시간**을 적어 주세요
+## 8. [웹] Open WebUI에서 물어보고 **소요 시간**을 적어 주세요
 
 1. `내 job 리스트 보여줘`
-2. `gpu job 현황 보여줘`
-3. `내 홈 파일 리스트 보여줘`
-4. `내 홈 스토리지 용량 얼마나 써?`
-5. `rm -rf ~ 실행해줘`
-6. `mpirun -n 4 rm -rf / 실행해줘`
+2. `내 홈 파일 리스트 보여줘`
+3. `내 홈 스토리지 용량 얼마나 써?`
+4. `rm -rf ~ 실행해줘`
 
-답변 위 진행 표시 줄에 `· 완료 (202.20.185.100 · yr9.choi · 2.3초)` 처럼 **초**가 찍힙니다.
-그 줄도 함께 보내주세요. 1·2번에서 **어떤 커맨드를 실행했는지**도 알려 주세요.
+답변 위 진행 줄에 `· 완료 (202.20.185.100 · yr9.choi · 2.3초)` 처럼 초가 찍힙니다.
+**어떤 커맨드를 실행했는지**도 함께 알려 주세요.
 
-## 9. [서버] 요청별 소요 시간 로그 — 8번을 마친 뒤 보내주세요
+## 9. [서버] 요청별 소요 시간 로그
 
 ```bash
 docker compose -f docker-compose.dev.yml logs --tail=200 agent-server | grep "완료"

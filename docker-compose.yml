@@ -100,6 +100,9 @@ services:
       SSH_MULTIPLEX: ${SSH_MULTIPLEX:-true}
       SSH_CONTROL_PERSIST: ${SSH_CONTROL_PERSIST:-3600}
       SSH_ALIVE_INTERVAL: ${SSH_ALIVE_INTERVAL:-30}
+      # `su - <user>`(로그인 셸)는 커맨드마다 원격 프로필을 읽어 약 2초를 쓴다.
+      # 사내 커맨드가 프로필 PATH에 의존하지 않는다고 확인한 뒤에만 false로 끈다.
+      SSH_SU_LOGIN: ${SSH_SU_LOGIN:-true}
     volumes:
       - /etc/hosts:/etc/hosts.targets:ro
       - ${SSH_KEY_PATH:-./secrets/id_ed25519}:/root/.ssh/id_ed25519:ro
