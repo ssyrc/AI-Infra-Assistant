@@ -55,7 +55,9 @@ except ValueError:
 # ControlPersist 동안 마스터 프로세스가 살아 있다가 알아서 종료된다.
 SSH_CONTROL_DIR = os.environ.get("SSH_CONTROL_DIR", "/tmp/.ssh-mux")
 SSH_MULTIPLEX = os.environ.get("SSH_MULTIPLEX", "true").strip().lower() != "false"
-SSH_CONTROL_PERSIST = os.environ.get("SSH_CONTROL_PERSIST", "300")
+# 마스터가 살아 있는 시간. 300초(5분)면 잠깐 쉬었다 물어볼 때마다 재접속해 1~3초가 붙는다.
+# 채팅이 드문드문 오는 사용 패턴이라 넉넉히 둔다(유휴 ssh 연결 하나의 비용은 무시할 만하다).
+SSH_CONTROL_PERSIST = os.environ.get("SSH_CONTROL_PERSIST", "3600")
 
 # LLM에 넘길 출력 상한. **컨텍스트 예산 때문에 반드시 작아야 한다.**
 # 예전엔 64KB였는데, 그 출력이 그대로 다음 요청 프롬프트에 실려 32768 컨텍스트를 넘겼다

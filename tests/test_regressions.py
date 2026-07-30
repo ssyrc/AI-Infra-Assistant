@@ -983,3 +983,56 @@ def test_context_overflow_error_is_actionable():
 
     # 다른 오류는 그대로 전달한다(원인을 숨기면 안 된다).
     assert "connection refused" in friendly(Exception("connection refused"))
+
+
+# --- 19번: 환경 값 블록을 답변에 베끼지 못하게 한다 -----------------------------------
+# 예전에는 지시문 끝에 `(참고: 로그인 서버 주소는 '...'입니다.)` 처럼 괄호 문장으로 붙였다.
+# 모델이 그 꼴을 '답변 꼬리말 서식'으로 보고 답변에 그대로 베꼈고, 같은 모양으로
+# `(참고: GPU_서버_활용_가이드_(KOR))`을 새로 만들어 붙이기까지 했다(#125).
+def test_env_values_are_labeled_not_parenthetical():
+    src = open(os.path.join(ROOT, "agent_server", "agent.py"), encoding="utf-8").read()
+    # 주석에는 사고 기록으로 남아 있어도 되지만, 지시문을 만드는 코드가 괄호 꼬리말을
+    # 붙이면 안 된다. 실제로 붙이는 표현식만 본다.
+    code = "\n".join(ln for ln in src.split("\n") if not ln.strip().startswith("#"))
+    # 줄바꿈 뒤에 바로 `(참고:` 를 붙이는 형태가 문제였다(답변 꼬리말처럼 보인다).
+    assert "\\n(참고:" not in code, "환경 값을 괄호 꼬리말로 붙이면 모델이 답변에 베낀다"
+    assert "# 이 환경의 값" in src
+    assert "이 블록을 답변에 옮겨 적지 마세요" in src
+    assert "'(참고: …)' 같은 꼬리말을 답변에 만들지 마세요" in src
+
+
+def test_user_facing_error_hides_internal_settings():
+    """사용자에게 내부 설정 키를 노출하지 않는다(관리자만 볼 값이다)."""
+    import re as _re
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    i = src.index("_CONTEXT_ERROR_MARKERS")
+    ns = {"re": _re}
+    exec(src[i:src.index("\ndef _trace_ctx(")], ns)
+    msg = ns["_friendly_error"](Exception(
+        "This model's maximum context length is 32768 tokens. However, your request has "
+        "33413 input tokens."))
+    assert "execution_result_max_chars" not in msg and "history_max_chars" not in msg
+    assert "운영팀" in msg
+
+
+def test_instruction_prefers_manual_for_infra_inventory():
+    """'GPU 인프라 현황'은 매뉴얼에 정리돼 있다. 서버마다 커맨드를 돌리면 출력이 쌓여
+    컨텍스트를 넘긴다(#123에서 33,413토큰으로 실패했다)."""
+    instr = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+    assert "인프라 \"현황·구성\"을 물으면" in instr
+    assert "매뉴얼을 먼저 검색합니다" in instr
+    assert "## 도구를 이어서 씁니다" in instr
+
+
+def test_instruction_forbids_using_agent_name_as_account():
+    """지어낸 파일 목록에 소유자를 `ops_assistant`(에이전트 자기 이름)로 적은 사고가 있었다."""
+    instr = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+    assert "ops_assistant" in instr
+    assert "실행할 수 있는 도구가 없어 확인하지 못했습니다" in instr
+
+
+def test_execution_mcp_logs_exposed_tool_names():
+    """필요한 툴이 꺼져 있으면 에이전트가 답을 지어낸다. 무엇이 노출됐는지 로그로 봐야 한다."""
+    src = open(os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"),
+               encoding="utf-8").read()
+    assert "노출된 툴:" in src

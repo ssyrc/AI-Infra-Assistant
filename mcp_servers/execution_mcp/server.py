@@ -183,6 +183,9 @@ _CHARS, _TOKENS = estimate_prompt_tokens(
 # 검색 결과·대화 이력에 쓸 자리가 줄어든다. 실제 비용을 찍어 두면 감이 아니라 숫자로 판단할 수 있다.
 print(f"[execution-mcp] 내장 {len(BUILTIN)}개 · 등록 {len(REGISTERED)}개 · run_command 1개 "
       f"= 툴 {len(ALL_TOOLS)}개 (스키마 {_CHARS:,}자 ≈ {_TOKENS:,}토큰/요청)")
+# 어떤 툴이 실제로 노출됐는지 남긴다. 필요한 툴이 꺼져 있으면 에이전트가 쓸 수 없고,
+# 그때 답을 지어내는 사고가 났다(#125). 목록을 보면 바로 확인된다.
+print(f"[execution-mcp] 노출된 툴: {', '.join(sorted(ALL_TOOLS))}")
 if _TOKENS > 8000:
     print(f"[execution-mcp] 경고: 툴 스키마가 요청마다 약 {_TOKENS:,}토큰을 씁니다. 지시문(~4.9k)과 "
           "합치면 32768 컨텍스트의 절반에 가까워 검색 결과·대화 이력이 밀려납니다. "
@@ -224,7 +227,7 @@ if __name__ == "__main__":
                 print(f"[execution-mcp] ssh 마스터를 열지 못했습니다({host}). 커맨드는 실행되지만 "
                       "매번 새로 접속해 1~3초씩 더 걸립니다. "
                       "scripts/diag-ssh.sh 로 원인을 확인하세요.")
-        start_master_keepalive(lambda: get_config("scheduler_login_host", host))
+        start_master_keepalive(lambda: get_config("scheduler_login_host", host), interval=180)
 
     inner.add_event_handler("startup", _warm_ssh)
     uvicorn.run(CallerContextMiddleware(inner), host="0.0.0.0", port=port)

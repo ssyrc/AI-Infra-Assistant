@@ -66,9 +66,20 @@ async def build_agent(caller_headers: dict | None = None,
     login_host = await get_config("scheduler_login_host", "202.20.185.100")
     # 운영팀 접수 경로도 설정에서 읽어 붙인다(포탈 메뉴가 바뀌어도 지시문을 고칠 필요 없음).
     voc_intake = (await get_config("voc_intake_guide", "") or "").strip()
-    instruction = f"{instruction}\n\n(참고: 커맨드를 실행할 로그인 서버 주소는 '{login_host}'입니다.)"
+    # 환경 값은 **구조화된 블록**으로 붙인다. 예전에는 지시문 끝에
+    #   `(참고: 커맨드를 실행할 로그인 서버 주소는 '...'입니다.)`
+    # 처럼 괄호 문장으로 붙였는데, 모델이 그 꼴을 '답변 꼬리말 서식'으로 보고 **답변에 그대로
+    # 베껴 썼다**. 심지어 같은 모양으로 `(참고: GPU_서버_활용_가이드_(KOR))`을 새로 만들어
+    # 붙이기까지 했다(#125). 값은 라벨로 주고, 이 블록을 옮겨 쓰지 말라고 못박는다.
+    env_lines = [f"로그인 서버 주소: {login_host}"]
     if voc_intake:
-        instruction = f"{instruction}\n(참고: 운영팀 접수 경로는 '{voc_intake}'입니다.)"
+        env_lines.append(f"운영팀 접수 경로: {voc_intake}")
+    instruction = (
+        f"{instruction}\n\n# 이 환경의 값\n"
+        "아래는 도구 호출과 안내에 쓰는 값입니다. **이 블록을 답변에 옮겨 적지 마세요.**\n"
+        "괄호로 감싼 '(참고: …)' 같은 꼬리말을 답변에 만들지 마세요.\n"
+        + "\n".join(f"- {line}" for line in env_lines)
+    )
     if extra_instruction:
         # 요청별 컨텍스트(예: 사용자 장기 메모리)를 시스템 지시문 뒤에 덧붙인다.
         instruction = f"{instruction}\n{extra_instruction}"
