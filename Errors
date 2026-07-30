@@ -17,3 +17,6 @@
 3. chart_mcp
 - gpu 인프라 현황 차트로 보여달라고 하면, 이런 에러가 뜸. [오류가 발생했습니다: litellm.ContextWindowExceededError: litellm.BadRequestError: ContextWindowExceededError: OpenAIException - Error code: 400 - {'error': {'message': "This model's maximum context length is 32768 tokens. However, your request has 59360 input tokens. Please reduce the length of the input messages. None", 'type': 'BadRequestError', 'param': None, 'code': 400}}]
   제대로 작동하고 있지 않음. git 코드를 그대로 가져와야하는지? 아직도 관리자 콘솔에 chart_public_base_url 파라미터가 있던데 뭔지?
+
+4. open_webui
+- 관리자 콘솔에 openwebui_base_url는 8080 포트로 되어 있는데 실제 사용자가 접속하는건 8502 포트. 8080이 내부적으로 사용하는거라면, 이 포트를 지정할 수 있어야함.
