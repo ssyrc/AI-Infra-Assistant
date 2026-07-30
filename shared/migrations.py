@@ -594,11 +594,12 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
          "Agent Server가 연결할 VOC MCP 주소", False, False, False),
         ("chart_mcp_url", os.environ.get("CHART_MCP_URL", "http://chart-mcp:8005/mcp"),
          "Agent Server가 연결할 Chart MCP 주소(비우면 차트 기능 없이 동작)", False, False, False),
-        # 차트 이미지는 **사용자 브라우저가 직접** 가져간다. 컨테이너는 자기 외부 주소를 모르므로
-        # 여기에 배포 호스트에서 접근 가능한 주소를 적어 둔다(예: http://202.20.183.30:8509).
-        # 비어 있으면 이미지 주소가 완성되지 않아 그림이 표시되지 않는다.
+        # **비워 두는 것이 기본이고 권장값이다.** 비어 있으면 차트를 답변 안에 그대로 박아
+        # 보내므로(data URI) 설정도 열어 둘 포트도 필요 없다 - 폐쇄망에서 그대로 동작한다.
+        # 이미지를 URL로 두고 싶을 때만(브라우저 캐시를 쓰거나 답변을 가볍게 하려면)
+        # 배포 호스트 주소를 넣는다(예: http://202.20.183.30:8509 - 사내 주소다).
         ("chart_public_base_url", os.environ.get("CHART_PUBLIC_BASE_URL", ""),
-         "차트 이미지를 사용자 브라우저가 받아갈 공개 주소(예: http://202.20.183.30:8509)",
+         "(선택) 차트를 URL로 제공할 때의 사내 주소. 비우면 답변에 이미지를 직접 넣는다",
          True, False, False),
         ("chart_max_points", "200", "차트 하나에 넣을 수 있는 최대 항목 수", True, False, False),
         ("chart_retention_hours", "72",

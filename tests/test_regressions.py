@@ -370,15 +370,15 @@ def test_chart_renders_all_types_and_is_deterministic(tmp_path):
     for kind in ("line", "bar", "pie", "scatter"):
         r = asyncio.run(m.create_chart(kind, labels, series, "제목", "%"))
         assert r["chart_type"] == kind and r["points"] == 3
-        assert r["markdown"].startswith("![") and r["url"].endswith(".svg")
-        svg = (tmp_path / r["url"].rsplit("/", 1)[-1]).read_text(encoding="utf-8")
+        assert r["markdown"].startswith("![")
+        svg = (tmp_path / f"{r['chart_id']}.svg").read_text(encoding="utf-8")
         assert svg.startswith("<svg") and svg.endswith("</svg>")
         assert "제목" in svg, "한글 제목이 SVG 안에 그대로 들어가야 한다(폰트 없이 렌더)"
 
     # 같은 입력 -> 같은 파일(내용 해시가 이름). 파일이 무한정 늘지 않는다.
     a = asyncio.run(m.create_chart("line", labels, series, "제목", "%"))
     b = asyncio.run(m.create_chart("line", labels, series, "제목", "%"))
-    assert a["url"] == b["url"]
+    assert a["chart_id"] == b["chart_id"]
 
 
 def test_chart_rejects_broken_input(tmp_path):
@@ -401,7 +401,7 @@ def test_chart_escapes_labels(tmp_path):
     m = _chart_module(tmp_path)
     r = asyncio.run(m.create_chart(
         "bar", ["<script>x</script>"], [{"name": "a&b", "values": [1]}], "5 > 3", ""))
-    svg = (tmp_path / r["url"].rsplit("/", 1)[-1]).read_text(encoding="utf-8")
+    svg = (tmp_path / f"{r['chart_id']}.svg").read_text(encoding="utf-8")
     assert "<script>" not in svg and "&lt;script&gt;" in svg
     assert "5 &gt; 3" in svg
 
@@ -428,7 +428,7 @@ def test_chart_file_server_only_serves_generated_names(tmp_path):
         return sent
 
     ok = asyncio.run(m.create_chart("bar", ["a"], [{"name": "x", "values": [1]}]))
-    name = ok["url"].rsplit("/", 1)[-1]
+    name = f"{ok['chart_id']}.svg"
     assert asyncio.run(call(f"/charts/{name}"))[0]["status"] == 200
     for bad in ("/charts/../secret.txt", "/charts/secret.txt", "/charts/x.svg"):
         assert asyncio.run(call(bad))[0]["status"] == 404, f"열리면 안 됨: {bad}"
@@ -670,3 +670,87 @@ def test_compose_command_overrides_stale_admin_cmd():
     assert cmd, "admin-console에 command가 없으면 낡은 CMD가 그대로 쓰인다"
     assert "/app/mcp_servers/execution_mcp" in cmd
     assert not any("system_mcp" in str(t) for t in cmd)
+
+
+# --- 13번: 차트를 답변에 직접 박아 넣는다(폐쇄망에서 설정·포트 없이 동작) ----------------
+# Chart MCP는 짧은 표시자(chart://<id>)만 돌려주고, Agent Server가 내보낼 때 data URI로 바꾼다.
+# 이유: MCP 툴 결과는 그대로 다음 요청 프롬프트에 실린다 - base64를 돌려주면 32768이 날아간다.
+def test_chart_marker_is_small_and_url_free(tmp_path):
+    m = _chart_module(tmp_path)
+    r = asyncio.run(m.create_chart("line", ["1월", "2월"],
+                                   [{"name": "사용률", "values": [10, 20]}], "제목", "%"))
+    assert r["markdown"].startswith("![제목](chart://")
+    assert "http" not in r["markdown"], "기본값은 URL이 아니라 표시자여야 한다"
+    # 툴 결과 전체가 프롬프트에 실린다. 300자를 넘으면 예산 설계가 깨진 것이다.
+    assert len(str(r)) < 300, f"툴 결과가 너무 크다: {len(str(r))}자"
+
+
+def test_chart_inliner_streaming_matches_whole():
+    """표시자가 스트리밍 델타 경계에 걸쳐 쪼개져도 결과가 같아야 한다."""
+    import random
+    from chart_inline import ChartInliner, marker_for
+
+    svg = "<svg xmlns='http://www.w3.org/2000/svg'>한글</svg>"
+
+    async def fetch(_cid):
+        return svg
+
+    cid = "ab" + "0" * 30
+    text = f"추이입니다.\n\n![월별]({marker_for(cid)})\n\n증가 추세입니다."
+    whole = asyncio.run(ChartInliner(fetch).whole(text))
+    assert "data:image/svg+xml;base64," in whole and "chart://" not in whole
+
+    async def streamed(chunks):
+        inl = ChartInliner(fetch)
+        out = ""
+        for c in chunks:
+            out += await inl.feed(c)
+        return out + await inl.flush()
+
+    assert asyncio.run(streamed(list(text))) == whole, "1자씩 흘렸을 때 결과가 다르다"
+    random.seed(7)
+    for _ in range(50):
+        chunks, i = [], 0
+        while i < len(text):
+            n = random.randint(1, 6)
+            chunks.append(text[i:i + n])
+            i += n
+        assert asyncio.run(streamed(chunks)) == whole
+
+
+def test_chart_inliner_reports_failure_instead_of_broken_image():
+    from chart_inline import ChartInliner, marker_for
+
+    async def fetch(_cid):
+        return None
+
+    out = asyncio.run(ChartInliner(fetch).whole(f"![x]({marker_for('cd' + '1' * 30)})"))
+    assert "chart://" not in out and "불러오지 못했습니다" in out
+
+
+def test_chart_inliner_ignores_lookalikes():
+    from chart_inline import ChartInliner
+
+    async def fetch(_cid):
+        raise AssertionError("호출되면 안 됨")
+
+    plain = "chart:// 라는 말, charter, http://x/chart 는 그대로 둔다"
+    assert asyncio.run(ChartInliner(fetch).whole(plain)) == plain
+
+
+def test_history_keeps_marker_not_data_uri():
+    """이력/메모리에는 표시자가 남아야 한다. data URI가 저장되면 다음 프롬프트가 부푼다."""
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    # 저장은 원문(final_text)으로, 응답 본문만 치환한다.
+    assert '_bg_persist(user_id, conv, "openwebui", last_text, final_text, mem_enabled)' in src
+    assert 'await _chart_inliner().whole(final_text)' in src
+    # 스트리밍도 dedup.full(원문)을 저장한다.
+    assert "_bg_persist(user_id, conv, \"openwebui\", last_text, dedup.full" in src \
+        or "dedup.full" in src
+
+
+def test_charts_base_url_derivation():
+    from chart_inline import charts_base_url
+    assert charts_base_url("http://chart-mcp:8005/mcp") == "http://chart-mcp:8005"
+    assert charts_base_url("http://chart-mcp:8005/") == "http://chart-mcp:8005"
+    assert charts_base_url("") == ""

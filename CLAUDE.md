@@ -121,7 +121,9 @@ docker compose -f docker-compose.dev.yml up -d --no-build
     엄격 적용(`mpirun ... rm -rf /` 우회 차단).
   RAG 검색은 쓰지 않는다 — 툴 목록을 보고 에이전트가 고른다(#105).
   **등록 내용을 고치면 execution-mcp 재시작 필요**(활성/역할만 바꾸면 즉시 반영).
-- **Chart MCP**: 추이/비교를 SVG로 그려 URL만 돌려준다(#110). 실행도 DB 조회도 하지 않는다.
+- **Chart MCP**: 추이/비교를 SVG로 그린다(#110). 실행도 DB 조회도 하지 않는다.
+  짧은 표시자(`chart://<id>`)만 돌려주고 **agent-server가 답변을 내보낼 때 data URI로 치환**한다
+  (#114). 그래서 이미지용 설정·포트가 없다. 이력에는 표시자가 남는다(프롬프트 예산).
 - Manual MCP / VOC MCP: 하이브리드 RAG 검색(읽기 전용). 매뉴얼은 **발행(published)** 해야 검색됨.
 
 ## 5. 반영 제약 (자주 놓치는 것)

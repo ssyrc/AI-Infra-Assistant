@@ -46,12 +46,13 @@ except Exception:  # noqa: BLE001
     _using_attributes = None
 
 from config_store import get_config
-from db import close_http_client
+from db import close_http_client, get_http_client
 from memory_store import (
     load_context, format_memory_block, record_turns, maybe_summarize,
     list_user_memory, add_user_memory, delete_user_memory,
 )
 from service_hub import search_similar_voc
+from chart_inline import ChartInliner, charts_base_url
 from agent import build_agent, APP_NAME
 
 MAX_MESSAGES = 100
@@ -354,6 +355,27 @@ class _StreamDedup:
         return delta
 
 
+
+# --- 차트 인라인 -------------------------------------------------------------------
+# Chart MCP는 `chart://<id>` 표시자만 돌려준다(프롬프트 예산 때문). 사용자에게 내보낼 때
+# 여기서 data URI로 바꿔 넣으므로, 이미지용 포트를 열거나 외부 주소를 설정할 필요가 없다.
+# 대화 이력에는 표시자가 그대로 남는다(다음 요청 프롬프트가 부풀지 않게).
+async def _fetch_chart_svg(chart_id: str) -> str | None:
+    base = charts_base_url(await get_config("chart_mcp_url", ""))
+    if not base:
+        return None
+    client = await get_http_client()
+    r = await client.get(f"{base}/charts/{chart_id}.svg", timeout=10)
+    if r.status_code != 200:
+        print(f"[chart] {chart_id} 응답 {r.status_code}")
+        return None
+    return r.text
+
+
+def _chart_inliner() -> ChartInliner:
+    return ChartInliner(_fetch_chart_svg)
+
+
 def _trace_ctx(user_id: str, session_id: str | None, source: str | None):
     """Langfuse 트레이스에 user_id/session_id(대화)를 붙여 사용자별로 묶이게 한다.
     openinference가 없거나 트레이싱이 꺼져 있으면 무해한 no-op이다."""
@@ -434,17 +456,20 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         finally:
             await _cleanup_session(user_id, session_id)
             await _close_toolsets(toolsets)
+        # 이력에는 **표시자 그대로** 저장한다(data URI가 들어가면 다음 프롬프트가 부푼다).
         _bg_persist(user_id, conv, "openwebui", last_text, final_text, mem_enabled)
         return JSONResponse({
             "id": request_id, "object": "chat.completion",
             "created": int(time.time()), "model": model_name,
             "choices": [{"index": 0,
-                         "message": {"role": "assistant", "content": final_text},
+                         "message": {"role": "assistant",
+                                     "content": await _chart_inliner().whole(final_text)},
                          "finish_reason": "stop"}],
         })
 
     async def event_stream():
         dedup = _StreamDedup()
+        charts = _chart_inliner()
         in_think = False
         try:
             with _trace_ctx(user_id, conv, "openwebui"):
@@ -461,11 +486,20 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                             yield _sse(request_id, model_name, status + "\n")
                     delta = dedup.feed(event)
                     if delta:
-                        if in_think:          # 진행 줄과 답변 사이만 한 줄 띄운다
-                            yield _sse(request_id, model_name, "\n")
-                            in_think = False
-                        yield _sse(request_id, model_name, delta)
+                        # 차트 표시자가 델타 경계에 걸쳐 쪼개져 올 수 있어 안전한 부분만 흘린다.
+                        out = await charts.feed(delta)
+                        if out:
+                            if in_think:      # 진행 줄과 답변 사이만 한 줄 띄운다
+                                yield _sse(request_id, model_name, "\n")
+                                in_think = False
+                            yield _sse(request_id, model_name, out)
 
+            tail = await charts.flush()       # 붙들고 있던 꼬리 마무리
+            if tail:
+                if in_think:
+                    yield _sse(request_id, model_name, "\n")
+                    in_think = False
+                yield _sse(request_id, model_name, tail)
             if in_think:
                 yield _sse(request_id, model_name, "\n")
             yield _sse(request_id, model_name, "", finish=True)
@@ -629,6 +663,7 @@ async def agent_query(body: AgentQueryIn, request: Request):
 
     async def event_stream():
         dedup = _StreamDedup()
+        charts = _chart_inliner()
         in_think = False
         try:
             with _trace_ctx(user_id, conv, body.source or "agent-api"):
@@ -644,10 +679,19 @@ async def agent_query(body: AgentQueryIn, request: Request):
                             yield _sse(request_id, model_name, status + "\n")
                     delta = dedup.feed(event)
                     if delta:
-                        if in_think:          # 진행 줄과 답변 사이만 한 줄 띄운다
-                            yield _sse(request_id, model_name, "\n")
-                            in_think = False
-                        yield _sse(request_id, model_name, delta)
+                        # 차트 표시자가 델타 경계에 걸쳐 쪼개져 올 수 있어 안전한 부분만 흘린다.
+                        out = await charts.feed(delta)
+                        if out:
+                            if in_think:      # 진행 줄과 답변 사이만 한 줄 띄운다
+                                yield _sse(request_id, model_name, "\n")
+                                in_think = False
+                            yield _sse(request_id, model_name, out)
+            tail = await charts.flush()       # 붙들고 있던 꼬리 마무리
+            if tail:
+                if in_think:
+                    yield _sse(request_id, model_name, "\n")
+                    in_think = False
+                yield _sse(request_id, model_name, tail)
             if in_think:
                 yield _sse(request_id, model_name, "\n")
             yield _sse(request_id, model_name, "", finish=True)
@@ -851,7 +895,8 @@ async def voc_query(body: VocQueryIn, request: Request):
         _bg_persist(user_id, conv, "voc-agent", message, final_text, mem_enabled)
         if not ok or not final_text:
             return JSONResponse({"success": False, "answer": None})
-        answer = {"content": final_text}
+        # 외부로 나가는 본문에서는 차트 표시자를 실제 이미지로 바꿔 준다(이력은 표시자 유지).
+        answer = {"content": await _chart_inliner().whole(final_text)}
         if similar:
             answer["similar_voc"] = similar
         return JSONResponse({"success": True, "answer": answer})
@@ -872,7 +917,7 @@ async def voc_query(body: VocQueryIn, request: Request):
             # 마지막에 가이드 계약 형태의 완성 envelope을 한 번 더 보낸다.
             if dedup.full:
                 similar = await _collect_similar()
-                answer = {"content": dedup.full}
+                answer = {"content": await _chart_inliner().whole(dedup.full)}
                 if similar:
                     answer["similar_voc"] = similar
                 envelope = {"success": True, "answer": answer}

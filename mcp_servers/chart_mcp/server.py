@@ -2,12 +2,15 @@
 Chart MCP - 사용자가 추이/비교/비율을 "그래프로" 보고 싶어할 때 호출하는 차트 생성 MCP.
 
 동작:
-  create_chart(...)로 SVG를 만들어 파일로 저장하고, **URL과 마크다운 한 줄만** 돌려준다.
-  에이전트는 그 마크다운(`![제목](url)`)을 답변에 그대로 넣고, Open WebUI가 이미지를 렌더한다.
+  create_chart(...)로 SVG를 만들어 파일로 저장하고, **짧은 표시자와 마크다운 한 줄만** 돌려준다.
+  에이전트는 그 마크다운(`![제목](chart://<id>)`)을 답변에 그대로 넣고, Agent Server가 내보낼 때
+  표시자를 data URI로 바꿔 넣는다(shared/chart_inline). 그래서 폐쇄망에서 **설정도, 열어 둘
+  포트도 필요 없다** - 브라우저는 Open WebUI 하나만 알면 된다.
 
-왜 이미지 바이트를 안 돌려주나:
-  MCP 툴 결과는 그대로 다음 요청 프롬프트에 실린다. base64 PNG를 돌려주면 컨텍스트
-  32768을 한 번에 날려 먹는다. URL은 100자 남짓이라 예산에 사실상 영향이 없다.
+왜 이미지 바이트를 직접 안 돌려주나:
+  MCP 툴 결과는 그대로 다음 요청 프롬프트에 실린다. base64를 돌려주면 컨텍스트 32768을
+  한 번에 날려 먹는다. 표시자는 40자 남짓이라 예산에 영향이 없고, 치환은 LLM이 보지 않는
+  '내보내는 텍스트'에서만 일어난다.
 
 왜 antvis/mcp-server-chart를 그대로 쓰지 않았나:
   그 서버는 기본적으로 외부 렌더 서버(antv-studio.alipay.com)로 데이터를 보내 이미지를
@@ -25,6 +28,7 @@ import time
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../shared"))
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from config_store import get_config  # noqa: E402
+from chart_inline import marker_for  # noqa: E402
 from mcp_caller import CallerContextMiddleware  # noqa: E402
 from svg_chart import CHART_TYPES, render  # noqa: E402
 
@@ -127,7 +131,7 @@ async def create_chart(chart_type: str, labels: list, series: list,
         title: 차트 제목
         y_label: 세로축 단위. 예: "GB", "%"
     Returns:
-        markdown(답변에 **그대로** 넣으면 그림이 표시된다), url, chart_type, points.
+        markdown(답변에 **그대로** 넣으면 그림이 표시된다), chart_id, chart_type, points.
     """
     kind = (chart_type or "line").strip().lower()
     if kind not in CHART_TYPES:
@@ -149,20 +153,18 @@ async def create_chart(chart_type: str, labels: list, series: list,
         os.replace(tmp, path)               # 반쯤 쓰인 파일이 서빙되지 않도록
     _cleanup(await _int_config("chart_retention_hours", DEFAULT_RETENTION_HOURS))
 
+    chart_id = name[:-len(".svg")]
+    # 기본은 **표시자**다. Agent Server가 답변을 내보낼 때 data URI로 바꿔 넣는다
+    # (설정도 열어 둘 포트도 필요 없다 - shared/chart_inline 참고).
+    # `chart_public_base_url`을 넣어 두면 그 주소를 직접 쓴다(이미지를 URL로 두고 싶을 때).
     base = (await _config("chart_public_base_url", "")).strip().rstrip("/")
-    url = f"{base}{_URL_PREFIX}{name}" if base else f"{_URL_PREFIX}{name}"
-    result = {
+    link = f"{base}{_URL_PREFIX}{name}" if base else marker_for(chart_id)
+    return {
         "chart_type": kind,
         "points": len(labels),
-        "url": url,
-        "markdown": f"![{title or '차트'}]({url})",
+        "chart_id": chart_id,
+        "markdown": f"![{title or '차트'}]({link})",
     }
-    if not base:
-        # 이게 비어 있으면 사용자 브라우저가 이미지를 못 받는다. 조용히 깨진 링크를 주는 대신
-        # 에이전트가 사용자에게 알릴 수 있게 이유를 함께 돌려준다.
-        result["warning"] = ("관리자 콘솔 설정의 chart_public_base_url이 비어 있어 "
-                            "이미지 주소가 완성되지 않았습니다(관리자 설정 필요).")
-    return result
 
 
 class ChartFiles:
