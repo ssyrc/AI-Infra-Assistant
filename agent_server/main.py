@@ -376,6 +376,31 @@ def _chart_inliner() -> ChartInliner:
     return ChartInliner(_fetch_chart_svg)
 
 
+
+# --- 오류 문구 ----------------------------------------------------------------------
+# 컨텍스트 초과는 사용자가 고칠 수 있는 문제다. litellm 스택트레이스를 그대로 보여주면
+# 무엇을 해야 하는지 알 수 없다(실제로 59,360토큰 오류가 그렇게 노출됐다 - #123).
+_CONTEXT_ERROR_MARKERS = ("ContextWindowExceeded", "maximum context length",
+                          "reduce the length of the input")
+
+
+def _friendly_error(e: Exception) -> str:
+    text = str(e)
+    if any(m in text for m in _CONTEXT_ERROR_MARKERS):
+        used = re.search(r"request has (\d+) input tokens", text)
+        limit = re.search(r"maximum context length is (\d+) tokens", text)
+        detail = ""
+        if used and limit:
+            detail = f" ({int(used.group(1)):,} / {int(limit.group(1)):,} 토큰)"
+        return ("한 번에 처리할 수 있는 양을 넘었습니다" + detail + ".\n"
+                "출력이 많은 커맨드를 여러 번 실행했거나 대화가 길어진 경우입니다. "
+                "새 대화에서 다시 물어보시거나, 조회 범위를 좁혀 주세요"
+                "(예: 서버 하나만, 기간을 줄여서).\n"
+                "계속 발생하면 관리자에게 알려주세요 - 설정에서 "
+                "execution_result_max_chars / history_max_chars 를 낮출 수 있습니다.")
+    return f"오류가 발생했습니다: {text}"
+
+
 def _trace_ctx(user_id: str, session_id: str | None, source: str | None):
     """Langfuse 트레이스에 user_id/session_id(대화)를 붙여 사용자별로 묶이게 한다.
     openinference가 없거나 트레이싱이 꺼져 있으면 무해한 no-op이다."""
@@ -508,7 +533,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             raise
         except Exception as e:  # noqa: BLE001
             print(f"[agent] 스트리밍 오류: {e}")
-            yield _sse(request_id, model_name, f"\n\n[오류가 발생했습니다: {e}]")
+            yield _sse(request_id, model_name, f"\n\n[{_friendly_error(e)}]")
             yield _sse(request_id, model_name, "", finish=True)
             yield "data: [DONE]\n\n"
         finally:
@@ -706,7 +731,7 @@ async def agent_query(body: AgentQueryIn, request: Request):
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001
-            yield _sse(request_id, model_name, f"\n\n[오류가 발생했습니다: {e}]")
+            yield _sse(request_id, model_name, f"\n\n[{_friendly_error(e)}]")
             yield _sse(request_id, model_name, "", finish=True)
             yield "data: [DONE]\n\n"
         finally:

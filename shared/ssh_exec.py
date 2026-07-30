@@ -57,7 +57,31 @@ SSH_CONTROL_DIR = os.environ.get("SSH_CONTROL_DIR", "/tmp/.ssh-mux")
 SSH_MULTIPLEX = os.environ.get("SSH_MULTIPLEX", "true").strip().lower() != "false"
 SSH_CONTROL_PERSIST = os.environ.get("SSH_CONTROL_PERSIST", "300")
 
-MAX_OUTPUT = 64 * 1024
+# LLM에 넘길 출력 상한. **컨텍스트 예산 때문에 반드시 작아야 한다.**
+# 예전엔 64KB였는데, 그 출력이 그대로 다음 요청 프롬프트에 실려 32768 컨텍스트를 넘겼다
+# (실제로 nvidia-smi/job 목록 몇 번에 59,360 토큰이 됐다 - #123).
+# 매뉴얼·VOC 검색 결과는 건당 1500자로 자르고 있었는데 커맨드 출력에만 상한이 없었다.
+# 설정 `execution_result_max_chars`로 조정한다.
+MAX_OUTPUT = 4000
+
+_output_limit_getter = None
+
+
+def set_output_limit_getter(getter):
+    """출력 상한을 설정에서 읽는 함수를 주입한다(이 모듈이 config_store에 묶이지 않게)."""
+    global _output_limit_getter
+    _output_limit_getter = getter
+
+
+async def _resolve_output_limit(explicit: int | None) -> int:
+    if explicit is not None:
+        return explicit
+    if _output_limit_getter is None:
+        return MAX_OUTPUT
+    try:
+        return int(await _output_limit_getter())
+    except Exception:  # noqa: BLE001
+        return MAX_OUTPUT
 # 사내 커맨드는 느린 게 많다(GPFS 쿼터 조회처럼 스토리지 전체를 훑는 것들). 25초는 너무 짧아서
 # 정상 동작하는 커맨드가 중단되고, 그러면 에이전트가 실패 원인을 엉뚱하게 해석한다.
 # .env의 SSH_COMMAND_TIMEOUT으로 조정한다.
@@ -253,10 +277,11 @@ def start_master_keepalive(host_getter, interval: int = 240):
 
 
 async def run_ssh_as_user(host: str, user_id: str, argv: list,
-                          timeout: int = DEFAULT_TIMEOUT, max_output: int = MAX_OUTPUT) -> dict:
+                          timeout: int = DEFAULT_TIMEOUT, max_output: int | None = None) -> dict:
     """host(=/etc/hosts 등록)로 ssh(root) 후 user_id 권한으로 argv를 실행한다(셸 주입 불가)."""
     ip = resolve_host(host)
     user = validate_user(user_id)
+    max_output = await _resolve_output_limit(max_output)
     remote_cmd = _remote_command(user, argv)
 
     # SSH_KEY 경로가 '파일'일 때만 -i로 넘긴다(_base_ssh_opts에서 처리). compose가 없는
@@ -296,7 +321,20 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
         s = b.decode("utf-8", "replace").replace("\r\n", "\n")
         s = "\n".join(line for line in s.split("\n")
                        if not line.startswith("Connection to ") or not line.endswith("closed."))
-        return s if len(s) <= max_output else s[:max_output] + "\n…(출력 잘림)"
+        if max_output <= 0 or len(s) <= max_output:
+            return s
+        # **줄 단위로** 자른다. 표 형태 출력을 줄 중간에서 끊으면 에이전트가 값을 잘못 읽는다.
+        lines = s.split("\n")
+        kept, used = [], 0
+        for line in lines:
+            if used + len(line) + 1 > max_output and kept:
+                break
+            kept.append(line)
+            used += len(line) + 1
+        dropped = len(lines) - len(kept)
+        return "\n".join(kept) + (
+            f"\n…({dropped}줄 더 있음 - 출력이 길어 잘랐습니다. 전체가 필요하면 조건을 좁혀 "
+            "다시 실행하세요. 여기 보이는 것만으로 답하고, 전부라고 말하지 마세요.)")
 
     result = {
         "host": host,

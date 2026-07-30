@@ -911,3 +911,75 @@ def test_instruction_covers_same_topic_different_target():
     assert "주제가 같고 대상만 다른 질문" in instr
     assert "스크래치" in instr, "실제로 틀렸던 사례가 지시문에 없다"
     assert "확인되지 않습니다" in instr
+
+
+# --- 18번: 커맨드 출력에도 컨텍스트 상한이 있어야 한다 --------------------------------
+# 매뉴얼·VOC 결과는 건당 1500자로 잘랐는데 커맨드 출력에만 상한이 없었다(64KB).
+# 그 출력이 그대로 다음 요청 프롬프트에 실려 59,360토큰으로 32768 컨텍스트를 넘겼다(#123).
+def test_command_output_has_context_budget_cap():
+    import ssh_exec
+    assert ssh_exec.MAX_OUTPUT <= 8000, \
+        f"커맨드 출력 상한이 너무 크다({ssh_exec.MAX_OUTPUT}자). 프롬프트에 그대로 실린다."
+    assert hasattr(ssh_exec, "set_output_limit_getter"), "설정으로 조정할 수 없다"
+
+    src = open(os.path.join(ROOT, "shared", "ssh_exec.py"), encoding="utf-8").read()
+    assert "max_output: int | None = None" in src, \
+        "기본값이 def 시점에 굳으면 설정 변경이 반영되지 않는다"
+
+    server = open(os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"),
+                  encoding="utf-8").read()
+    assert "execution_result_max_chars" in server
+    assert "set_output_limit_getter(_output_limit)" in server
+
+    cfg = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+    assert '("execution_result_max_chars", "4000"' in cfg
+
+
+def test_output_truncation_keeps_whole_lines():
+    """표 형태 출력을 줄 중간에서 끊으면 에이전트가 값을 잘못 읽는다."""
+    src = open(os.path.join(ROOT, "shared", "ssh_exec.py"), encoding="utf-8").read()
+    i = src.index("def _clip(")
+    clip = src[i:i + 1400]
+    assert "lines = s.split" in clip, "줄 단위로 자르지 않는다"
+    assert "줄 더 있음" in clip, "몇 줄이 빠졌는지 알려주지 않는다"
+    assert "전부라고 말하지 마세요" in clip, "잘린 것을 전부로 답할 위험을 막지 않는다"
+
+
+def test_chart_public_base_url_hidden_from_console():
+    """비워 두는 게 기본인 고급 설정은 콘솔에 보이지 않아야 한다(사용자 지적)."""
+    html = open(os.path.join(ROOT, "admin_console", "frontend", "index.html"),
+                encoding="utf-8").read()
+    assert "chart_public_base_url" not in html
+    assert "chart_mcp_url" in html          # 나머지 차트 설정은 남아 있어야 한다
+
+
+def test_openwebui_base_url_description_explains_internal_port():
+    """8080(컨테이너 내부)과 8502(사용자 접속)를 혼동하지 않게 설명이 있어야 한다."""
+    cfg = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+    i = cfg.index('("openwebui_base_url"')
+    around = cfg[i - 500:i + 300]
+    assert "8502" in around and "내부" in around
+
+
+def test_context_overflow_error_is_actionable():
+    """컨텍스트 초과는 사용자가 고칠 수 있는 문제다. litellm 스택트레이스를 그대로 보여주면
+    무엇을 해야 하는지 알 수 없다(#123에서 실제로 그렇게 노출됐다)."""
+    import re as _re
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    i = src.index("_CONTEXT_ERROR_MARKERS")
+    j = src.index("\ndef _trace_ctx(")
+    ns = {"re": _re}
+    exec(src[i:j], ns)
+    friendly = ns["_friendly_error"]
+
+    real = ("litellm.ContextWindowExceededError: OpenAIException - Error code: 400 - "
+            "{'error': {'message': \"This model's maximum context length is 32768 tokens. "
+            "However, your request has 59360 input tokens. Please reduce the length of the "
+            "input messages.\"}}")
+    msg = friendly(Exception(real))
+    assert "litellm" not in msg and "BadRequest" not in msg
+    assert "59,360" in msg and "32,768" in msg, "실제 수치를 보여줘야 한다"
+    assert "새 대화" in msg and "좁혀" in msg, "사용자가 할 수 있는 조치가 없다"
+
+    # 다른 오류는 그대로 전달한다(원인을 숨기면 안 된다).
+    assert "connection refused" in friendly(Exception("connection refused"))

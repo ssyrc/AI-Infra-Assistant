@@ -1446,8 +1446,7 @@ const SETTING_GROUPS = [
   { title: "VOC MCP", service: "voc-mcp",
     keys: ["voc_mcp_url", "voc_result_max_chars"] },
   { title: "Chart MCP", service: "chart-mcp",
-    keys: ["chart_mcp_url", "chart_public_base_url", "chart_max_points",
-           "chart_retention_hours"] },
+    keys: ["chart_mcp_url", "chart_max_points", "chart_retention_hours"] },
   { title: "Open WebUI", service: null,
     keys: ["openwebui_base_url", "openwebui_admin_api_key"] },
 ];
@@ -1516,11 +1515,6 @@ function SettingsPanel() {
                 <button onClick={() => restartService(g.service)}>{g.service} 재시작</button>
               )}
             </div>
-            {g.title === "Chart MCP" && (
-              <div style={{fontSize: 12.5, color: "var(--muted)", marginBottom: 10}}>
-                <code>chart_public_base_url</code>은 비워 두세요.
-              </div>
-            )}
             {g.title === "Open WebUI" && (
               <div style={{fontSize: 12.5, color: "var(--muted)", marginBottom: 10}}>
                 API 키를 저장하면 기본 모델이 자동 지정됩니다.

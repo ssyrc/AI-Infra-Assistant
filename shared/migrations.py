@@ -550,6 +550,10 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
         # 실제로 매뉴얼+VOC 결과가 길어 ContextWindowExceededError(33k~35k 토큰)가 났다.
         ("voc_result_max_chars", "1500",
          "VOC 검색 결과에서 질문/답변 하나당 넘길 최대 글자 수(0이면 자르지 않음)", True, False, False),
+        # 커맨드 출력도 그대로 다음 요청 프롬프트에 실린다. 상한이 없어서 nvidia-smi/job 목록
+        # 몇 번에 59,360토큰이 되어 컨텍스트를 넘긴 사고가 있었다(#123).
+        ("execution_result_max_chars", "4000",
+         "커맨드 실행 출력을 에이전트에 넘길 최대 글자 수(0이면 자르지 않음)", True, False, False),
         ("manual_result_max_chars", "1500",
          "매뉴얼 검색 결과 하나당 넘길 최대 글자 수(이웃 청크 포함, 0이면 자르지 않음)",
          True, False, False),
@@ -626,7 +630,7 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
         # 이미지를 URL로 두고 싶을 때만(브라우저 캐시를 쓰거나 답변을 가볍게 하려면)
         # 배포 호스트 주소를 넣는다(예: http://202.20.183.30:8509 - 사내 주소다).
         ("chart_public_base_url", os.environ.get("CHART_PUBLIC_BASE_URL", ""),
-         "(선택) 차트를 URL로 제공할 때의 사내 주소. 비우면 답변에 이미지를 직접 넣는다",
+         "(고급/보통 비움) 차트를 URL로 제공할 때의 사내 주소. 비우면 답변에 이미지를 직접 넣는다",
          True, False, False),
         ("chart_max_points", "200", "차트 하나에 넣을 수 있는 최대 항목 수", True, False, False),
         ("chart_retention_hours", "72",
@@ -638,8 +642,13 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
 
         # Open WebUI 기본 모델 동기화("설정" 탭의 "Open WebUI 기본 모델 동기화" 버튼용).
         # API 키는 Open WebUI 관리자 계정으로 로그인 -> 설정 -> 계정 -> API 키에서 발급.
+        # **도커 네트워크 안에서** 관리자 콘솔이 Open WebUI API를 부를 때 쓰는 주소다.
+        # 8080은 Open WebUI 컨테이너의 내부 포트이고, 사용자가 브라우저로 쓰는 8502는
+        # 그 8080에 매핑된 호스트 포트다. 여기에 8502를 넣으면 안 된다(내부망에서 그 포트는 없다).
+        # 컨테이너 이름·포트를 바꿨다면 그때 이 값을 고친다.
         ("openwebui_base_url", os.environ.get("OPENWEBUI_BASE_URL", "http://open-webui:8080"),
-         "Open WebUI 내부 주소(기본 모델 동기화용)", True, False, False),
+         "관리자 콘솔이 Open WebUI API를 부를 도커 내부 주소. 사용자 접속 주소(8502)가 아니다",
+         True, False, False),
         ("openwebui_admin_api_key", "", "Open WebUI 관리자 API 키(기본 모델 동기화용, 비우면 동기화 생략)", True, True, False),
 
         ("agent_system_instruction", AGENT_INSTRUCTION, "ADK 루트 에이전트 system instruction", False, False, False),

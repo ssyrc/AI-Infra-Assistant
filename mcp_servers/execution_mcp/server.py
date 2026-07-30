@@ -31,7 +31,8 @@ from mcp_caller import (  # noqa: E402
     get_caller, CallerContextMiddleware, load_overrides_sync, tool_description, build_wrapped,
 )
 from ssh_exec import (  # noqa: E402
-    master_alive, run_ssh_as_user, warm_master, start_master_keepalive,
+    master_alive, run_ssh_as_user, set_output_limit_getter, warm_master,
+    start_master_keepalive,
 )
 from execution_exec import DEFAULT_DENY_CSV, build_free_argv, deny_set  # noqa: E402
 from builtin import BUILTIN_COMMANDS  # noqa: E402
@@ -52,6 +53,15 @@ async def _deny_csv() -> str:
 
 
 set_deny_csv_getter(_deny_csv)
+
+
+async def _output_limit() -> int:
+    """커맨드 출력을 LLM에 넘길 때의 상한. 매뉴얼·VOC 결과(건당 1500자)와 같은 이유로 필요하다 -
+    출력이 그대로 다음 요청 프롬프트에 실린다(#123)."""
+    return int(await get_config("execution_result_max_chars", "4000"))
+
+
+set_output_limit_getter(_output_limit)
 
 
 async def _login_host() -> str:
