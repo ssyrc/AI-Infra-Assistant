@@ -15,6 +15,7 @@
  채팅이 시작될 때 ssh 가 제대로 되는지, execution_mcp가 그 세션을 제대로 활용하고 있는지 확인 필요
 - job 리스트 보여달라고 하면 원래 잘 빠르게 됐었고 표로 잘 정리해서 보여줬었는데, 이제 너무 느리게 실행되고 간단하게 리스트 형식으로 보여줌. 
   마찬가지로 세션이 제대로 시작되고 있는지, mcp 가 제대로 동작하고 있는지, 결과를 agent 가 적절히 보여줄 수 있어야 함.
+- 현재 mcp 동작 방식을 알려줘. https://github.com/xkiranj/linux-command-mcp 랑 비슷한 로직인거야? 굳이 command 를 일일이 지정하지 않아도 되나 해서.
 
 3. chart_mcp
 - gpu 인프라 현황 차트로 보여달라고 하면, 이런 에러가 뜸. [오류가 발생했습니다: litellm.ContextWindowExceededError: litellm.BadRequestError: ContextWindowExceededError: OpenAIException - Error code: 400 - {'error': {'message': "This model's maximum context length is 32768 tokens. However, your request has 59360 input tokens. Please reduce the length of the input messages. None", 'type': 'BadRequestError', 'param': None, 'code': 400}}]
