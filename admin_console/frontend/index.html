@@ -189,7 +189,7 @@ function ManualsPanel() {
     if ([".xlsx", ".xls"].includes(e)) return "엑셀 (열 선택)";
     if (e === ".csv") return "CSV (열 선택)";
     if (e === ".tsv") return "TSV·탭 구분 (열 선택)";
-    if (e === ".pptx") return "PPT (슬라이드 단위)";
+    if (e === ".pptx") return "PPT";
     if ([".docx", ".pdf"].includes(e)) return "문서 (섹션 단위)";
     if ([".txt", ".md"].includes(e)) return "텍스트 (문단 단위)";
     return "";
@@ -292,7 +292,7 @@ function ManualsPanel() {
       body: JSON.stringify({ reference_path: refPath }),
     });
     await load();
-    alert("문서 위치를 저장했습니다(같은 제목의 모든 버전에 적용).");
+    alert("문서 위치를 저장했습니다.");
   };
   // 큰 문서는 청크가 수천 개라 발행에 시간이 걸린다. 진행 표시가 없으면 "버튼이 안 눌린다"로
   // 보이므로, 누르는 즉시 상태를 바꾸고 끝나면 결과(임베딩 실패 수 포함)를 알린다.
@@ -353,7 +353,7 @@ function ManualsPanel() {
 
       <div className="card">
         <div className="toolbar">
-          <input placeholder="문서 제목 (버전 그룹핑 키)" value={title} onChange={e => setTitle(e.target.value)} style={{width: 260}} />
+          <input placeholder="문서 제목" value={title} onChange={e => setTitle(e.target.value)} style={{width: 260}} />
           <input type="file" accept=".xlsx,.xls,.csv,.tsv,.docx,.pptx,.pdf,.txt,.md"
                  onChange={e => pickFile(e.target.files[0])} />
           <button onClick={() => setShowBrowser(true)}>서버 파일에서 선택</button>
@@ -450,10 +450,7 @@ function ManualsPanel() {
       {excelPreview && (
         <div className="card">
           <div style={{marginBottom: 8}}><strong>열 선택</strong> · {excelPreview.filename} · {excelPreview.sheet} · {excelPreview.total_rows}행 · 헤더 {excelPreview.header_row}행</div>
-          <div className="subtitle">
-            <strong>내용</strong>: 청크 본문에 넣을 열(복수 선택) ·
-            <strong>문서명</strong>: 원본 문서 이름 열(<code>ppt_title</code>이면 자동 선택)
-          </div>
+          <div className="subtitle"><strong>내용</strong>: 청크 본문 열 · <strong>문서명</strong>: 원본 문서 이름 열</div>
           <table style={{marginBottom: 12}}>
             <thead><tr><th>① 내용</th><th>② 문서명</th><th>열 이름</th><th>샘플 값</th></tr></thead>
             <tbody>
@@ -512,7 +509,7 @@ function ManualsPanel() {
             <div className="row-actions">
               {detail.file.status !== "published" && (
                 <button className="primary" disabled={publishBusy} onClick={() => publish(detail.file.id)}>
-                  {publishBusy ? "발행 중… (청크가 많으면 몇 분 걸립니다)" : "발행"}
+                  {publishBusy ? "발행 중…" : "발행"}
                 </button>
               )}
               {detail.file.status === "published" && <button className="danger" onClick={() => unpublish(detail.file.id)}>발행취소</button>}
@@ -550,7 +547,7 @@ function ManualsPanel() {
             {detail.chunks.map(c => (
               <div className="chunk" key={c.id}>
                 <div className="meta">
-                  <span>{c.section_title || "(제목 없음)"} {c.page_no ? `· p${c.page_no}` : ""} · #{c.seq} {c.embedded ? "· 임베딩됨" : "· 미임베딩(발행 시 처리)"}</span>
+                  <span>{c.section_title || "(제목 없음)"} {c.page_no ? `· p${c.page_no}` : ""} · #{c.seq} {c.embedded ? "· 임베딩됨" : "· 미임베딩"}</span>
                   {detail.file.status === "draft" && <button className="danger" onClick={() => deleteChunk(c.id)}>삭제</button>}
                 </div>
                 <textarea defaultValue={c.chunk_text}
@@ -739,8 +736,8 @@ function VocPanel() {
           </div>
 
           <div style={{display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12}}>
-            {colSel("question_column", "질문(question) *")}
-            {colSel("answer_column", "답변(answer) *")}
+            {colSel("question_column", "질문 *")}
+            {colSel("answer_column", "답변 *")}
           </div>
           <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 10}}>
             비어 있으면 그 행을 건너뛸 열(선택):{" "}
@@ -934,9 +931,15 @@ function ServerFileBrowser({ onPick, onClose }) {
 // argv JSON을 손으로 쓰게 하던 예전 방식보다 쉽고, 카탈로그의 {user_id} 문법과도 같다.
 const HOST_MODE_LABEL = {
   login_server: "로그인 서버 고정",
-  target_server: "서버 지정(에이전트가 선택)",
+  target_server: "서버 지정",
 };
 const ARG_TYPE_LABEL = { str: "문자열", int: "정수", enum: "선택형" };
+// Open WebUI 계정 역할이 그대로 넘어온다. 자유 입력이면 오타 하나로 아무도 못 쓰게 된다.
+const ROLE_OPTIONS = [
+  { value: "", label: "제한 없음" },
+  { value: "user", label: "user" },
+  { value: "admin", label: "admin" },
+];
 const EMPTY_FORM = {
   title: "", description: "", exec_command: "", args: [],
   allow_extra_args: true, host_mode: "login_server", enabled: true, required_roles: [],
@@ -975,25 +978,24 @@ function CommandForm({ form, setForm, onSubmit, onCancel, editing }) {
   return (
     <div className="card">
       <div className="toolbar">
-        <input placeholder="이름 (한글 가능 · 목록에 표시)" value={form.title}
+        <input placeholder="이름" value={form.title}
                onChange={e => setForm({ ...form, title: e.target.value })} style={{ width: 240 }} />
-        <input placeholder="실행 커맨드 (예: phd info -u {user_id})" value={form.exec_command}
+        <input placeholder="실행 커맨드" value={form.exec_command}
                onChange={e => setForm({ ...form, exec_command: e.target.value })}
                style={{ flex: 1, minWidth: 320, fontFamily: "var(--mono)" }} />
       </div>
       <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>
-        셸 없이 그대로 실행됩니다(파이프 <code>|</code>·리다이렉션 <code>&gt;</code> 불가).
-        <code>{"{user_id}"}</code>는 질문한 사용자 계정으로 치환됩니다.
-        그 밖의 <code>{"{이름}"}</code>은 <strong>에이전트가 채우는 인자</strong>가 됩니다.
+        <code>{"{user_id}"}</code>는 질문한 사용자 계정으로,
+        그 밖의 <code>{"{이름}"}</code>은 에이전트가 채우는 인자가 됩니다.
       </div>
-      <textarea placeholder="설명 — 에이전트가 이걸 보고 고릅니다. 사용자가 물어볼 말로 한 줄."
+      <textarea placeholder="설명 — 에이전트가 이걸 보고 툴을 고릅니다"
                 value={form.description} rows={2} style={{ width: "100%", marginTop: 8 }}
                 onChange={e => setForm({ ...form, description: e.target.value })} />
 
       {form.args.length > 0 && (
         <div style={{ marginTop: 10 }}>
           <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>
-            인자 {form.args.length}개 — 커맨드의 {"{이름}"}에서 자동으로 잡았습니다
+            인자 {form.args.length}개
           </div>
           <table>
             <thead>
@@ -1020,11 +1022,11 @@ function CommandForm({ form, setForm, onSubmit, onCancel, editing }) {
                            onChange={e => setArg(i, { default: e.target.value })} />
                   </td>
                   <td>
-                    <input placeholder="에이전트에게 보여줄 설명" value={a.description || ""}
+                    <input placeholder="설명" value={a.description || ""}
                            style={{ width: "100%" }}
                            onChange={e => setArg(i, { description: e.target.value })} />
                     {a.type === "enum" && (
-                      <input placeholder="선택지 (콤마로 구분: uptime,memory,cpu)"
+                      <input placeholder="선택지 (콤마 구분)"
                              value={(a.choices || []).join(",")} style={{ width: "100%", marginTop: 4 }}
                              onChange={e => setArg(i, {
                                choices: e.target.value.split(",").map(s => s.trim()).filter(Boolean),
@@ -1050,7 +1052,7 @@ function CommandForm({ form, setForm, onSubmit, onCancel, editing }) {
         <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 6 }}>
           <input type="checkbox" checked={form.allow_extra_args}
                  onChange={e => setForm({ ...form, allow_extra_args: e.target.checked })} />
-          추가 인자 허용 (에이전트가 위에 없는 인자도 덧붙일 수 있음)
+          추가 인자 허용
         </label>
         <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 6 }}>
           <input type="checkbox" checked={form.enabled}
@@ -1058,21 +1060,15 @@ function CommandForm({ form, setForm, onSubmit, onCancel, editing }) {
           활성
         </label>
         <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 6 }}>
-          필요 역할
-          <input placeholder="비우면 제한 없음" value={(form.required_roles || []).join(",")}
-                 style={{ width: 140 }}
-                 onChange={e => setForm({
-                   ...form,
-                   required_roles: e.target.value.split(",").map(s => s.trim()).filter(Boolean),
-                 })} />
+          역할
+          <select value={(form.required_roles || [])[0] || ""}
+                  onChange={e => setForm({
+                    ...form, required_roles: e.target.value ? [e.target.value] : [],
+                  })}>
+            {ROLE_OPTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+          </select>
         </label>
       </div>
-      {hasUserId && (
-        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>
-          <code>{"{user_id}"}</code>가 있어 이 커맨드는 <strong>호출자 본인 자원만</strong> 조회합니다
-          (에이전트가 같은 옵션으로 다른 계정을 지정하는 것을 시스템이 막습니다).
-        </div>
-      )}
       <div className="toolbar" style={{ marginTop: 10 }}>
         <button className="primary" onClick={onSubmit}>{editing ? "수정 저장" : "등록"}</button>
         {editing && <button onClick={onCancel}>취소</button>}
@@ -1209,7 +1205,7 @@ function ExecutionPanel() {
 
   // 한 행의 공통 필드(활성 제외)를 저장한다. 내장/등록에 따라 다른 API로 보낸다.
   const saveRow = async (c, e) => {
-    const roles = e.roles.split(",").map(s => s.trim()).filter(Boolean);
+    const roles = e.role ? [e.role] : [];
     try {
       if (c.kind === "builtin") {
         await patchBuiltin(c.tool_name, {
@@ -1239,16 +1235,11 @@ function ExecutionPanel() {
   return (
     <div>
       <h2>커맨드 실행</h2>
-      <div className="subtitle">
-        커맨드 하나가 에이전트 툴 하나가 됩니다. 여기 없는 커맨드는 에이전트가
-        <code>run_command</code>로 실행하며 차단 목록(<code>execution_deny_commands</code>)이 걸립니다.
-      </div>
+      <div className="subtitle">커맨드 하나가 에이전트 툴 하나가 됩니다.</div>
 
       {needsRestart && (
         <div className="card" style={{ borderColor: "var(--warn)", color: "var(--warn)", fontSize: 12.5 }}>
-          툴 목록이 바뀌었습니다. <strong>execution-mcp를 재시작해야</strong> 에이전트에 반영됩니다.
-          (<strong>끄기</strong>와 역할 변경은 재시작 없이 즉시 적용됩니다. 켜기·커맨드·인자·실행
-          위치는 툴 목록을 다시 만들어야 합니다.)
+          변경 사항을 반영하려면 <strong>execution-mcp 재시작</strong>이 필요합니다.
           <button className="primary" style={{ marginLeft: 10 }}
                   onClick={async () => { await restartService("execution-mcp"); setNeedsRestart(false); }}>
             지금 재시작
@@ -1272,7 +1263,7 @@ function ExecutionPanel() {
             <input type="file" accept=".xlsx,.xls,.csv,.tsv" disabled={busy}
                    onChange={e => { analyzeExcel(e.target.files[0]); e.target.value = ""; }} />
             <button disabled={busy} onClick={() => setShowBrowser(true)}>서버 파일에서 선택</button>
-            <span style={{ fontSize: 11.5, color: "var(--muted)" }}>엑셀·CSV 일괄 등록 (열 매핑)</span>
+            <span style={{ fontSize: 11.5, color: "var(--muted)" }}>엑셀·CSV 일괄 등록</span>
           </div>
 
           {showBrowser && (
@@ -1286,8 +1277,7 @@ function ExecutionPanel() {
               <div style={{ marginBottom: 8 }}>
                 <strong>열 매핑</strong> · {excel.filename} · {excel.total_rows}행 · 헤더 {excel.header_row}행
               </div>
-              <div className="subtitle">이름 기준으로 등록/갱신됩니다. 인자가 필요한 커맨드는
-                등록 후 개별 편집에서 {"{이름}"}을 넣으세요.</div>
+              <div className="subtitle">이름 기준으로 등록/갱신됩니다.</div>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
                 {colSelect("title_column", "이름", true)}
                 {colSelect("description_column", "설명", true)}
@@ -1310,8 +1300,11 @@ function ExecutionPanel() {
                 const isBuiltin = c.kind === "builtin";
                 const key = rowKey(c);
                 const e = edits[key] || {
-                  description: isBuiltin ? (c.description_override || "") : (c.description || ""),
-                  roles: (c.required_roles || []).join(","),
+                  // 내장은 코드 기본 설명을 값으로 보여준다(칸이 비어 보이지 않게).
+                  description: isBuiltin
+                    ? (c.description_override || c.code_description || "")
+                    : (c.description || ""),
+                  role: (c.required_roles || [])[0] || "",
                   host_mode: c.host_mode,
                 };
                 const setE = (patch) => setEdits({ ...edits, [key]: { ...e, ...patch } });
@@ -1354,8 +1347,11 @@ function ExecutionPanel() {
                              onChange={ev => setE({ description: ev.target.value })} />
                     </td>
                     <td>
-                      <input value={e.roles} placeholder="제한 없음" style={{ width: 90 }}
-                             onChange={ev => setE({ roles: ev.target.value })} />
+                      <select value={e.role} onChange={ev => setE({ role: ev.target.value })}>
+                        {ROLE_OPTIONS.map(r => (
+                          <option key={r.value} value={r.value}>{r.label}</option>
+                        ))}
+                      </select>
                     </td>
                     <td className="row-actions">
                       {key in edits
@@ -1372,10 +1368,6 @@ function ExecutionPanel() {
                 ? <tr><td colSpan="8" className="empty">커맨드가 없습니다.</td></tr> : null}
             </tbody>
           </table>
-          <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 8 }}>
-            <strong>코드 내장</strong>으로 표시된 것은 값 검증이 코드에 있어(줄 수 1~2000, 경로 검사 등)
-            커맨드와 인자를 여기서 바꿀 수 없습니다. 활성·실행 위치·설명·역할은 다른 커맨드와 같습니다.
-          </div>
         </React.Fragment>
       )}
 
@@ -1526,14 +1518,12 @@ function SettingsPanel() {
             </div>
             {g.title === "Chart MCP" && (
               <div style={{fontSize: 12.5, color: "var(--muted)", marginBottom: 10}}>
-                <code>chart_public_base_url</code>은 <strong>비워 두세요</strong>(권장).
-                비어 있으면 차트를 답변 안에 직접 넣어 보내므로 설정도, 열어 둘 포트도 필요 없습니다.
+                <code>chart_public_base_url</code>은 비워 두세요.
               </div>
             )}
             {g.title === "Open WebUI" && (
               <div style={{fontSize: 12.5, color: "var(--muted)", marginBottom: 10}}>
-                API 키를 저장하면 기본 모델이 자동으로 지정됩니다(따로 누를 버튼 없음).
-                키는 Open WebUI 로그인 → 설정 → 계정 → API 키에서 발급합니다.
+                API 키를 저장하면 기본 모델이 자동 지정됩니다.
               </div>
             )}
             {rows.map(field)}
@@ -1583,7 +1573,7 @@ function AccountsPanel() {
   return (
     <div>
       <h2>계정 관리</h2>
-      <div className="subtitle">관리자 콘솔 로그인 계정. `.env`의 기본 계정은 지울 수 없습니다.</div>
+      <div className="subtitle">관리자 콘솔 로그인 계정.</div>
 
       <div className="card">
         <div style={{fontWeight: 600, marginBottom: 8}}>새 계정 추가</div>

@@ -31,7 +31,7 @@ from mcp_caller import (  # noqa: E402
     get_caller, CallerContextMiddleware, load_overrides_sync, tool_description, build_wrapped,
 )
 from ssh_exec import (  # noqa: E402
-    run_ssh_as_user, warm_master, start_master_keepalive,
+    master_alive, run_ssh_as_user, warm_master, start_master_keepalive,
 )
 from execution_exec import DEFAULT_DENY_CSV, build_free_argv, deny_set  # noqa: E402
 from builtin import BUILTIN_COMMANDS  # noqa: E402
@@ -204,7 +204,16 @@ if __name__ == "__main__":
             print(f"[execution-mcp] 로그인 서버 설정을 읽지 못해 예열을 건너뜁니다: {e}")
             return
         if host:
-            await warm_master(host)
+            ok = await warm_master(host)
+            alive = await master_alive(host) if ok else False
+            # "ssh 세션이 제대로 열렸는지"를 기동 로그에서 바로 확인할 수 있게 남긴다.
+            if alive:
+                print(f"[execution-mcp] ssh 다중화 마스터 준비 완료({host}). "
+                      "첫 커맨드부터 곧바로 실행됩니다.")
+            else:
+                print(f"[execution-mcp] ssh 마스터를 열지 못했습니다({host}). 커맨드는 실행되지만 "
+                      "매번 새로 접속해 1~3초씩 더 걸립니다. "
+                      "scripts/diag-ssh.sh 로 원인을 확인하세요.")
         start_master_keepalive(lambda: get_config("scheduler_login_host", host))
 
     inner.add_event_handler("startup", _warm_ssh)

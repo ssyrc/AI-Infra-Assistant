@@ -95,27 +95,21 @@ _LOGIN_SERVER = {**_COMMON, "host_mode": "login_server"}
 
 BUILTIN_COMMANDS = {
     "gpu_status": {"handler": gpu_status, "example_command": "nvidia-smi",
-                   "description": ("지정 서버(host)의 GPU 상태 조회(nvidia-smi: 장수·모델·"
-                                   "사용률/메모리·실행 프로세스). host는 서버 이름(예: hgpu8002)."),
+                   "description": "지정한 서버의 GPU 상태. 장수·모델·사용률·메모리·실행 중인 프로세스",
                    **_COMMON},
     "list_dir": {"handler": list_dir, "example_command": "ls -lh [-a] <path>",
-                 "description": ("로그인 서버에서 디렉토리 내용 나열(ls -lh). "
-                                 "show_hidden=True면 숨김 파일 포함."), **_LOGIN_SERVER},
+                 "description": "내 홈이나 지정한 경로의 파일 목록", **_LOGIN_SERVER},
     "find_files": {"handler": find_files, "example_command": "find <path> [-name pattern] [-type f|d|l] (read-only)",
-                   "description": ("로그인 서버에서 이름 패턴(glob, 예: '*.log')이나 종류로 파일 "
-                                   "검색(find, 읽기 전용)."), **_LOGIN_SERVER},
+                   "description": "이름 패턴이나 종류로 파일 찾기. 읽기 전용", **_LOGIN_SERVER},
     "disk_free": {"handler": disk_free, "example_command": "df -h",
-                  "description": ("지정 서버(host)의 **파일시스템 전체** 디스크 여유 용량(df -h). "
-                                  "개인 홈 할당량(quota) 질문에는 쓰지 않는다 — 그건 커맨드 툴로."),
+                  "description": "서버 파일시스템의 디스크 여유 용량. "
+                                  "개인 홈 할당량 조회에는 쓰지 않는다",
                   **_COMMON},
     "disk_usage": {"handler": disk_usage, "example_command": "du -h --max-depth=<n> <path>",
-                   "description": ("지정 서버(host)에서 특정 경로의 디스크 사용량 조회(du -h). "
-                                   "max_depth로 하위 폴더별 내역."), **_COMMON},
+                   "description": "지정한 경로가 디스크를 얼마나 쓰는지", **_COMMON},
     "read_file_head": {"handler": read_file_head, "example_command": "head -n <lines> <path>",
-                       "description": ("로그인 서버에서 텍스트 파일 앞부분 읽기(head). "
-                                       "lines 기본 200, 최대 2000."), **_LOGIN_SERVER},
+                       "description": "텍스트 파일 앞부분 읽기. 로그·설정 확인용", **_LOGIN_SERVER},
     "system_info": {"handler": system_info,
                     "example_command": "uptime | free -h | ip addr | who | lscpu (kind로 선택)",
-                    "description": ("지정 서버(host)의 시스템 정보. kind: uptime | memory | "
-                                    "network | who | cpu."), **_COMMON},
+                    "description": "서버 시스템 정보. kind로 uptime, memory, network, who, cpu 중 선택", **_COMMON},
 }

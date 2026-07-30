@@ -35,7 +35,12 @@ def full_reference(c: dict) -> str | None:
     """이 청크를 찾아갈 수 있는 전체 경로. reference_path(메뉴까지) + doc_title(문서 이름).
 
     관리자는 매뉴얼 탭에 메뉴 경로까지만 넣는다("… > 활용 가이드"). 그 메뉴 안에 어떤 문서가
-    있는지는 행마다 다르므로(doc_title), 둘을 여기서 이어 붙여 답변에 그대로 쓸 수 있게 한다.
+    있는지는 행마다 다르므로(doc_title), 둘을 이어 붙인 문자열도 함께 준다.
+
+    다만 **이것만 주면 LLM이 줄여서 옮긴다** - URL이 든 긴 경로를 "슈퍼컴 Portal > 활용 가이드"
+    처럼 요약해 버려 사용자가 문서를 찾을 수 없었다. 그래서 검색 결과에는
+    `guide_location`(경로)과 `guide_document`(문서 이름)를 **따로** 실어, 지시문이 정해진
+    두 줄 형식으로 그대로 옮겨 적게 한다.
     """
     parts = [x for x in (c.get("reference_path"), c.get("doc_title")) if x]
     return " > ".join(parts) if parts else None
@@ -238,10 +243,13 @@ async def search_manual_chunks(query: str, top_k: int = 5, *,
     except (TypeError, ValueError):
         max_chars = 1500
 
-    # 메뉴 경로 + 문서 이름을 미리 이어 둔다. LLM이 두 필드를 직접 조합하게 두면
-    # 빠뜨리거나 순서를 바꾸기 쉬우므로, 답변에 그대로 옮겨 적을 문자열을 만들어 준다.
+    # 답변에 그대로 옮겨 적을 값을 만들어 준다. LLM이 조합하게 두면 순서를 바꾸거나 줄인다.
+    #  · guide_location  = 관리자가 넣은 문서 위치(URL 포함). **줄이지 말고 그대로** 써야 한다.
+    #  · guide_document  = 그 위치 안의 문서 이름.
     for item in picked:
         item["reference"] = full_reference(item)
+        item["guide_location"] = item.get("reference_path") or ""
+        item["guide_document"] = item.get("doc_title") or item.get("title") or ""
         text = item.get("chunk_text") or ""
         if max_chars > 0 and len(text) > max_chars:
             item["chunk_text"] = text[:max_chars] + "\n…(이하 생략, 더 필요하면 get_document)"

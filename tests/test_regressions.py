@@ -822,3 +822,60 @@ def test_disabled_commands_are_not_exposed_as_tools():
     assert 'if _ov.get("enabled") is False:' in server, "비활성 내장 커맨드를 건너뛰지 않는다"
     # 즉시 차단(실행 시점 검사)은 그대로 남아 있어야 한다.
     assert "async def _is_enabled" in server
+
+
+# --- 16번: 참고 문서 안내를 줄여서 쓰지 못하게 한다 -----------------------------------
+# 관리자가 넣은 문서 위치에는 URL이 들어 있는데, LLM이 "슈퍼컴 Portal > 활용 가이드"처럼
+# 요약해 버려 사용자가 문서를 찾을 수 없었다. 검색 결과가 위치와 문서 이름을 **따로** 실어
+# 주고, 지시문이 정해진 두 줄 형식으로 옮기게 한다.
+def test_manual_search_exposes_location_and_document_separately():
+    src = open(os.path.join(ROOT, "shared", "manual_search.py"), encoding="utf-8").read()
+    assert 'item["guide_location"] = item.get("reference_path")' in src
+    assert 'item["guide_document"]' in src
+
+    instr = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+    assert "가이드 위치:" in instr and "가이드 문서:" in instr, \
+        "지시문에 참고 문서 출력 형식이 없다"
+    assert "guide_location" in instr and "guide_document" in instr
+    assert "한 글자도 줄이지 않고" in instr, "경로를 요약하지 말라는 규칙이 없다"
+
+
+def test_instruction_asks_for_table_on_multi_column_output():
+    """job 목록처럼 열이 있는 실행 결과는 표로 정리해야 한다(예전엔 그렇게 나왔다)."""
+    instr = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+    assert "마크다운 테이블" in instr and "job 목록" in instr
+
+
+def test_ssh_master_health_is_observable():
+    """'ssh 세션이 제대로 열렸는지'를 로그로 확인할 수 있어야 한다.
+    추측으로 느림을 진단할 수 없다 - 마스터가 죽으면 커맨드마다 1~3초가 더 붙는다."""
+    ssh = open(os.path.join(ROOT, "shared", "ssh_exec.py"), encoding="utf-8").read()
+    assert "async def master_alive" in ssh
+    assert '"-O", "check"' in ssh, "ssh -O check로 실제 상태를 확인해야 한다"
+
+    server = open(os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"),
+                  encoding="utf-8").read()
+    assert "master_alive" in server and "다중화 마스터 준비 완료" in server
+    assert "매번 새로 접속해" in server, "마스터가 없을 때의 영향을 로그로 알려야 한다"
+
+
+def test_builtin_descriptions_are_short_and_present():
+    """콘솔 설명 칸이 비어 보이지 않도록 내장 커맨드에 설명이 다 있어야 한다.
+    설명은 에이전트가 툴을 고르는 유일한 근거이므로 매 요청 프롬프트에 실린다 - 짧게."""
+    sys.path.insert(0, os.path.join(ROOT, "shared"))
+    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "execution_mcp"))
+    from builtin import BUILTIN_COMMANDS
+    for name, entry in BUILTIN_COMMANDS.items():
+        desc = (entry.get("description") or "").strip()
+        assert desc, f"{name}에 설명이 없다"
+        assert len(desc) <= 80, f"{name} 설명이 너무 길다({len(desc)}자): {desc}"
+
+
+def test_console_role_is_a_select_with_admin_user():
+    """역할은 자유 입력이면 오타 하나로 아무도 못 쓰게 된다. select로 고정한다."""
+    html = open(os.path.join(ROOT, "admin_console", "frontend", "index.html"),
+                encoding="utf-8").read()
+    assert "const ROLE_OPTIONS" in html
+    for v in ('value: ""', 'value: "user"', 'value: "admin"'):
+        assert v in html, f"역할 선택지에 {v}가 없다"
+    assert 'onChange={ev => setE({ role: ev.target.value })}' in html

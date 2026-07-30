@@ -205,6 +205,29 @@ async def warm_master(host: str) -> bool:
     return True
 
 
+async def master_alive(host: str) -> bool:
+    """다중화 마스터 연결이 실제로 살아 있는지 확인한다(`ssh -O check`).
+
+    "커맨드가 왜 느리냐"를 판단하는 데 이게 필요하다. 마스터가 죽어 있으면 매 커맨드가
+    TCP+키교환+로그인 셸을 새로 열어(1~3초) 체감이 확 달라진다. 추측 대신 확인한다.
+    """
+    if not SSH_MULTIPLEX:
+        return False
+    try:
+        ip = resolve_host(host)
+    except Exception:  # noqa: BLE001
+        return False
+    argv = ["ssh", *_base_ssh_opts(), "-O", "check", f"{SSH_ROOT_USER}@{ip}"]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv, stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        await asyncio.wait_for(proc.communicate(), timeout=5)
+    except (asyncio.TimeoutError, OSError):
+        return False
+    return proc.returncode == 0
+
+
 def start_master_keepalive(host_getter, interval: int = 240):
     """마스터 연결이 끊기지 않게 주기적으로 예열한다(ControlPersist보다 짧은 주기).
 
@@ -216,7 +239,10 @@ def start_master_keepalive(host_getter, interval: int = 240):
             try:
                 host = await host_getter()
                 if host:
-                    await warm_master(host)
+                    ok = await warm_master(host)
+                    if not ok:
+                        print(f"[ssh_exec] 마스터 연결 유지 실패({host}). 다음 커맨드는 "
+                              "새로 접속하므로 1~3초 더 걸립니다.")
             except asyncio.CancelledError:
                 raise
             except Exception as e:  # noqa: BLE001
