@@ -13,7 +13,6 @@ x-mcp-source-volumes: &mcp-source-volumes
 x-admin-source-volumes: &admin-source-volumes
   - ./admin_console:/app/admin_console:ro
   - ./shared:/app/shared:ro
-  - ./mcp_servers/execution_mcp:/app/mcp_servers/execution_mcp:ro
 
 # 폐쇄망: 사내 미러 레지스트리를 .env로 지정한다(기본은 공개 레지스트리).
 #   REGISTRY_DOCKERHUB=repository.samsungds.net/proxy-docker-registry-1.docker.io
@@ -116,7 +115,7 @@ services:
     depends_on:
       dev-config: { condition: service_completed_successfully }
 
-  # 커맨드 실행 전담(구 command-mcp + system-mcp). 내장 커맨드·등록 커맨드·run_command.
+  # 커맨드 실행 전담(구 command-mcp + system-mcp). 콘솔 등록 커맨드 + run_command.
   execution-mcp:
     <<: *mcpimage
     command: ["watchfiles", "--filter", "python", "python mcp_servers/execution_mcp/server.py", "mcp_servers/execution_mcp", "shared"]
@@ -135,7 +134,12 @@ services:
       SSH_FORCE_TTY: ${SSH_FORCE_TTY:-false}
       # 연결 다중화: 첫 커맨드만 핸드셰이크하고 이후는 같은 연결에 얹는다(체감 지연의 대부분).
       SSH_MULTIPLEX: ${SSH_MULTIPLEX:-true}
-      SSH_CONTROL_PERSIST: ${SSH_CONTROL_PERSIST:-300}
+      # **3600.** 여기 300(5분)이 박혀 있어서, 코드 기본값을 3600으로 올린 뒤에도(#127)
+      # 실제로는 5분마다 마스터가 죽고 있었다. 드문드문 오는 채팅이라 그때마다 첫 커맨드에
+      # 1~3초가 다시 붙는다. compose가 코드 기본값을 덮어쓰는 값이니 함께 올린다.
+      SSH_CONTROL_PERSIST: ${SSH_CONTROL_PERSIST:-3600}
+      # 유휴 TCP를 끊는 방화벽이 있으면 소켓만 남고 연결은 죽는다. keepalive로 스스로 확인.
+      SSH_ALIVE_INTERVAL: ${SSH_ALIVE_INTERVAL:-30}
     volumes:
       - ./mcp_servers:/app/mcp_servers:ro
       - ./shared:/app/shared:ro
@@ -197,12 +201,10 @@ services:
     # --reload-dir로 감시했고, uvicorn은 없는 경로를 주면 **기동을 거부**한다(컨테이너 즉시 종료).
     # compose에서 지정하면 이미지를 다시 만들지 않고 고칠 수 있다.
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload",
-              "--reload-dir", "/app/admin_console", "--reload-dir", "/app/shared",
-              "--reload-dir", "/app/mcp_servers/execution_mcp"]
+              "--reload-dir", "/app/admin_console", "--reload-dir", "/app/shared"]
     volumes:
       - ./admin_console:/app/admin_console:ro
       - ./shared:/app/shared:ro
-      - ./mcp_servers/execution_mcp:/app/mcp_servers/execution_mcp:ro
       # "서버 파일에서 선택" 업로드용. 호스트 경로는 .env의 UPLOAD_SOURCE_HOST_DIR로 바꿀 수 있다.
       - ${UPLOAD_SOURCE_HOST_DIR:-/home/gpu1/yr9.choi/05_halo/datasets}:/data/uploads:ro
       # 설정/화이트리스트 저장 후 "지금 재시작" 버튼용. admin-console에 사실상 호스트 권한을

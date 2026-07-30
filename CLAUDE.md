@@ -93,7 +93,8 @@ docker compose -f docker-compose.dev.yml up -d --no-build
 | `rerank_provider` | `vllm` (vLLM으로 리랭커를 띄웠을 때. TEI면 `tei`) |
 | `rerank_base_url` | `http://75.23.32.41:8020/v1` (`tei`면 `/v1` 없이) |
 | `rerank_model` | `bge-reranker-v2-m3` |
-| `scheduler_login_host` | `202.20.185.100` (**이름 금지 — IP로**. login07은 /etc/hosts에서 75.11.29.7로 풀려 전부 실패했다) |
+| `execution_host` | `202.20.185.100` (**이름 금지 — IP로**. login07은 /etc/hosts에서 75.11.29.7로 풀려 전부 실패했다. 구 `scheduler_login_host`, #128에서 개명) |
+| `openwebui_public_url` | `http://202.20.183.30:8502` (사용자 접속 주소. 콘솔이 API를 부르는 `openwebui_base_url`(8080)과 다르다) |
 | `agent_system_instruction` | `docs/NEXT-STEPS.md` **부록**의 전문 |
 
 - **왜 초기화되나**: `docker-compose.dev.yml`의 `dev-config` 서비스가 `up` 할 때마다 vLLM 주소를
@@ -113,14 +114,17 @@ docker compose -f docker-compose.dev.yml up -d --no-build
 
 ## 4. MCP 역할 분담 (사용자 결정 사항)
 
-- **Execution MCP**(구 Command MCP + System MCP를 #111에서 통합): 커맨드 실행 전담. 세 갈래다.
-  · **내장 커맨드**(`builtin.py` 7개) — 값 검증이 필요한 read-only 리눅스 명령(코드).
+- **Execution MCP**(구 Command MCP + System MCP를 #111에서 통합): 커맨드 실행 전담. **두 갈래**다
+  (#128에서 코드 내장 커맨드 7개를 삭제 — 전부 LLM이 아는 표준 리눅스 명령이었다).
   · **등록 커맨드**(`execution_commands`) — 콘솔에서 `head -n {lines} {path}`처럼 등록.
-    자리표시자가 **타입 붙은 파라미터**로 LLM에 노출된다. 항목별 on/off·역할·실행위치 지정.
-  · **`run_command`** — 미등록 커맨드(매뉴얼/VOC/LLM이 아는 것). 차단 목록을 **모든 토큰에**
-    엄격 적용(`mpirun ... rm -rf /` 우회 차단).
+    자리표시자가 **타입 붙은 파라미터**로 LLM에 노출된다. 전부 편집·삭제·on/off 가능.
+    자유 인자는 항상 허용(에이전트가 판단).
+  · **`run_command`** — 미등록 커맨드(표준 리눅스 명령, 매뉴얼/VOC에서 찾은 것).
+    차단 목록을 **모든 토큰에** 엄격 적용(`mpirun ... rm -rf /` 우회 차단).
   RAG 검색은 쓰지 않는다 — 툴 목록을 보고 에이전트가 고른다(#105).
   **등록 내용을 고치면 execution-mcp 재시작 필요**(활성/역할만 바꾸면 즉시 반영).
+  실행 결과에 `duration_ms`·`connection_reused`가 실려 오고 진행 표시 줄에 초가 보인다 —
+  "느리다"는 추측하지 말고 그 숫자와 `scripts/bench-exec.sh`로 가른다(#128).
 - **Chart MCP**: 추이/비교를 SVG로 그린다(#110). 실행도 DB 조회도 하지 않는다.
   짧은 표시자(`chart://<id>`)만 돌려주고 **agent-server가 답변을 내보낼 때 data URI로 치환**한다
   (#114). 그래서 이미지용 설정·포트가 없다. 이력에는 표시자가 남는다(프롬프트 예산).
@@ -131,8 +135,7 @@ docker compose -f docker-compose.dev.yml up -d --no-build
 | 바꾼 것 | 반영 방법 |
 |---|---|
 | 새 설정 키 / 마이그레이션 | `db-init` 재실행 필수 |
-| **등록 커맨드 추가·수정·인자·`host_mode`** | `execution-mcp` 재시작(툴 목록 재구성) |
-| 내장 커맨드 설명·`host_mode` | `execution-mcp` 재시작 |
+| **등록 커맨드 추가·수정·인자·`host_mode`·설명** | `execution-mcp` 재시작(툴 목록 재구성) |
 | `enabled` / `required_roles` | 실시간 반영(재시작 불필요) |
 | `agent_system_instruction` | non-force 시드라 **기존 DB에 자동 반영 안 됨** → 콘솔 설정 탭에 직접 붙여넣고 agent-server 재시작 |
 | `hot_reload=false` 설정값 | 해당 서비스 재시작(콘솔에 "지금 재시작" 버튼 있음) |

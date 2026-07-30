@@ -178,35 +178,6 @@ def test_clamp_top_k(monkeypatch):
     assert asyncio.run(db.clamp_candidates(500)) == 100
 
 
-# --- 7번: MCP 툴 스키마에 실제 파라미터가 노출되어야 한다 -------------------------
-# 래퍼가 인자를 **kwargs로 뭉개면 LLM이 무엇을 넣어야 할지 알 수 없다.
-# 반대로 user_id는 **노출되면 안 된다** - 호출자 헤더에서 강제 주입해 남의 자원 접근을 막는다
-# (user_scoped=True). 예전 이 테스트는 있지도 않은 툴 이름을 보고 있어서 계속 실패했고,
-# user_id가 노출돼야 한다고 거꾸로 단언하고 있었다.
-def test_execution_mcp_tool_schema_preserves_params():
-    os.environ.setdefault("CONFIG_DB_DSN", "postgresql://x:x@localhost/x")
-    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "execution_mcp"))
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "execmcp_test", os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"))
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    tools = asyncio.run(m.mcp.list_tools())
-    by_name = {t.name: t for t in tools}
-
-    # gpu_status(user_id, host) - host는 LLM이 정하고 user_id는 시스템이 고정한다.
-    props = by_name["gpu_status"].inputSchema["properties"]
-    assert "host" in props, "실제 파라미터(host)가 스키마에 있어야 함"
-    assert "kwargs" not in props, "kwargs로 뭉개지면 안 됨"
-    assert "user_id" not in props, "user_id는 LLM에 노출되면 안 됨(호출자 신원에서 주입)"
-
-    # list_dir은 로그인 서버 고정이라 host까지 감춘다. path/show_hidden은 보여야 한다.
-    props = by_name["list_dir"].inputSchema["properties"]
-    assert "path" in props and "show_hidden" in props
-    assert "user_id" not in props and "host" not in props, \
-        "로그인 서버 고정 툴은 host도 감춘다"
-
-
 # --- 7-1번: 자유 실행 툴은 run_command 하나뿐이어야 한다 --------------------------
 # job 조회처럼 특정 커맨드를 코드/설정에 박아 둔 전용 툴을 두면, 관리자가 실행 탭에서
 # 고쳐도 반영되지 않는다. 커맨드의 출처는 등록 테이블 하나로 유지한다.
@@ -222,12 +193,13 @@ def test_execution_mcp_has_no_hardcoded_command_tool():
         f"자유 실행 툴은 run_command 하나여야 함(현재: {sorted(m.FREE_TOOLS)})"
 
     props = {t.name: t.inputSchema["properties"] for t in asyncio.run(m.mcp.list_tools())}
+    # 실제 파라미터는 보이고(kwargs로 뭉개지면 LLM이 무엇을 넣을지 알 수 없다),
+    # user_id는 감춰져야 한다(호출자 헤더에서 강제 주입 - 남의 자원 접근 방지).
+    assert {"command", "args", "host"} <= set(props["run_command"])
+    assert "kwargs" not in props["run_command"], "kwargs로 뭉개지면 안 됨"
     assert "user_id" not in props["run_command"], "user_id는 LLM에 노출되면 안 됨"
-    assert "command" in props["run_command"]
     # 검색(RAG)은 걷어냈다 - 등록 커맨드는 툴로 노출한다.
     assert "search_commands" not in props, "커맨드 검색 툴이 다시 생기면 안 됨"
-    # 내장 커맨드도 같은 서버에 있어야 한다(통합의 핵심).
-    assert "gpu_status" in props and "list_dir" in props
 
 
 # --- 7-2번: 카탈로그 툴 이름은 ASCII이고, 재시작해도 바뀌지 않아야 한다 -------------
@@ -517,8 +489,13 @@ def test_execution_registration_rejects_dangerous_templates():
                         "login_server", deny)
 
 
-def test_execution_mcp_exposes_builtin_and_hides_identity():
-    """통합 서버 하나에 내장 커맨드와 run_command가 함께 있고, user_id는 감춰져야 한다."""
+def test_execution_mcp_has_no_builtin_tools():
+    """커맨드는 **전부 콘솔 등록분**이어야 한다(#128).
+
+    예전에는 파이썬 함수로 박아 둔 내장 커맨드 7개가 툴 목록에 섞여 있었다. 편집도 삭제도
+    안 되면서 설명이 매 요청 프롬프트에 실렸고, 전부 LLM이 아는 표준 리눅스 명령이라
+    run_command로 대체된다. 다시 코드에 커맨드를 박으면 이 테스트가 잡는다.
+    """
     import importlib.util
     os.environ.setdefault("CONFIG_DB_DSN", "postgresql://x:x@localhost/x")
     sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "execution_mcp"))
@@ -528,11 +505,11 @@ def test_execution_mcp_exposes_builtin_and_hides_identity():
     spec.loader.exec_module(m)
 
     props = {t.name: t.inputSchema["properties"] for t in asyncio.run(m.mcp.list_tools())}
-    assert {"gpu_status", "list_dir", "run_command"} <= set(props)
+    # DB가 없는 테스트 환경에서는 등록 커맨드가 안 실리므로 run_command 하나만 남는다.
+    assert set(props) == {"run_command"}, f"코드에 박힌 커맨드가 남아 있다: {sorted(props)}"
     for name, p in props.items():
         assert "user_id" not in p, f"{name}에 user_id가 노출됨"
-    # 로그인 서버 고정 툴은 host까지 감춘다.
-    assert "host" not in props["list_dir"] and "host" in props["gpu_status"]
+    assert not os.path.exists(os.path.join(ROOT, "mcp_servers", "execution_mcp", "builtin.py"))
 
 
 def test_registered_tool_schema_exposes_declared_args():
@@ -556,13 +533,14 @@ def test_registered_tool_schema_exposes_declared_args():
         "exec_command": "head -n {lines} {path}",
         "args": [{"name": "lines", "type": "int", "required": False, "default": "200"},
                  {"name": "path", "type": "str", "required": True}],
-        "allow_extra_args": False, "host_mode": "login_server",
-        "enabled": True, "required_roles": [],
+        "host_mode": "login_server", "enabled": True, "required_roles": [],
     }, host)
 
+    async def state(*_a):
+        return True, []
+
     srv = FastMCP("t", host="0.0.0.0")
-    srv.add_tool(build_wrapped("read_head", entry, is_enabled=lambda *a: True,
-                               required_roles=lambda *a: [], log_execution=None,
+    srv.add_tool(build_wrapped("read_head", entry, tool_state=state, log_execution=None,
                                host_mode="login_server", login_host=host),
                  name="read_head", description=entry["description"])
     schema = asyncio.run(srv.list_tools())[0].inputSchema
@@ -570,7 +548,8 @@ def test_registered_tool_schema_exposes_declared_args():
     assert props["lines"]["type"] == "integer" and props["path"]["type"] == "string"
     assert schema["required"] == ["path"]
     assert "user_id" not in props and "host" not in props
-    assert "args" not in props, "추가 인자를 막았으면 args가 노출되면 안 됨"
+    # 자유 인자는 **항상** 허용한다(#128) - 어떤 인자가 필요한지는 에이전트가 판단한다.
+    assert "args" in props
 
 
 # --- 11번: 이관 코드가 db-init 컨테이너에서 실제로 import 되어야 한다 -----------------
@@ -592,15 +571,21 @@ def test_migration_imports_only_shared():
         assert r.returncode == 0, f"shared만으로 import되지 않음:\n{r.stderr}"
 
 
-def test_admin_console_builtin_deps_are_in_shared():
-    """관리자 콘솔 이미지는 builtin.py 한 개만 복사한다. 그 의존이 shared 밖에 있으면 깨진다
-    (예전엔 linux_exec가 mcp_servers에 있어 운영 이미지에서 ImportError였다)."""
-    for mod in ("ssh_exec", "linux_exec"):
-        assert os.path.exists(os.path.join(ROOT, "shared", f"{mod}.py")), \
-            f"{mod}는 shared/에 있어야 한다(콘솔 이미지가 mcp_servers를 통째로 넣지 않는다)"
+def test_admin_console_image_does_not_reach_into_mcp_servers():
+    """콘솔 이미지는 mcp_servers를 복사하지 않는다.
+
+    예전에는 내장 커맨드 파일 하나를 COPY했는데, 그 파일이 옮겨지거나 사라지면 운영 이미지
+    빌드가 깨졌다(dev는 볼륨 마운트라 안 걸려서 못 봤다 - #112). 콘솔이 쓰는 실행 규칙은
+    전부 shared에 있어야 한다.
+    """
     dockerfile = open(os.path.join(ROOT, "admin_console", "Dockerfile"), encoding="utf-8").read()
-    assert "mcp_servers/execution_mcp/builtin.py" in dockerfile
-    assert "system_mcp" not in dockerfile, "없어진 경로를 복사하면 이미지 빌드가 실패한다"
+    copies = [ln for ln in dockerfile.splitlines()
+              if ln.strip().startswith("COPY") and "mcp_servers" in ln]
+    assert not copies, f"콘솔 이미지가 mcp_servers를 복사한다: {copies}"
+    router = open(os.path.join(ROOT, "admin_console", "backend", "routers", "execution.py"),
+                  encoding="utf-8").read()
+    assert "mcp_servers" not in router, "콘솔 라우터가 mcp_servers를 import하면 안 된다"
+    assert os.path.exists(os.path.join(ROOT, "shared", "execution_exec.py"))
 
 
 # --- 12번: --reload-dir가 가리키는 경로는 실제로 있어야 한다 -------------------------
@@ -668,8 +653,9 @@ def test_compose_command_overrides_stale_admin_cmd():
     spec = yaml.safe_load(open(os.path.join(ROOT, "docker-compose.dev.yml"), encoding="utf-8"))
     cmd = spec["services"]["admin-console"].get("command")
     assert cmd, "admin-console에 command가 없으면 낡은 CMD가 그대로 쓰인다"
-    assert "/app/mcp_servers/execution_mcp" in cmd
-    assert not any("system_mcp" in str(t) for t in cmd)
+    assert "/app/admin_console" in cmd and "/app/shared" in cmd
+    # 콘솔은 mcp_servers를 보지 않는다(#128). 감시 대상에 넣으면 경로가 바뀔 때 또 죽는다.
+    assert not any("mcp_servers" in str(t) for t in cmd)
 
 
 # --- 13번: 차트를 답변에 직접 박아 넣는다(폐쇄망에서 설정·포트 없이 동작) ----------------
@@ -756,56 +742,6 @@ def test_charts_base_url_derivation():
     assert charts_base_url("") == ""
 
 
-# --- 14번: 자동 생성된 상태 행이 실행 위치를 덮어쓰면 안 된다 -------------------------
-# `_is_enabled`는 처음 실행되는 내장 커맨드의 상태 행을 (tool_name, enabled)만 넣어 만든다.
-# 그때 host_mode가 컬럼 기본값('target_server')으로 채워지면, 코드가 login_server로 고정한
-# 툴(list_dir 등)의 host가 LLM에 노출돼 **엉뚱한 서버에서 실행된다**(#115).
-# 그래서 컬럼은 nullable이어야 하고(NULL = 코드 기본값), 기본값이 없어야 한다.
-def test_builtin_state_host_mode_is_nullable_without_default():
-    import re as _re
-    src = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
-
-    create = _re.search(r"CREATE TABLE IF NOT EXISTS execution_builtin_state \((.*?)\);",
-                        src, _re.S).group(1)
-    host_line = [ln for ln in create.split("\n") if "host_mode" in ln and "CONSTRAINT" not in ln]
-    assert host_line, "host_mode 컬럼 정의를 찾지 못했다"
-    assert "NOT NULL" not in host_line[0], \
-        "host_mode가 NOT NULL이면 자동 생성 행이 코드 기본값을 덮어쓴다"
-    assert "DEFAULT" not in host_line[0], \
-        "host_mode에 DEFAULT가 있으면 자동 생성 행이 코드 기본값을 덮어쓴다"
-
-    # 기존 배포를 고치는 마이그레이션이 있어야 한다(이미 오염된 DB가 있다).
-    assert "ALTER COLUMN host_mode DROP NOT NULL" in src
-    assert "ALTER COLUMN host_mode DROP DEFAULT" in src
-
-    # 자동 생성 INSERT는 host_mode를 건드리지 않아야 한다.
-    server = open(os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"),
-                  encoding="utf-8").read()
-    insert = _re.search(r"INSERT INTO \{_STATE\} \(([^)]*)\)", server).group(1)
-    assert "host_mode" not in insert, f"자동 생성 INSERT가 host_mode를 채운다: {insert}"
-
-
-def test_login_server_builtins_hide_host_from_llm():
-    """로그인 서버 고정 툴은 host를 LLM에 노출하지 않아야 한다.
-    노출되면 모델이 서버를 골라 넣어 '내 홈'이 엉뚱한 서버에서 조회된다."""
-    import importlib.util
-    os.environ.setdefault("CONFIG_DB_DSN", "postgresql://x:x@localhost/x")
-    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "execution_mcp"))
-    spec = importlib.util.spec_from_file_location(
-        "execmcp_host", os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"))
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-
-    from builtin import BUILTIN_COMMANDS
-    login_fixed = [n for n, e in BUILTIN_COMMANDS.items()
-                   if e.get("host_mode") == "login_server"]
-    assert "list_dir" in login_fixed, "'내 홈 파일 리스트'용 툴은 로그인 서버 고정이어야 한다"
-
-    props = {t.name: t.inputSchema["properties"] for t in asyncio.run(m.mcp.list_tools())}
-    for name in login_fixed:
-        assert "host" not in props[name], f"{name}에 host가 노출됨(엉뚱한 서버에서 실행될 수 있다)"
-
-
 # --- 15번: 비활성 커맨드는 툴 목록에 실리지 않아야 한다 -------------------------------
 # 끄는 것만으로 막히긴 했지만(실행 시점 검사), 툴 설명이 매 요청 프롬프트에 계속 실렸다
 # (하나당 ~100토큰). 게다가 에이전트가 그걸 골라 호출한 뒤 "비활성입니다" 오류를 받는
@@ -817,11 +753,8 @@ def test_disabled_commands_are_not_exposed_as_tools():
 
     server = open(os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"),
                   encoding="utf-8").read()
-    assert '"enabled"' in server and 'extra_columns=("host_mode", "enabled")' in server, \
-        "내장 커맨드의 활성 상태를 기동 시 읽지 않는다"
-    assert 'if _ov.get("enabled") is False:' in server, "비활성 내장 커맨드를 건너뛰지 않는다"
     # 즉시 차단(실행 시점 검사)은 그대로 남아 있어야 한다.
-    assert "async def _is_enabled" in server
+    assert "async def _tool_state" in server
 
 
 # --- 16번: 참고 문서 안내를 줄여서 쓰지 못하게 한다 -----------------------------------
@@ -859,16 +792,58 @@ def test_ssh_master_health_is_observable():
     assert "매번 새로 접속해" in server, "마스터가 없을 때의 영향을 로그로 알려야 한다"
 
 
-def test_builtin_descriptions_are_short_and_present():
-    """콘솔 설명 칸이 비어 보이지 않도록 내장 커맨드에 설명이 다 있어야 한다.
-    설명은 에이전트가 툴을 고르는 유일한 근거이므로 매 요청 프롬프트에 실린다 - 짧게."""
-    sys.path.insert(0, os.path.join(ROOT, "shared"))
-    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "execution_mcp"))
-    from builtin import BUILTIN_COMMANDS
-    for name, entry in BUILTIN_COMMANDS.items():
-        desc = (entry.get("description") or "").strip()
-        assert desc, f"{name}에 설명이 없다"
-        assert len(desc) <= 80, f"{name} 설명이 너무 길다({len(desc)}자): {desc}"
+# --- 18번: 커맨드 실행이 왜 느린지 **측정**할 수 있어야 한다 --------------------------
+# "느리다"는 리포트가 올 때마다 원인을 추측해 왔다(빈 키 파일·호스트 키·TTY — 셋 다 틀렸고
+# 진짜 원인은 타임아웃이었다, #69). 이제 매 실행이 소요 시간과 접속 재사용 여부를 달고 온다.
+def test_ssh_result_carries_timing_and_reuse():
+    ssh = open(os.path.join(ROOT, "shared", "ssh_exec.py"), encoding="utf-8").read()
+    assert '"duration_ms"' in ssh, "실행 결과에 소요 시간이 없다"
+    assert '"connection_reused"' in ssh, "접속을 새로 맺었는지 알 수 없다"
+    # 소켓 경로를 우리가 정해야 밖에서 재사용 여부를 확인할 수 있다(ssh의 %C로는 불가).
+    assert "def control_path" in ssh and "def master_socket_exists" in ssh
+    assert "ControlPath={control_path(ip)}" in ssh, "소켓 경로를 우리가 정하지 않는다"
+
+    # 진행 상황 줄에 소요 시간이 보여야 사용자가 어느 커맨드가 느린지 짚어 줄 수 있다.
+    main = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    assert "duration_ms" in main and "초\"" in main
+    # 요청 단위 계측(전체 / 첫 글자 / 도구 횟수 / 커맨드 실행 시간).
+    assert "class _Pace" in main and "커맨드 실행" in main
+
+
+def test_tool_call_hits_db_once_and_does_not_block_on_audit_log():
+    """툴 호출 하나가 사용자를 기다리게 하는 DB 왕복을 줄인다.
+
+    예전에는 같은 행을 두 번 조회하고(enabled / required_roles), 성공 감사로그 INSERT까지
+    await했다. 커맨드를 여러 개 부르는 질문에서는 그만큼 그대로 쌓인다.
+    """
+    caller = open(os.path.join(ROOT, "shared", "mcp_caller.py"), encoding="utf-8").read()
+    assert "tool_state" in caller and "is_enabled" not in caller, \
+        "활성/역할 조회가 아직 두 번으로 나뉘어 있다"
+    assert "_log_later(log_execution, name, params, \"success\"" in caller, \
+        "성공 감사로그가 응답을 막고 있다"
+    # 거부/차단은 실행되지 않아 빠르므로 그대로 await한다(기록이 응답보다 먼저 남는 편이 낫다).
+    assert 'await log_execution(name, params, "blocked"' in caller
+
+    server = open(os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"),
+                  encoding="utf-8").read()
+    assert "SELECT enabled, required_roles FROM execution_commands" in server
+
+
+def test_session_history_is_written_without_reloading_the_session():
+    """이력 주입이 턴 수의 제곱으로 늘어나면 안 된다(사용자가 첫 글자를 보기 전의 지연)."""
+    import re as _re
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    body = _re.search(r"async def _create_session\(.*?\n    return session_id", src, _re.S).group(0)
+    assert "svc.get_session(" not in body, "이력 한 턴마다 세션을 다시 읽고 있다"
+    assert "append_event" in body
+
+
+def test_instruction_routes_own_resource_checks_straight_to_execution():
+    """'내 job 현황'처럼 본인 자원을 물으면 매뉴얼을 뒤지지 말고 바로 실행해야 한다.
+    '현황'이라는 낱말 때문에 매뉴얼 검색이 앞에 붙으면 답이 몇 초씩 늦어진다."""
+    instr = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+    assert "내 job 현황" in instr, "'현황'이 붙은 본인 자원 질문의 예외가 지시문에 없다"
+    assert "매뉴얼도 과거 사례도 먼저 뒤지지 않습니다" in instr
 
 
 def test_console_role_is_a_select_with_admin_user():
@@ -968,9 +943,13 @@ def test_context_overflow_error_is_actionable():
     src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
     i = src.index("_CONTEXT_ERROR_MARKERS")
     j = src.index("\ndef _trace_ctx(")
-    ns = {"re": _re}
+
+    async def get_config(_k, default=None):     # 접수 경로는 설정에서 읽는다
+        return "서비스 포탈 > VOC 등록"
+
+    ns = {"re": _re, "get_config": get_config}
     exec(src[i:j], ns)
-    friendly = ns["_friendly_error"]
+    friendly = lambda e: asyncio.run(ns["_friendly_error"](e))   # noqa: E731
 
     real = ("litellm.ContextWindowExceededError: OpenAIException - Error code: 400 - "
             "{'error': {'message': \"This model's maximum context length is 32768 tokens. "
@@ -980,6 +959,8 @@ def test_context_overflow_error_is_actionable():
     assert "litellm" not in msg and "BadRequest" not in msg
     assert "59,360" in msg and "32,768" in msg, "실제 수치를 보여줘야 한다"
     assert "새 대화" in msg and "좁혀" in msg, "사용자가 할 수 있는 조치가 없다"
+    # "운영팀에 알려주세요"로 끝내지 말고 콘솔에 등록된 접수 경로를 그대로 안내한다.
+    assert "서비스 포탈 > VOC 등록" in msg
 
     # 다른 오류는 그대로 전달한다(원인을 숨기면 안 된다).
     assert "connection refused" in friendly(Exception("connection refused"))
@@ -1006,11 +987,15 @@ def test_user_facing_error_hides_internal_settings():
     import re as _re
     src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
     i = src.index("_CONTEXT_ERROR_MARKERS")
-    ns = {"re": _re}
+
+    async def get_config(_k, default=None):     # 접수 경로 미설정 환경
+        return ""
+
+    ns = {"re": _re, "get_config": get_config}
     exec(src[i:src.index("\ndef _trace_ctx(")], ns)
-    msg = ns["_friendly_error"](Exception(
+    msg = asyncio.run(ns["_friendly_error"](Exception(
         "This model's maximum context length is 32768 tokens. However, your request has "
-        "33413 input tokens."))
+        "33413 input tokens.")))
     assert "execution_result_max_chars" not in msg and "history_max_chars" not in msg
     assert "운영팀" in msg
 

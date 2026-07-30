@@ -3,7 +3,7 @@
 
 토폴로지:
 - 이 agent 호스트(예: 202.20.183.30)는 root로 뜬다. 대상 서버들에 root로 ssh 할 수 있다.
-- 대상은 **IP로 직접 지정**하는 것을 원칙으로 한다(설정 `scheduler_login_host`).
+- 대상은 **IP로 직접 지정**하는 것을 원칙으로 한다(설정 `execution_host`).
   이름을 쓰면 이 호스트의 /etc/hosts에서 찾는다. 미등록 이름은 거부한다.
   이름 해석은 우리가 통제하지 못하는 파일에 의존해, 같은 이름이 다른 서버로 풀리면
   키가 등록되지 않은 곳에 붙어 전부 인증 실패한다(실제로 login07이 그랬다).
@@ -25,8 +25,10 @@
 """
 import os
 import re
+import time
 import shlex
 import asyncio
+import hashlib
 import ipaddress
 
 HOSTS_FILE = os.environ.get("HOSTS_FILE", "/etc/hosts")
@@ -58,6 +60,10 @@ SSH_MULTIPLEX = os.environ.get("SSH_MULTIPLEX", "true").strip().lower() != "fals
 # 마스터가 살아 있는 시간. 300초(5분)면 잠깐 쉬었다 물어볼 때마다 재접속해 1~3초가 붙는다.
 # 채팅이 드문드문 오는 사용 패턴이라 넉넉히 둔다(유휴 ssh 연결 하나의 비용은 무시할 만하다).
 SSH_CONTROL_PERSIST = os.environ.get("SSH_CONTROL_PERSIST", "3600")
+# 방화벽/NAT가 유휴 TCP를 조용히 끊으면 마스터 소켓만 남고 실제 연결은 죽는다. 그러면 다음
+# 커맨드가 죽은 소켓을 잡고 타임아웃까지 기다린다. keepalive로 살아 있는지 스스로 확인하게 한다.
+SSH_ALIVE_INTERVAL = os.environ.get("SSH_ALIVE_INTERVAL", "30")
+SSH_ALIVE_COUNT = os.environ.get("SSH_ALIVE_COUNT", "3")
 
 # LLM에 넘길 출력 상한. **컨텍스트 예산 때문에 반드시 작아야 한다.**
 # 예전엔 64KB였는데, 그 출력이 그대로 다음 요청 프롬프트에 실려 32768 컨텍스트를 넘겼다
@@ -179,20 +185,45 @@ def _remote_command(user: str, argv: list) -> str:
     return f"su - {user} -c {shlex.quote(inner)}"            # root 셸 파싱용 (user는 정규식 검증됨)
 
 
-def _base_ssh_opts() -> list[str]:
-    """모든 ssh 호출이 공유하는 옵션(다중화 포함)."""
+def control_path(ip: str) -> str:
+    """다중화 소켓 경로. **ssh의 `%C` 대신 우리가 직접 만든다.**
+
+    `%C`는 ssh가 내부에서 해싱하는 값이라 파이썬에서 같은 경로를 계산할 수 없다. 그러면
+    "지금 마스터가 서 있나"를 밖에서 확인할 방법이 없어서, 느릴 때마다 접속 비용 때문인지
+    커맨드 자체가 느린 것인지 추측하게 된다(#120에서 겪은 그대로다).
+    경로를 우리가 정하면 `os.path.exists()` 한 번으로 재사용 여부를 알 수 있고,
+    실행 결과에 그대로 실어 보낼 수 있다. 길이도 짧아 유닉스 소켓 제한(보통 108바이트)에 안 걸린다.
+    """
+    key = hashlib.sha1(f"{SSH_ROOT_USER}@{ip}".encode("utf-8")).hexdigest()[:16]
+    return os.path.join(SSH_CONTROL_DIR, f"cm-{key}")
+
+
+def master_socket_exists(ip: str) -> bool:
+    """마스터 소켓 파일이 있는지(= 접속 비용 없이 채널만 얹을 수 있는 상태인지).
+    `ssh -O check`(master_alive)보다 훨씬 싸서 매 커맨드마다 불러도 된다."""
+    if not SSH_MULTIPLEX:
+        return False
+    try:
+        return os.path.exists(control_path(ip))
+    except OSError:
+        return False
+
+
+def _base_ssh_opts(ip: str = "") -> list[str]:
+    """모든 ssh 호출이 공유하는 옵션(다중화 포함). ip를 주면 그 호스트 전용 소켓을 쓴다."""
     opts = [
         "-o", "BatchMode=yes",
         "-o", "PasswordAuthentication=no",
         "-o", f"StrictHostKeyChecking={SSH_STRICT_HOST_KEY}",
         "-o", f"UserKnownHostsFile={SSH_KNOWN_HOSTS}",
         "-o", f"ConnectTimeout={SSH_CONNECT_TIMEOUT}",
+        "-o", f"ServerAliveInterval={SSH_ALIVE_INTERVAL}",
+        "-o", f"ServerAliveCountMax={SSH_ALIVE_COUNT}",
     ]
     if SSH_MULTIPLEX and _ensure_control_dir():
-        # 소켓 경로는 %C(호스트·포트·사용자 해시)로 만들어 길이 제한(보통 108바이트)을 피한다.
         opts += [
             "-o", "ControlMaster=auto",
-            "-o", f"ControlPath={os.path.join(SSH_CONTROL_DIR, 'cm-%C')}",
+            "-o", f"ControlPath={control_path(ip)}",
             "-o", f"ControlPersist={SSH_CONTROL_PERSIST}",
         ]
     if SSH_KEY and os.path.isfile(SSH_KEY):
@@ -215,7 +246,7 @@ async def warm_master(host: str) -> bool:
     except Exception as e:  # noqa: BLE001
         print(f"[ssh_exec] 예열 대상 호스트를 해석하지 못했습니다({host}): {e}")
         return False
-    argv = ["ssh", *_base_ssh_opts(), f"{SSH_ROOT_USER}@{ip}", "true"]
+    argv = ["ssh", *_base_ssh_opts(ip), f"{SSH_ROOT_USER}@{ip}", "true"]
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv, stdin=asyncio.subprocess.DEVNULL,
@@ -243,7 +274,7 @@ async def master_alive(host: str) -> bool:
         ip = resolve_host(host)
     except Exception:  # noqa: BLE001
         return False
-    argv = ["ssh", *_base_ssh_opts(), "-O", "check", f"{SSH_ROOT_USER}@{ip}"]
+    argv = ["ssh", *_base_ssh_opts(ip), "-O", "check", f"{SSH_ROOT_USER}@{ip}"]
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv, stdin=asyncio.subprocess.DEVNULL,
@@ -292,10 +323,16 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
     if SSH_KEY and not os.path.isfile(SSH_KEY):
         print(f"[ssh_exec] SSH_KEY가 파일이 아니라 무시합니다: {SSH_KEY} "
               "(docker가 빈 디렉토리를 만든 상태일 수 있음 - .env의 SSH_KEY_PATH 확인)")
-    ssh_argv = ["ssh", *_base_ssh_opts()]
+    ssh_argv = ["ssh", *_base_ssh_opts(ip)]
     if SSH_FORCE_TTY:
         ssh_argv.append("-tt")
     ssh_argv += [f"{SSH_ROOT_USER}@{ip}", remote_cmd]
+
+    # "느리다"를 추측하지 않기 위한 두 값이다.
+    #   reused=True  -> 접속은 공짜였다. 느렸다면 원격 커맨드나 `su -` 로그인 셸이 느린 것.
+    #   reused=False -> 이 호출이 TCP+키교환+로그인까지 새로 했다(1~3초). 예열이 안 된 것.
+    reused = master_socket_exists(ip)
+    started = time.monotonic()
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -317,6 +354,8 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
         raise TimeoutError(
             f"명령이 {timeout}초 안에 끝나지 않아 중단했습니다({host}). 원래 오래 걸리는 "
             "커맨드라면 .env의 SSH_COMMAND_TIMEOUT을 늘리세요(권한/인증 문제가 아닙니다).")
+
+    elapsed_ms = int((time.monotonic() - started) * 1000)
 
     def _clip(b: bytes) -> str:
         # -tt로 pty를 쓰면 줄바꿈이 CRLF로 오고 "Connection to ... closed." 안내가 붙는다.
@@ -346,7 +385,13 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
         "exit_code": proc.returncode,
         "stdout": _clip(out),
         "stderr": _clip(err),
+        "duration_ms": elapsed_ms,
+        "connection_reused": reused,
     }
+    # 커맨드 하나가 몇 초 걸렸는지, 접속을 새로 맺었는지를 **항상** 남긴다.
+    # 이게 없으면 "느리다"는 리포트가 올 때마다 다시 추측하게 된다.
+    print(f"[ssh_exec] {argv[0]} {elapsed_ms:,}ms "
+          f"({'연결 재사용' if reused else '새 접속'} · {ip} · {user})")
     # 실패 원인을 에이전트가 엉뚱하게 해석하지 않도록, 흔한 두 가지는 명시적으로 알려준다.
     # **어느 IP로 붙었는지를 반드시 함께 적는다** - 손으로 IP를 직접 넣으면 되는데 에이전트만
     # 실패하는 경우, 원인은 거의 항상 "이름이 /etc/hosts에서 다른 IP로 풀렸다"이기 때문이다.

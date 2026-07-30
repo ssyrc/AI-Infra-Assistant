@@ -60,4 +60,4 @@ echo "    (종료코드 $?)"
 echo
 echo "판정: 3번이 실패하고 4번이 성공하면 -> '$HOST'가 잘못된 IP($IP)로 풀리는 것이 원인입니다."
 echo "      배포 호스트 /etc/hosts의 '$HOST' 항목을 202.20.185.100으로 고치거나,"
-echo "      관리자 콘솔 설정의 scheduler_login_host를 202.20.185.100(IP)으로 두세요."
+echo "      관리자 콘솔 설정의 execution_host를 202.20.185.100(IP)으로 두세요."

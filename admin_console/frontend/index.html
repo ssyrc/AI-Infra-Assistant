@@ -942,7 +942,7 @@ const ROLE_OPTIONS = [
 ];
 const EMPTY_FORM = {
   title: "", description: "", exec_command: "", args: [],
-  allow_extra_args: true, host_mode: "login_server", enabled: true, required_roles: [],
+  host_mode: "login_server", enabled: true, required_roles: [],
 };
 
 // 커맨드 한 줄에서 {이름}을 뽑는다. {user_id}는 시스템이 자동 주입하므로 인자 표에 넣지 않는다.
@@ -1050,11 +1050,6 @@ function CommandForm({ form, setForm, onSubmit, onCancel, editing }) {
           </select>
         </label>
         <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 6 }}>
-          <input type="checkbox" checked={form.allow_extra_args}
-                 onChange={e => setForm({ ...form, allow_extra_args: e.target.checked })} />
-          추가 인자 허용
-        </label>
-        <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 6 }}>
           <input type="checkbox" checked={form.enabled}
                  onChange={e => setForm({ ...form, enabled: e.target.checked })} />
           활성
@@ -1080,21 +1075,19 @@ function CommandForm({ form, setForm, onSubmit, onCancel, editing }) {
 function ExecutionPanel() {
   const [view, setView] = useState("commands");
   const [items, setItems] = useState([]);
-  const [builtin, setBuiltin] = useState([]);
   const [logs, setLogs] = useState([]);
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState(null);
   const [busy, setBusy] = useState(false);
   const [needsRestart, setNeedsRestart] = useState(false);
   const [showBrowser, setShowBrowser] = useState(false);
-  const [edits, setEdits] = useState({});          // 내장 커맨드 편집 버퍼
+  const [edits, setEdits] = useState({});          // 행별(설명/실행위치/역할) 편집 버퍼
   const [excel, setExcel] = useState(null);
   const [map, setMap] = useState({ title_column: "", description_column: "", exec_command_column: "" });
 
   const loadCommands = useCallback(async () => setItems(await api("/api/execution/commands")), []);
-  const loadBuiltin = useCallback(async () => setBuiltin(await api("/api/execution/builtin")), []);
   const loadLogs = useCallback(async () => setLogs(await api("/api/execution/logs")), []);
-  useEffect(() => { loadCommands(); loadBuiltin(); loadLogs(); }, [loadCommands, loadBuiltin, loadLogs]);
+  useEffect(() => { loadCommands(); loadLogs(); }, [loadCommands, loadLogs]);
 
   const submit = async () => {
     if (!form.title || !form.exec_command) return alert("이름과 실행 커맨드를 입력하세요.");
@@ -1127,13 +1120,6 @@ function ExecutionPanel() {
               { method: "PATCH", body: JSON.stringify({ enabled: !row.enabled }) });
     await loadCommands();
     if (!row.enabled) setNeedsRestart(true);      // 껐던 것을 다시 켠 경우
-  };
-
-  const patchBuiltin = async (name, body, restart) => {
-    await api(`/api/execution/builtin/${encodeURIComponent(name)}`,
-              { method: "PATCH", body: JSON.stringify(body) });
-    await loadBuiltin();
-    if (restart) setNeedsRestart(true);
   };
 
   const analyzeExcel = async (f) => {
@@ -1190,45 +1176,31 @@ function ExecutionPanel() {
     </label>
   );
 
-  // 내장/등록을 **한 목록**으로 합쳐 보여준다(사용자 요청: "따로 나누지 말고 모두 등록 커맨드로").
-  // 내장은 파이썬 함수라 커맨드·인자를 여기서 바꿀 수 없지만(값 검증이 코드에 있다), 활성·실행
-  // 위치·설명·역할은 등록 커맨드와 똑같이 다룬다. 그래서 표는 하나로 두고 편집 가능한 범위만
-  // 행마다 다르게 한다 — "이건 어느 목록에 있지?"가 없어진다.
-  const merged = [
-    ...builtin.map(b => ({ ...b, kind: "builtin", title: b.tool_name,
-                           exec_command: b.example_command, args: [],
-                           allow_extra_args: false })),
-    ...items.map(c => ({ ...c, kind: "registered" })),
-  ].sort((a, b) => String(a.title).localeCompare(String(b.title), "ko"));
+  // 커맨드는 **전부 등록분 하나**다(#128). 예전에는 파이썬 함수로 박아 둔 '내장 커맨드'가
+  // 섞여 있어서 편집도 삭제도 안 됐는데, 그건 전부 LLM이 아는 표준 리눅스 명령이라 없앴다.
+  // 이제 모든 행이 똑같이 편집·삭제·on/off 된다.
+  const rowKey = (c) => `r:${c.id}`;
 
-  const rowKey = (c) => (c.kind === "builtin" ? `b:${c.tool_name}` : `r:${c.id}`);
-
-  // 한 행의 공통 필드(활성 제외)를 저장한다. 내장/등록에 따라 다른 API로 보낸다.
+  // 한 행에서 바로 고칠 수 있는 값(설명·실행 위치·역할)을 저장한다.
   const saveRow = async (c, e) => {
     const roles = e.role ? [e.role] : [];
     try {
-      if (c.kind === "builtin") {
-        await patchBuiltin(c.tool_name, {
-          description: e.description, required_roles: roles, host_mode: e.host_mode,
-        }, e.host_mode !== c.host_mode || e.description !== (c.description_override || ""));
-      } else {
-        await api(`/api/execution/commands/${c.id}`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            title: c.title, description: e.description, exec_command: c.exec_command,
-            args: c.args || [], allow_extra_args: c.allow_extra_args,
-            host_mode: e.host_mode, enabled: c.enabled, required_roles: roles,
-          }),
-        });
-        await loadCommands();
-        setNeedsRestart(true);
-      }
+      await api(`/api/execution/commands/${c.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          title: c.title, description: e.description, exec_command: c.exec_command,
+          args: c.args || [], host_mode: e.host_mode,
+          enabled: c.enabled, required_roles: roles,
+        }),
+      });
+      await loadCommands();
+      setNeedsRestart(true);
       const next = { ...edits }; delete next[rowKey(c)]; setEdits(next);
     } catch (err) { alert("저장 실패: " + err.message); }
   };
 
   const views = [
-    { id: "commands", label: `커맨드 (${merged.length})` },
+    { id: "commands", label: `커맨드 (${items.length})` },
     { id: "logs", label: "실행 로그" },
   ];
 
@@ -1292,18 +1264,14 @@ function ExecutionPanel() {
 
           <table>
             <thead>
-              <tr><th>활성</th><th>이름</th><th>실행 커맨드</th><th>인자</th>
+              <tr><th>활성</th><th>이름</th><th>실행 커맨드</th>
                   <th>실행 위치</th><th>설명</th><th>역할</th><th></th></tr>
             </thead>
             <tbody>
-              {merged.map(c => {
-                const isBuiltin = c.kind === "builtin";
+              {items.map(c => {
                 const key = rowKey(c);
                 const e = edits[key] || {
-                  // 내장은 코드 기본 설명을 값으로 보여준다(칸이 비어 보이지 않게).
-                  description: isBuiltin
-                    ? (c.description_override || c.code_description || "")
-                    : (c.description || ""),
+                  description: c.description || "",
                   role: (c.required_roles || [])[0] || "",
                   host_mode: c.host_mode,
                 };
@@ -1312,28 +1280,10 @@ function ExecutionPanel() {
                   <tr key={key}>
                     <td style={{ textAlign: "center" }}>
                       <input type="checkbox" checked={c.enabled}
-                             onChange={() => (isBuiltin
-                               ? patchBuiltin(c.tool_name, { enabled: !c.enabled }, !c.enabled)
-                               : toggleCommand(c))} />
+                             onChange={() => toggleCommand(c)} />
                     </td>
-                    <td>
-                      {c.title}
-                      <div style={{ fontSize: 11, color: "var(--muted)", fontFamily: "var(--mono)" }}>
-                        {c.tool_name}{isBuiltin ? " · 코드 내장" : ""}
-                      </div>
-                    </td>
-                    <td style={{ fontFamily: "var(--mono)", fontSize: 12,
-                                 color: isBuiltin ? "var(--muted)" : undefined }}>
-                      {c.exec_command}
-                    </td>
-                    <td style={{ fontSize: 11.5 }}>
-                      {isBuiltin
-                        ? <span style={{ color: "var(--muted)" }}>코드에서 검증</span>
-                        : ((c.args || []).map(a => a.name).join(", ") ||
-                           <span style={{ color: "var(--muted)" }}>없음</span>)}
-                      {!isBuiltin && c.allow_extra_args
-                        ? <div style={{ color: "var(--muted)" }}>+ 자유 인자</div> : null}
-                    </td>
+                    <td>{c.title}</td>
+                    <td style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{c.exec_command}</td>
                     <td>
                       <select value={e.host_mode} onChange={ev => setE({ host_mode: ev.target.value })}>
                         {Object.keys(HOST_MODE_LABEL).map(m => (
@@ -1343,7 +1293,6 @@ function ExecutionPanel() {
                     </td>
                     <td>
                       <input value={e.description} style={{ width: "100%" }}
-                             placeholder={isBuiltin ? c.code_description : ""}
                              onChange={ev => setE({ description: ev.target.value })} />
                     </td>
                     <td>
@@ -1357,15 +1306,14 @@ function ExecutionPanel() {
                       {key in edits
                         ? <button className="primary" onClick={() => saveRow(c, e)}>저장</button>
                         : null}
-                      {!isBuiltin ? <button onClick={() => edit(c)}>편집</button> : null}
-                      {!isBuiltin
-                        ? <button className="danger" onClick={() => remove(c.id)}>삭제</button> : null}
+                      <button onClick={() => edit(c)}>편집</button>
+                      <button className="danger" onClick={() => remove(c.id)}>삭제</button>
                     </td>
                   </tr>
                 );
               })}
-              {merged.length === 0
-                ? <tr><td colSpan="8" className="empty">커맨드가 없습니다.</td></tr> : null}
+              {items.length === 0
+                ? <tr><td colSpan="7" className="empty">커맨드가 없습니다.</td></tr> : null}
             </tbody>
           </table>
         </React.Fragment>
@@ -1441,14 +1389,14 @@ const SETTING_GROUPS = [
   { title: "Manual MCP", service: "manual-mcp",
     keys: ["manual_mcp_url", "manual_result_max_chars", "manual_neighbor_window"] },
   { title: "Execution MCP", service: "execution-mcp",
-    keys: ["execution_mcp_url", "execution_tools_max", "execution_deny_commands",
-           "scheduler_login_host"] },
+    keys: ["execution_mcp_url", "execution_host", "execution_result_max_chars",
+           "execution_tools_max", "execution_deny_commands"] },
   { title: "VOC MCP", service: "voc-mcp",
     keys: ["voc_mcp_url", "voc_result_max_chars"] },
   { title: "Chart MCP", service: "chart-mcp",
     keys: ["chart_mcp_url", "chart_max_points", "chart_retention_hours"] },
   { title: "Open WebUI", service: null,
-    keys: ["openwebui_base_url", "openwebui_admin_api_key"] },
+    keys: ["openwebui_public_url", "openwebui_base_url", "openwebui_admin_api_key"] },
 ];
 
 function SettingsPanel() {

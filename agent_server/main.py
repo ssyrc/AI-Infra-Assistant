@@ -204,12 +204,15 @@ async def _trim_history(history: list[tuple[str, str]]) -> list[tuple[str, str]]
 async def _create_session(user_id: str, history: list[tuple[str, str]]) -> str:
     session_id = str(uuid.uuid4())
     svc = state["session_service"]
-    await svc.create_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
+    session = await svc.create_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
+    # 세션 객체는 **한 번만** 읽는다. 예전에는 이력 한 턴마다 get_session()을 다시 불렀는데,
+    # get_session은 그때까지 쌓인 이벤트를 전부 다시 읽어 오므로 턴 수의 제곱으로 늘어난다
+    # (10턴이면 DB 왕복 20번 + 매번 커지는 페이로드). append_event가 메모리의 session에도
+    # 이벤트를 더해 주므로 다시 읽을 이유가 없다. 이건 사용자가 첫 글자를 보기 전의 지연이다.
     for role, text in await _trim_history(history):
         adk_role = "user" if role == "user" else "model"
         event = Event(author=adk_role,
                       content=types.Content(role=adk_role, parts=[types.Part(text=text)]))
-        session = await svc.get_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
         await svc.append_event(session=session, event=event)
     return session_id
 
@@ -287,11 +290,13 @@ def _result_phrase(name: str, resp) -> str:
     if isinstance(r, list):
         return f"{len(r)}건 찾음" if r else "찾은 내용 없음"
     if isinstance(r, dict):
-        # 실행 툴이면 '어디서 누구 권한으로' 돌았는지 함께 보여준다.
-        # 출력만 보고는 진짜 실행됐는지, 의도한 서버가 맞는지 알 수 없기 때문이다.
-        where = ""
-        if r.get("ip") or r.get("as_user"):
-            where = " (" + " · ".join(str(x) for x in (r.get("ip"), r.get("as_user")) if x) + ")"
+        # 실행 툴이면 '어디서 누구 권한으로 몇 초' 걸렸는지 함께 보여준다.
+        # 출력만 보고는 진짜 실행됐는지, 의도한 서버가 맞는지 알 수 없고, "느리다"는 리포트가
+        # 왔을 때 어느 커맨드가 느린지 사용자가 화면에서 바로 짚어 줄 수 있다.
+        bits = [str(x) for x in (r.get("ip"), r.get("as_user")) if x]
+        if isinstance(r.get("duration_ms"), int):
+            bits.append(f"{r['duration_ms'] / 1000:.1f}초")
+        where = f" ({' · '.join(bits)})" if bits else ""
         if r.get("error"):
             return f"실패{where} — {str(r['error'])[:60]}"
         if "exit_code" in r:
@@ -302,6 +307,44 @@ def _result_phrase(name: str, resp) -> str:
         return "찾은 내용 없음"
     text = str(r).strip()
     return (text[:50] + "…") if len(text) > 50 else (text or "완료")
+
+
+class _Pace:
+    """요청 하나가 어디에 시간을 썼는지 로그로 남긴다.
+
+    "느리다"는 리포트가 올 때마다 원인을 추측해 왔다(ssh 키·호스트 키·TTY — 셋 다 틀렸고
+    실제 원인은 타임아웃이었다, #69). 매 요청 아래 네 숫자를 찍어 두면 다음부터는 로그 한 줄로
+    갈린다: 전체 / 첫 글자까지 / 도구 호출 횟수 / 그중 커맨드 실행에 실제로 쓴 시간.
+    나머지(전체 - 커맨드)는 곧 LLM이 생각한 시간이다.
+    """
+
+    def __init__(self, request_id: str, user_id: str):
+        self.t0 = time.monotonic()
+        self.request_id = request_id
+        self.user_id = user_id
+        self.tool_calls = 0
+        self.tool_ms = 0
+        self.first_text_at = None
+
+    def observe(self, event):
+        self.tool_calls += len(event.get_function_calls() or [])
+        for fr in (event.get_function_responses() or []):
+            resp = fr.response
+            if not isinstance(resp, dict):
+                continue
+            inner = resp.get("result") if isinstance(resp.get("result"), dict) else resp
+            if isinstance(inner, dict) and isinstance(inner.get("duration_ms"), int):
+                self.tool_ms += inner["duration_ms"]
+
+    def mark_first_text(self):
+        if self.first_text_at is None:
+            self.first_text_at = time.monotonic() - self.t0
+
+    def done(self):
+        total = time.monotonic() - self.t0
+        first = f"{self.first_text_at:.1f}초" if self.first_text_at is not None else "-"
+        print(f"[agent] {self.request_id} 완료 {total:.1f}초 (첫 글자 {first} · "
+              f"도구 {self.tool_calls}회 · 커맨드 실행 {self.tool_ms / 1000:.1f}초 · {self.user_id})")
 
 
 def _tool_status_lines(event) -> str:
@@ -384,7 +427,7 @@ _CONTEXT_ERROR_MARKERS = ("ContextWindowExceeded", "maximum context length",
                           "reduce the length of the input")
 
 
-def _friendly_error(e: Exception) -> str:
+async def _friendly_error(e: Exception) -> str:
     text = str(e)
     if any(m in text for m in _CONTEXT_ERROR_MARKERS):
         used = re.search(r"request has (\d+) input tokens", text)
@@ -392,10 +435,15 @@ def _friendly_error(e: Exception) -> str:
         detail = ""
         if used and limit:
             detail = f" ({int(used.group(1)):,} / {int(limit.group(1)):,} 토큰)"
+        # "운영팀에 알려주세요"로 끝내면 어디로 알려야 하는지가 빠진다. 접수 경로는 관리자가
+        # 콘솔(voc_intake_guide)에 넣어 둔 값이 있으니 그걸 그대로 안내한다.
+        intake = (await get_config("voc_intake_guide", "") or "").strip()
+        where = f" 계속 발생하면 여기로 알려주세요: {intake}" if intake else \
+                " 계속 발생하면 운영팀에 알려주세요."
         return ("한 번에 처리할 수 있는 양을 넘었습니다" + detail + ".\n"
                 "출력이 많은 커맨드를 여러 번 실행했거나 대화가 길어진 경우입니다. "
                 "새 대화에서 다시 물어보시거나, 조회 범위를 좁혀 주세요"
-                "(예: 서버 하나만, 기간을 줄여서). 계속 발생하면 운영팀에 알려주세요.")
+                "(예: 서버 하나만, 기간을 줄여서)." + where)
     return f"오류가 발생했습니다: {text}"
 
 
@@ -467,6 +515,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     }
     agent, _model, toolsets = await build_agent(caller_headers, extra_instruction)
     runner = Runner(agent=agent, app_name=APP_NAME, session_service=state["session_service"])
+    pace = _Pace(request_id, user_id)
 
     if not req.stream:
         final_text = ""
@@ -474,11 +523,13 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             with _trace_ctx(user_id, conv, "openwebui"):
                 async for event in runner.run_async(user_id=user_id, session_id=session_id,
                                                     new_message=new_message):
+                    pace.observe(event)
                     if event.is_final_response():
                         final_text = _event_text(event) or final_text
         finally:
             await _cleanup_session(user_id, session_id)
             await _close_toolsets(toolsets)
+            pace.done()
         # 이력에는 **표시자 그대로** 저장한다(data URI가 들어가면 다음 프롬프트가 부푼다).
         _bg_persist(user_id, conv, "openwebui", last_text, final_text, mem_enabled)
         return JSONResponse({
@@ -502,6 +553,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                     if await request.is_disconnected():
                         print("[agent] 클라이언트 연결 종료, 스트리밍 중단")
                         break
+                    pace.observe(event)
                     if show_tools:
                         status = _tool_status_lines(event)
                         if status:
@@ -509,6 +561,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                             yield _sse(request_id, model_name, status + "\n")
                     delta = dedup.feed(event)
                     if delta:
+                        pace.mark_first_text()
                         # 차트 표시자가 델타 경계에 걸쳐 쪼개져 올 수 있어 안전한 부분만 흘린다.
                         out = await charts.feed(delta)
                         if out:
@@ -531,12 +584,13 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             raise
         except Exception as e:  # noqa: BLE001
             print(f"[agent] 스트리밍 오류: {e}")
-            yield _sse(request_id, model_name, f"\n\n[{_friendly_error(e)}]")
+            yield _sse(request_id, model_name, f"\n\n[{await _friendly_error(e)}]")
             yield _sse(request_id, model_name, "", finish=True)
             yield "data: [DONE]\n\n"
         finally:
             await _cleanup_session(user_id, session_id)
             await _close_toolsets(toolsets)
+            pace.done()
             _bg_persist(user_id, conv, "openwebui", last_text, dedup.full, mem_enabled)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -729,7 +783,7 @@ async def agent_query(body: AgentQueryIn, request: Request):
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001
-            yield _sse(request_id, model_name, f"\n\n[{_friendly_error(e)}]")
+            yield _sse(request_id, model_name, f"\n\n[{await _friendly_error(e)}]")
             yield _sse(request_id, model_name, "", finish=True)
             yield "data: [DONE]\n\n"
         finally:

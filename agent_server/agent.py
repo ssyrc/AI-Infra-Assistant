@@ -63,7 +63,7 @@ async def build_agent(caller_headers: dict | None = None,
     # (Execution MCP의 "로그인 서버 실행" 툴은 host를 자동 고정하지만, disk_free처럼 host가
     # 노출된 툴에서 에이전트가 로그인 서버를 직접 지정해야 하는 경우를 위함).
     # 이름이 아니라 **IP**다 - 이름 해석(/etc/hosts)이 엉뚱한 서버를 가리킨 사고가 있었다.
-    login_host = await get_config("scheduler_login_host", "202.20.185.100")
+    login_host = await get_config("execution_host", "202.20.185.100")
     # 운영팀 접수 경로도 설정에서 읽어 붙인다(포탈 메뉴가 바뀌어도 지시문을 고칠 필요 없음).
     voc_intake = (await get_config("voc_intake_guide", "") or "").strip()
     # 환경 값은 **구조화된 블록**으로 붙인다. 예전에는 지시문 끝에

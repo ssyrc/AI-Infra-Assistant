@@ -101,7 +101,7 @@ docker compose up -d --build
 - 기동 순서: `postgres`(healthy) → `db-init`(마이그레이션 + 설정 시드, 멱등) → 나머지.
   비밀번호를 바꾸면 각 MCP DSN이 자동으로 맞춰진다(credential 하드코딩 없음).
 - 내부 서비스는 호스트 포트를 열지 않고 웹 3개만 `127.0.0.1` 바인딩 → 외부는 reverse proxy로만.
-- 기동 후 **관리자 콘솔 설정 탭**에서 `vllm_*`/`rerank_*`/`scheduler_login_host` 등 주소 확정.
+- 기동 후 **관리자 콘솔 설정 탭**에서 `vllm_*`/`rerank_*`/`execution_host` 등 주소 확정.
 - 폐쇄망 준비물: 프론트 vendor 3파일(`admin_console/frontend/vendor/README.md`), Docling 모델 캐시
   (`admin_console` 이미지에 포함), Langfuse 키(선택 — 없으면 트레이싱만 비활성).
 

@@ -10,7 +10,8 @@
   콘솔에서 `head -n {lines} {path}`처럼 **자리표시자가 든 커맨드 한 줄**을 적고, 각 자리표시자의
   타입/필수/기본값을 정한다. 그러면 LLM에게는 `lines`, `path`가 **타입이 붙은 파라미터**로 보인다
   (예전 Command MCP의 `args` 리스트 하나보다 훨씬 정확하게 채운다).
-  `allow_extra_args`를 켜면 그 위에 자유 인자도 덧붙일 수 있다.
+  그 위에 자유 인자(`args`)를 덧붙이는 것은 **항상 허용**한다 - 어떤 인자가 필요한지는 질문마다
+  달라서 관리자가 미리 정할 수 없고, 위험한 인자는 차단 목록이 어차피 막는다(#128).
   `{user_id}`는 예약어라 LLM에 노출되지 않고 호출자 신원에서 강제 주입된다.
 
 트레이드오프(알고 택한 것):
@@ -72,7 +73,7 @@ def build_entry(row: dict, login_host_getter) -> dict:
     """등록 커맨드 한 행 -> build_wrapped가 받는 형태의 항목."""
     exec_command = row["exec_command"]
     arg_specs = row.get("args") or []
-    allow_extra = bool(row.get("allow_extra_args", True))
+    allow_extra = True      # 항상 허용(#128). 어떤 인자가 필요한지는 에이전트가 판단한다.
 
     async def handler(user_id: str, host: str = "", **kwargs) -> dict:
         extra = kwargs.pop("args", None)
@@ -163,7 +164,7 @@ def load_registered_sync(login_host_getter, dsn_key: str = "execution_db_dsn") -
             disabled = await c2.fetchval(
                 "SELECT count(*) FROM execution_commands WHERE NOT enabled") or 0
             rows = await c2.fetch(
-                "SELECT tool_name, title, description, exec_command, args, allow_extra_args, "
+                "SELECT tool_name, title, description, exec_command, args, "
                 "host_mode, enabled, required_roles FROM execution_commands "
                 "WHERE enabled ORDER BY title LIMIT $1", max_tools)
         finally:

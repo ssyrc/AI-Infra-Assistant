@@ -31,8 +31,9 @@ RUN pip install --no-cache-dir --find-links /tmp/vendor-wheels -r admin_console/
     && pip install --no-cache-dir --find-links /tmp/vendor-wheels -r admin_console/backend/requirements-docling.txt
 ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
 COPY shared/ shared/
-# 내장 커맨드 목록(메타데이터만 사용). 의존 모듈은 전부 shared/에 있다.
-COPY mcp_servers/execution_mcp/builtin.py mcp_servers/execution_mcp/builtin.py
+# mcp_servers는 복사하지 않는다. 콘솔이 쓰는 실행 규칙(툴 이름 생성·검증·차단 목록)은 전부
+# shared/execution_exec.py에 있다 - 예전에 내장 커맨드 파일 하나를 복사하다 경로가 바뀌어
+# 운영 이미지 빌드가 깨진 적이 있다(#112).
 COPY admin_console/ admin_console/
 WORKDIR /app/admin_console/backend
 EXPOSE 8080

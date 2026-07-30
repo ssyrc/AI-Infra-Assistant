@@ -6,18 +6,14 @@
 - build_wrapped(): 화이트리스트 핸들러에 아래를 덧씌운다.
     · user_scoped 툴은 scope_param(기본 user_id)을 LLM 스키마에서 감추고 호출자 신원에서
       강제 주입한다. LLM/사용자가 준 값이 있어도 덮어쓰고, 신뢰된 id가 없으면 거부(fail-closed).
-    · enabled/required_roles를 실행 시점에 DB에서 읽어 검사(콜백 주입).
-    · 모든 실행을 감사 로그로 남긴다(콜백 주입).
+    · enabled/required_roles를 실행 시점에 DB에서 **한 번에** 읽어 검사(콜백 주입).
+    · 모든 실행을 감사 로그로 남긴다(콜백 주입). 성공 로그는 응답을 막지 않도록 뒤에서 쓴다.
   DB 접근(대상 DB/테이블)은 각 MCP가 콜백으로 넘겨, 이 모듈은 DB에 독립적이다.
-- load_overrides_sync(): 기동 시 1회, 대상 DB에서 설명/역할 오버라이드를 읽는다.
 """
-import os
 import asyncio
 import functools
 import inspect
 from contextvars import ContextVar
-
-import asyncpg
 
 _caller: ContextVar[dict] = ContextVar("caller", default={})
 
@@ -50,50 +46,44 @@ class CallerContextMiddleware:
         await self.app(scope, receive, send)
 
 
-def load_overrides_sync(dsn_key: str, state_table: str, extra_columns: tuple[str, ...] = ()) -> dict:
-    """기동 시 1회, 대상 DB의 상태 테이블에서 설명/역할(+extra_columns) 오버라이드를 읽는다.
-    extra_columns는 System MCP의 host_mode처럼 스키마(LLM 노출 파라미터)에 영향을 줘서
-    기동 시에만 반영되면 되는 컬럼을 위한 것 — Command MCP처럼 안 쓰면 기존과 동일하다.
-    공용 풀(get_pool)을 쓰면 임시 이벤트루프에 풀이 묶여 런타임에서 못 쓰므로 전용 연결을 쓴다."""
-    async def _run() -> dict:
-        config_dsn = os.environ.get("CONFIG_DB_DSN")
-        if not config_dsn:
-            return {}
-        conn = await asyncpg.connect(config_dsn)
-        try:
-            dsn = await conn.fetchval(
-                "SELECT value FROM platform_settings WHERE key = $1", dsn_key)
-        finally:
-            await conn.close()
-        if not dsn:
-            return {}
-        cols = ", ".join(["tool_name", "description_override", "required_roles", *extra_columns])
-        c2 = await asyncpg.connect(dsn)
-        try:
-            rows = await c2.fetch(f"SELECT {cols} FROM {state_table}")
-        finally:
-            await c2.close()
-        return {r["tool_name"]: dict(r) for r in rows}
+def tool_description(name: str, entry: dict, overrides: dict | None = None) -> str:
+    """LLM에 보일 설명: 콘솔 오버라이드가 있으면 그것을, 없으면 코드 설명을 쓴다.
 
-    try:
-        return asyncio.run(_run())
-    except Exception as e:  # noqa: BLE001
-        print(f"[mcp] 오버라이드 로드 실패, 코드 기본값 사용: {type(e).__name__}: {e}")
-        return {}
-
-
-def tool_description(name: str, entry: dict, overrides: dict) -> str:
-    """LLM에 보일 설명: 콘솔 오버라이드가 있으면 그것을, 없으면 코드 설명을 쓴다."""
-    ov = overrides.get(name, {})
+    내장 커맨드가 없어진 뒤로(모든 커맨드가 콘솔 등록분) 오버라이드 테이블은 쓰지 않는다 —
+    등록 커맨드는 설명 자체가 DB 행에 있기 때문이다. 인자는 호환을 위해 남긴다."""
+    ov = (overrides or {}).get(name, {})
     return (ov.get("description_override") or "").strip() or entry["description"]
 
 
-def build_wrapped(name: str, entry: dict, *, is_enabled, required_roles, log_execution,
+_log_tasks: set = set()   # 감사로그 백그라운드 태스크가 GC로 사라지지 않도록 참조를 보관한다.
+
+
+def _log_later(log_execution, *args):
+    """성공 감사로그는 **응답을 막지 않고** 뒤에서 쓴다.
+
+    성공 경로에서 INSERT를 await하면 그 DB 왕복이 그대로 사용자 대기 시간이 된다.
+    커맨드 결과는 이미 손에 있으므로 기다릴 이유가 없다. 실패/차단 경로는 그대로 await한다
+    (실행되지 않아 빠르고, 거부 사실은 응답보다 먼저 남는 편이 낫다).
+    create_task는 현재 컨텍스트를 복사하므로 호출자 ContextVar(user_id 등)도 그대로 보인다.
+    """
+    async def _run():
+        try:
+            await log_execution(*args)
+        except Exception as e:  # noqa: BLE001
+            print(f"[mcp] 감사로그 기록 실패(무시): {type(e).__name__}: {e}")
+
+    task = asyncio.create_task(_run())
+    _log_tasks.add(task)
+    task.add_done_callback(_log_tasks.discard)
+
+
+def build_wrapped(name: str, entry: dict, *, tool_state, log_execution,
                   host_mode: str | None = None, login_host=None):
     """화이트리스트 항목에 권한 검사·감사로그·user_id 강제 주입을 덧씌운 async 함수를 만든다.
 
-    is_enabled(name, default_bool) -> bool
-    required_roles(name, code_default_list) -> list
+    tool_state(name, default_enabled, default_roles) -> (enabled: bool, roles: list)
+      활성 여부와 필요 역할을 **한 번에** 돌려준다. 예전에는 두 콜백을 각각 await해서
+      툴 호출마다 DB를 두 번 왕복했다 - 같은 행을 두 번 읽는 것이라 합칠 수 있었다.
     log_execution(name, params_dict, status_str, result) -> None
     host_mode: "login_server"면 host 파라미터를 user_id처럼 LLM 스키마에서 숨기고
       login_host()가 돌려주는 값으로 강제 주입한다(기동 시 1회 결정 — 스키마에 영향을 주므로).
@@ -128,11 +118,12 @@ def build_wrapped(name: str, entry: dict, *, is_enabled, required_roles, log_exe
         except Exception:  # noqa: BLE001
             params = {"args": list(args), **kwargs}
 
-        if not await is_enabled(name, entry.get("enabled", False)):
+        enabled, required = await tool_state(
+            name, entry.get("enabled", False), entry.get("required_roles") or [])
+        if not enabled:
             await log_execution(name, params, "blocked", {"reason": "disabled by admin"})
             raise PermissionError(f"'{name}' 툴은 관리자 콘솔에서 비활성화되어 있습니다.")
 
-        required = await required_roles(name, entry.get("required_roles") or [])
         if required:
             roles = set(get_caller().get("roles", []))
             if not roles.intersection(set(required)):
@@ -142,7 +133,7 @@ def build_wrapped(name: str, entry: dict, *, is_enabled, required_roles, log_exe
 
         try:
             result = await handler(*args, **kwargs)
-            await log_execution(name, params, "success", result)
+            _log_later(log_execution, name, params, "success", result)
             return result
         except PermissionError:
             raise

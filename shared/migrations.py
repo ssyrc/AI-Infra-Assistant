@@ -190,6 +190,20 @@ MIGRATIONS: list[tuple[str, int, str]] = [
         WHERE key IN ('command_tools_max', 'catalog_exec_deny_commands',
                       'command_mcp_url', 'system_mcp_url', 'command_db_dsn');
     """),
+    # v6: scheduler_login_host -> execution_host 개명(#128).
+    #   'scheduler'라는 이름 탓에 "스케줄러 전용 설정"으로 읽혔는데, 실제로는 **모든 커맨드가
+    #   실행되는 로그인 서버 주소**다. 관리자가 여기를 안 보고 지나쳐 실행이 통째로 죽는 일이
+    #   반복됐다. 값은 그대로 옮긴다 - 개명 때문에 ssh가 끊기면 안 된다.
+    ("platform_config", 6, """
+        INSERT INTO platform_settings (key, value, description, hot_reload, is_secret, updated_by)
+        SELECT 'execution_host', value,
+               '커맨드를 실행할 서버 주소(로그인 서버). 이름 말고 IP로 적는다',
+               true, false, updated_by
+        FROM platform_settings WHERE key = 'scheduler_login_host'
+        ON CONFLICT (key) DO NOTHING;
+
+        DELETE FROM platform_settings WHERE key = 'scheduler_login_host';
+    """),
     # v3: 감사로그에 사용자/대화 식별자 추가
     ("system_db", 3, """
         ALTER TABLE job_logs ADD COLUMN IF NOT EXISTS conversation_id TEXT;
@@ -441,7 +455,8 @@ MIGRATIONS: list[tuple[str, int, str]] = [
         );
         CREATE UNIQUE INDEX IF NOT EXISTS execution_commands_title_idx
             ON execution_commands (title);
-        -- 코드 내장 커맨드(builtin.py)의 활성/역할/설명/실행위치. 구 system_whitelist_state.
+        -- 구 코드 내장 커맨드의 활성/역할/설명/실행위치. 구 system_whitelist_state.
+        -- **#128에서 내장 커맨드를 없애 더 이상 읽지 않는다.** 되돌릴 수 있게 테이블만 남긴다.
         CREATE TABLE IF NOT EXISTS execution_builtin_state (
             tool_name            TEXT PRIMARY KEY,
             enabled              BOOLEAN NOT NULL DEFAULT true,
@@ -575,8 +590,10 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
         ("execution_tools_max", "80",
          "등록 커맨드를 MCP 툴로 노출할 최대 개수(툴 하나당 약 100토큰이 매 요청에 실린다)",
          False, False, False),
-        ("scheduler_login_host", os.environ.get("SCHEDULER_LOGIN_HOST", "202.20.185.100"),
-         "커맨드를 실행할 로그인 서버 주소. 이름 말고 **IP**로 적는다(이름 해석 사고 방지)",
+        ("execution_host",
+         os.environ.get("EXECUTION_HOST", os.environ.get("SCHEDULER_LOGIN_HOST", "202.20.185.100")),
+         "커맨드를 실행할 서버 주소(로그인 서버). 등록 커맨드 중 '로그인 서버 고정'인 것과 "
+         "run_command가 여기서 실행된다. 이름 말고 **IP**로 적는다(이름 해석 사고 방지)",
          True, False, False),
         # 차단 목록. 등록 커맨드의 '추가 인자'와 미등록 커맨드(run_command)의 **모든 토큰**을
         # 이 목록으로 검사한다 - `mpirun -n 4 rm -rf /`처럼 인자를 실행하는 커맨드가 있기 때문이다.
@@ -650,6 +667,12 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
          "관리자 콘솔이 Open WebUI API를 부를 도커 내부 주소. 사용자 접속 주소(8502)가 아니다",
          True, False, False),
         ("openwebui_admin_api_key", "", "Open WebUI 관리자 API 키(기본 모델 동기화용, 비우면 동기화 생략)", True, True, False),
+        # 위 openwebui_base_url은 **콘솔 -> Open WebUI API**용 내부 주소(8080)다. 사용자가
+        # 브라우저로 들어가는 주소(8502)는 별개라, 안내 문구에 쓸 값으로 따로 둔다.
+        ("openwebui_public_url",
+         os.environ.get("OPENWEBUI_PUBLIC_URL", "http://202.20.183.30:8502"),
+         "사용자가 브라우저로 접속하는 Open WebUI 주소(안내용). 콘솔이 API를 부르는 "
+         "openwebui_base_url(도커 내부 8080)과는 다른 값이다", True, False, False),
 
         ("agent_system_instruction", AGENT_INSTRUCTION, "ADK 루트 에이전트 system instruction", False, False, False),
     ]
@@ -846,18 +869,24 @@ AGENT_INSTRUCTION = """당신은 사내 인프라/시스템 운영을 돕는 한
 - 필요한 커맨드가 여럿이면 각각 한 번씩만 부르고, 결과를 모아 한 번에 답합니다.
 
 ## "확인해 달라" — 실행이 필요한 요청
-예: "내 홈스토리지 용량", "내 job 목록", "내 작업 상태", "이 서버 GPU 상태"
+예: "내 홈스토리지 용량", "내 job 목록", "내 작업 상태", "내 홈 파일 리스트", "이 서버 GPU 상태"
+
+**여기서는 속도가 답의 일부입니다.** 사용자는 결과 한 덩어리를 기다립니다. 도구를 한 번 더
+부를 때마다 몇 초씩 늘어나므로, **맞는 툴 하나를 골라 한 번에 실행하고 끝냅니다.**
+
 0) 커맨드 툴은 전부 **로그인 서버에서 호출자 본인 권한으로** 실행되며, 추가 인자가 필요하면
-   `args`에 한 칸씩 나눠 넣습니다(예: `["-l", "/home"]`). 툴 설명의 `[...]` 안이 실제 커맨드입니다.
+   `args`에 한 칸씩 나눠 넣습니다(예: `["-lh", "."]`). 툴 설명의 `[...]` 안이 실제 커맨드입니다.
 1) **먼저 사용 가능한 툴 목록을 봅니다.** 등록된 사내 커맨드는 각각 전용 툴로 나와 있고,
-   툴 설명에 무엇을 하는지와 실제 실행되는 커맨드가 적혀 있습니다. 맞는 툴이 있으면 그걸 씁니다
-   (스케줄러 job 조회, 스토리지 용량 조회 등도 전부 여기 해당합니다).
-   `phd info` 같은 커맨드를 기억으로 지어내지 말고, **툴 목록에 있는 것**을 씁니다.
-2) 툴 목록에 없으면 매뉴얼을 검색합니다. 매뉴얼 본문에서 찾은 커맨드는 등록 여부와 무관하게
-   커맨드 실행 도구(run_command)로 그대로 실행합니다.
-3) 실행할 때 "실행할까요?"라고 묻지 않습니다. 추가 인자는 인자 목록에 한 칸씩 나눠 넣습니다.
-4) 실행 결과만 답합니다. 개인 계정의 할당량/사용량을 서버 전체 디스크 도구(df 등)로 답하지 않습니다.
-5) **"커맨드가 없다"고 답하기 전에 반드시 매뉴얼 검색을 합니다.** 툴 목록에 없어도 매뉴얼
+   툴 설명에 무엇을 하는지와 실제 실행되는 커맨드가 적혀 있습니다. 맞는 툴이 있으면
+   **그걸 바로 호출합니다 — 매뉴얼도 과거 사례도 먼저 뒤지지 않습니다.**
+   `phd info` 같은 사내 커맨드를 기억으로 지어내지 말고, **툴 목록에 있는 것**을 씁니다.
+2) 목록에 없고 `ls`·`df`·`du`·`find`·`head`·`nvidia-smi`처럼 **표준 리눅스 명령으로 되는 일**이면
+   매뉴얼을 뒤지지 말고 `run_command`로 바로 실행합니다(command에 커맨드 이름, args에 인자).
+3) 사내 전용 커맨드로 보이는데 툴 목록에 없을 때만 매뉴얼을 검색합니다. 매뉴얼 본문에서 찾은
+   커맨드는 등록 여부와 무관하게 `run_command`로 그대로 실행합니다.
+4) 실행할 때 "실행할까요?"라고 묻지 않습니다.
+5) 실행 결과만 답합니다. 개인 계정의 할당량/사용량을 서버 전체 디스크 조회(df 등)로 답하지 않습니다.
+6) **"커맨드가 없다"고 답하기 전에 반드시 매뉴얼 검색을 합니다.** 툴 목록에 없어도 매뉴얼
    본문에 커맨드가 적혀 있는 경우가 많습니다. 툴 목록 확인 → **매뉴얼 검색**(표현을 바꿔 한 번 더)
    → 그래도 없을 때만 "확인할 수 있는 커맨드가 없습니다"라고 답합니다.
 
@@ -874,11 +903,15 @@ AGENT_INSTRUCTION = """당신은 사내 인프라/시스템 운영을 돕는 한
 - 거부 사유를 그대로 전하고, 필요하면 관리자에게 커맨드 등록을 요청하도록 안내합니다.
 
 ## 인프라 "현황·구성"을 물으면 — 매뉴얼을 먼저 봅니다
-"GPU 인프라 현황", "서버 구성", "노드 스펙", "보유 자원"처럼 **정해져 있는 정보**는 매뉴얼에
-정리돼 있는 경우가 많습니다. 서버마다 커맨드를 돌리기 전에 **매뉴얼을 먼저 검색합니다.**
+"GPU 인프라 현황", "서버 구성", "노드 스펙", "보유 자원"처럼 **장비 구성에 관한,
+정해져 있는 정보**는 매뉴얼에 정리돼 있는 경우가 많습니다.
+서버마다 커맨드를 돌리기 전에 **매뉴얼을 먼저 검색합니다.**
 - 매뉴얼에 표·목록으로 있으면 그 값을 쓰고, 커맨드는 실행하지 않습니다.
 - 실시간 상태(지금 사용률, 지금 빈 노드)를 물었을 때만 커맨드를 씁니다.
 - 커맨드를 여러 서버에 반복 실행하면 출력이 쌓여 한도를 넘습니다. 꼭 필요한 것만 한 번씩 씁니다.
+- **'현황'이라는 말이 붙었다고 무조건 매뉴얼부터 보는 것은 아닙니다.** "내 job 현황",
+  "내 작업 현황", "내 스토리지 현황"처럼 **본인 자원**을 묻는 것은 매뉴얼에 있을 수 없는
+  실시간 값입니다. 위 "확인해 달라" 절대로, 맞는 툴을 **바로 한 번** 실행해 답합니다.
 
 ## 도구를 이어서 씁니다
 한 질문에 도구 여러 개가 필요하면 순서대로 이어 씁니다. 예: "GPU 인프라 현황을 차트로"
@@ -1027,12 +1060,9 @@ async def import_execution_registry():
                 rows = await sysconn.fetch(
                     "SELECT tool_name, description, argv_template, params, required_roles, "
                     "enabled, host_mode FROM system_custom_commands")
-                states = await sysconn.fetch(
-                    "SELECT tool_name, enabled, required_roles, description_override, host_mode "
-                    "FROM system_whitelist_state")
             except Exception as e:  # noqa: BLE001
                 print(f"[migrate] 구 System MCP 테이블을 읽지 못했습니다(무시): {e}")
-                rows, states = [], []
+                rows = []
             finally:
                 await sysconn.close()
 
@@ -1064,18 +1094,9 @@ async def import_execution_registry():
                     r["enabled"], list(r["required_roles"] or []))
                 moved += 1
 
-            # (3) 내장 커맨드의 on/off·역할·설명·실행위치는 관리자가 조정해 둔 값이다. 그대로 옮긴다.
-            for s in states:
-                await conn.execute(
-                    """
-                    INSERT INTO execution_builtin_state
-                        (tool_name, enabled, required_roles, description_override, host_mode,
-                         updated_by, updated_at)
-                    VALUES ($1,$2,$3,$4,$5,'migrate', now())
-                    ON CONFLICT (tool_name) DO NOTHING
-                    """,
-                    s["tool_name"], s["enabled"], s["required_roles"],
-                    s["description_override"], s["host_mode"] or "target_server")
+            # 구 내장 커맨드(화이트리스트)의 on/off·설명은 더 이상 옮기지 않는다 —
+            # 내장 커맨드 자체를 없앴다(#128). execution_builtin_state 테이블은 되돌릴 수 있게
+            # 남겨 두지만 읽는 코드가 없다.
 
         src_custom = 0 if sysconn is None else len(rows)
         total_now = await conn.fetchval("SELECT count(*) FROM execution_commands") or 0

@@ -5,19 +5,22 @@ Execution MCP - 커맨드 실행을 담당하는 **단 하나의** MCP. (구 Com
 어느 쪽이든 결국 화이트리스트이며, 인자를 에이전트가 자유롭게 정할 수 있어야 하는 것도 같다.
 탭이 둘이라 "이건 어디에 등록하지?"가 매번 생겼고, 재시작 규칙도 감사 로그도 두 벌이었다.
 
-노출하는 툴은 세 갈래다.
-  1) **내장 커맨드**(builtin.py) - 값 검증이 필요한 read-only 리눅스 명령 7개.
-     `lines` 1~2000, `kind` enum, safe_path() 같은 검사는 템플릿으로 표현할 수 없어 코드로 남겼다.
-  2) **등록 커맨드**(execution_commands) - 콘솔에서 `head -n {lines} {path}`처럼 적어 등록한 것.
-     자리표시자가 타입 붙은 파라미터로 LLM에 노출된다.
-  3) **run_command** - 등록되지 않은 커맨드(매뉴얼/VOC에서 찾았거나 LLM이 아는 것)를 그대로 실행.
-     승인한 사람이 없으므로 차단 목록을 **엄격하게** 적용한다(shared/execution_exec).
+노출하는 툴은 **두 갈래뿐**이다(#128에서 코드 내장 커맨드 7개를 없앴다).
+  1) **등록 커맨드**(execution_commands) - 콘솔에서 `head -n {lines} {path}`처럼 적어 등록한 것.
+     자리표시자가 타입 붙은 파라미터로 LLM에 노출된다. 전부 콘솔에서 편집·삭제·on/off 된다.
+  2) **run_command** - 등록되지 않은 커맨드(매뉴얼/VOC에서 찾았거나 LLM이 아는 리눅스 명령)를
+     그대로 실행. 승인한 사람이 없으므로 차단 목록을 **엄격하게** 적용한다(shared/execution_exec).
 
 공통 보장(어느 갈래든 동일):
 - 셸을 쓰지 않는다(argv 리스트). 항상 `ssh root@host` 후 `su - <user_id>`로 **호출자 본인**
   권한으로 강등해 실행한다. root로 실행되는 경로가 없다.
 - user_id는 LLM 스키마에서 감추고 호출자 헤더에서 강제 주입한다(남의 자원 접근 불가).
 - 전건 감사 로그(job_logs).
+
+속도(#128): 툴 호출 하나가 사용자를 기다리게 하는 시간은 (a) 상태 조회 DB 왕복,
+(b) 감사 로그 INSERT, (c) ssh 접속, (d) 원격 커맨드다. (a)는 한 번으로 합쳤고, (b)는 성공
+경로에서 응답 뒤로 미뤘으며, (c)는 마스터 연결 예열로 없앤다. 남는 것은 (d)뿐이고
+그 값은 결과의 `duration_ms`로 그대로 보인다.
 """
 import sys
 import os
@@ -28,14 +31,13 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db import get_pool  # noqa: E402
 from config_store import get_config  # noqa: E402
 from mcp_caller import (  # noqa: E402
-    get_caller, CallerContextMiddleware, load_overrides_sync, tool_description, build_wrapped,
+    get_caller, CallerContextMiddleware, tool_description, build_wrapped,
 )
 from ssh_exec import (  # noqa: E402
     master_alive, run_ssh_as_user, set_output_limit_getter, warm_master,
     start_master_keepalive,
 )
 from execution_exec import DEFAULT_DENY_CSV, build_free_argv, deny_set  # noqa: E402
-from builtin import BUILTIN_COMMANDS  # noqa: E402
 from registry import (  # noqa: E402
     estimate_prompt_tokens, load_registered_sync, set_deny_csv_getter,
 )
@@ -45,7 +47,6 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP("execution-mcp", stateless_http=True, host="0.0.0.0")
 
 _DSN = "execution_db_dsn"
-_STATE = "execution_builtin_state"
 
 
 async def _deny_csv() -> str:
@@ -65,13 +66,13 @@ set_output_limit_getter(_output_limit)
 
 
 async def _login_host() -> str:
-    return await get_config("scheduler_login_host", "202.20.185.100")
+    return await get_config("execution_host", "202.20.185.100")
 
 
 # ------------------------------------------------------------------ 미등록 커맨드 실행
 async def run_command(user_id: str, command: str, args: list[str] | None = None,
                       host: str | None = None) -> dict:
-    """등록되지 않은 커맨드를 그대로 실행한다(매뉴얼/VOC에서 찾은 것 등).
+    """등록되지 않은 커맨드를 그대로 실행한다(매뉴얼/VOC에서 찾은 것, LLM이 아는 리눅스 명령).
 
     등록 커맨드는 각각 전용 툴로 이미 노출돼 있으므로 이 툴을 거치지 않는다.
     여기로 오는 것은 아무도 승인하지 않은 문자열이라, 차단 목록을 모든 토큰에 엄격히 적용한다
@@ -89,9 +90,10 @@ FREE_TOOLS = {
     "run_command": {
         "handler": run_command,
         "description": (
-            "**등록되지 않은** 사내 커맨드를 실행한다. 등록된 커맨드는 각각 전용 툴로 나와 있으니 "
-            "그 툴을 먼저 쓰고, 목록에 없는 커맨드(매뉴얼에서 찾은 것 등)만 이 툴로 실행한다. "
-            "args는 인자를 한 칸씩 나눠 넣는다(예: ['-l','/home']). "
+            "**등록되지 않은** 커맨드를 실행한다(ls·df·du·find·head·nvidia-smi 같은 표준 리눅스 "
+            "명령과 매뉴얼에서 찾은 사내 커맨드). 등록된 커맨드는 각각 전용 툴로 나와 있으니 "
+            "그 툴을 먼저 쓰고, 목록에 없는 것만 이 툴로 실행한다. "
+            "command에는 커맨드 이름만, args에는 인자를 한 칸씩 나눠 넣는다(예: ['-lh','.']). "
             "host는 사용자가 특정 서버를 지목했을 때만 넣는다(기본: 로그인 서버). "
             "파괴적이거나 다른 명령을 대신 실행하는 커맨드는 거부된다."
         ),
@@ -120,85 +122,54 @@ async def _log_execution(tool_name: str, params: dict, status: str, result):
     )
 
 
-async def _is_enabled(tool_name: str, default: bool) -> bool:
-    """활성 여부는 **실행 시점에** 읽는다(콘솔에서 끄면 재시작 없이 바로 막힌다)."""
-    pool = await get_pool(_DSN)
-    if tool_name in BUILTIN_COMMANDS:
-        row = await pool.fetchrow(
-            f"SELECT enabled FROM {_STATE} WHERE tool_name = $1", tool_name)
-        if row is None:
-            # host_mode는 **넣지 않는다**. 여기서 값을 채우면 컬럼 기본값이 코드가 지정한
-            # 실행 위치(login_server)를 덮어써서, host가 LLM에 노출되고 엉뚱한 서버에서
-            # 실행된다(#115). NULL로 두면 builtin.py의 값이 쓰인다.
-            await pool.execute(
-                f"INSERT INTO {_STATE} (tool_name, enabled) VALUES ($1, $2) "
-                "ON CONFLICT (tool_name) DO NOTHING", tool_name, default)
-            return default
-        return row["enabled"]
-    if tool_name in FREE_TOOLS:
-        return True
-    row = await pool.fetchrow(
-        "SELECT enabled FROM execution_commands WHERE tool_name = $1", tool_name)
-    return default if row is None else row["enabled"]
+async def _tool_state(tool_name: str, default_enabled: bool, default_roles: list) -> tuple:
+    """활성 여부와 필요 역할을 **한 행에서 한 번에** 읽는다(콘솔에서 끄면 재시작 없이 즉시 막힘).
 
-
-async def _required_roles(tool_name: str, code_default: list) -> list:
-    pool = await get_pool(_DSN)
-    table = _STATE if tool_name in BUILTIN_COMMANDS else "execution_commands"
+    예전에는 같은 행을 두 번 조회했다(enabled 한 번, required_roles 한 번). 툴 호출마다
+    DB를 두 번 왕복하는 셈이라, 커맨드 여러 개를 부르는 질문에서는 그만큼 쌓였다.
+    """
     if tool_name in FREE_TOOLS:
-        return []
+        return True, []
+    pool = await get_pool(_DSN)
     row = await pool.fetchrow(
-        f"SELECT required_roles FROM {table} WHERE tool_name = $1", tool_name)
-    if row and row["required_roles"] is not None:
-        return list(row["required_roles"])
-    return list(code_default or [])
+        "SELECT enabled, required_roles FROM execution_commands WHERE tool_name = $1", tool_name)
+    if row is None:
+        return default_enabled, list(default_roles or [])
+    roles = list(row["required_roles"]) if row["required_roles"] is not None \
+        else list(default_roles or [])
+    return row["enabled"], roles
 
 
 # ------------------------------------------------------------------ 툴 구성 (기동 시 1회)
 # host_mode와 설명은 LLM 스키마/프롬프트에 영향을 줘서 기동 시에만 반영한다(변경 후 재시작 필요).
-_OVERRIDES = load_overrides_sync(_DSN, _STATE, extra_columns=("host_mode", "enabled"))
-
-# 비활성 내장 커맨드도 툴 목록에서 뺀다(등록 커맨드와 같은 이유 - 프롬프트 예산).
-# 끄는 즉시 막히는 건 _is_enabled가 호출 시점에 또 확인하므로 그대로다.
-BUILTIN, _OFF = {}, 0
-for _name, _e in BUILTIN_COMMANDS.items():
-    _ov = _OVERRIDES.get(_name) or {}
-    if _ov.get("enabled") is False:
-        _OFF += 1
-        continue
-    BUILTIN[_name] = {**_e, "host_mode": _ov["host_mode"]} if _ov.get("host_mode") else _e
-if _OFF:
-    print(f"[execution-mcp] 비활성 내장 커맨드 {_OFF}개는 툴 목록에서 제외했습니다.")
-
 REGISTERED, _DROPPED = load_registered_sync(_login_host)
 if _DROPPED:
     print(f"[execution-mcp] 등록 커맨드가 상한(execution_tools_max)을 넘어 {_DROPPED}개를 툴로 "
           "노출하지 못했습니다. 설정에서 상한을 올리거나 쓰지 않는 커맨드를 정리하세요 "
           "- 노출되지 않은 커맨드는 run_command로만 실행할 수 있습니다.")
 
-ALL_TOOLS = {**BUILTIN, **REGISTERED, **FREE_TOOLS}
+ALL_TOOLS = {**REGISTERED, **FREE_TOOLS}
 _CHARS, _TOKENS = estimate_prompt_tokens(
-    [tool_description(n, e, _OVERRIDES) for n, e in ALL_TOOLS.items()])
+    [tool_description(n, e) for n, e in ALL_TOOLS.items()])
 # 툴 설명은 **매 요청** 프롬프트에 통째로 실린다. 컨텍스트가 32768이라 등록이 늘수록
-# 검색 결과·대화 이력에 쓸 자리가 줄어든다. 실제 비용을 찍어 두면 감이 아니라 숫자로 판단할 수 있다.
-print(f"[execution-mcp] 내장 {len(BUILTIN)}개 · 등록 {len(REGISTERED)}개 · run_command 1개 "
+# 검색 결과·대화 이력에 쓸 자리가 줄어들고, 프리필이 길어져 첫 글자까지의 시간도 늘어난다.
+print(f"[execution-mcp] 등록 {len(REGISTERED)}개 · run_command 1개 "
       f"= 툴 {len(ALL_TOOLS)}개 (스키마 {_CHARS:,}자 ≈ {_TOKENS:,}토큰/요청)")
 # 어떤 툴이 실제로 노출됐는지 남긴다. 필요한 툴이 꺼져 있으면 에이전트가 쓸 수 없고,
 # 그때 답을 지어내는 사고가 났다(#125). 목록을 보면 바로 확인된다.
 print(f"[execution-mcp] 노출된 툴: {', '.join(sorted(ALL_TOOLS))}")
 if _TOKENS > 8000:
-    print(f"[execution-mcp] 경고: 툴 스키마가 요청마다 약 {_TOKENS:,}토큰을 씁니다. 지시문(~4.9k)과 "
-          "합치면 32768 컨텍스트의 절반에 가까워 검색 결과·대화 이력이 밀려납니다. "
+    print(f"[execution-mcp] 경고: 툴 스키마가 요청마다 약 {_TOKENS:,}토큰을 씁니다. 지시문(~5k)과 "
+          "합치면 32768 컨텍스트의 절반에 가까워 검색 결과·대화 이력이 밀려나고 응답이 느려집니다. "
           "커맨드 설명을 한 줄로 줄이거나 안 쓰는 커맨드를 정리하세요.")
 
 for _name, _entry in ALL_TOOLS.items():
     mcp.add_tool(
-        build_wrapped(_name, _entry, is_enabled=_is_enabled,
-                      required_roles=_required_roles, log_execution=_log_execution,
+        build_wrapped(_name, _entry, tool_state=_tool_state, log_execution=_log_execution,
                       host_mode=_entry.get("host_mode", "target_server"),
                       login_host=_login_host),
         name=_name,
-        description=tool_description(_name, _entry, _OVERRIDES),
+        description=tool_description(_name, _entry),
     )
 
 
@@ -227,7 +198,7 @@ if __name__ == "__main__":
                 print(f"[execution-mcp] ssh 마스터를 열지 못했습니다({host}). 커맨드는 실행되지만 "
                       "매번 새로 접속해 1~3초씩 더 걸립니다. "
                       "scripts/diag-ssh.sh 로 원인을 확인하세요.")
-        start_master_keepalive(lambda: get_config("scheduler_login_host", host), interval=180)
+        start_master_keepalive(lambda: get_config("execution_host", host), interval=180)
 
     inner.add_event_handler("startup", _warm_ssh)
     uvicorn.run(CallerContextMiddleware(inner), host="0.0.0.0", port=port)

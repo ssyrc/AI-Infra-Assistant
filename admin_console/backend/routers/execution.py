@@ -1,5 +1,5 @@
 """
-Execution MCP 관리 API - 등록 커맨드(execution_commands) + 코드 내장 커맨드 + 실행 감사로그.
+Execution MCP 관리 API - 등록 커맨드(execution_commands) + 실행 감사로그.
 구 commands.py(커맨드 카탈로그)와 system.py(화이트리스트)를 하나로 합친 것이다(#111).
 
 등록 커맨드의 인자 설계:
@@ -8,7 +8,9 @@ Execution MCP 관리 API - 등록 커맨드(execution_commands) + 코드 내장 
   argv JSON을 손으로 쓰게 하던 예전 방식보다 훨씬 쉽고, 카탈로그의 `{user_id}` 문법과도 같다.
   `{user_id}`는 예약어라 표에 나오지 않는다(호출자 신원에서 자동 주입).
 
-내장 커맨드는 파이썬 함수라 콘솔에서 만들 수 없다. 활성/역할/설명/실행위치만 바꾼다.
+**커맨드는 전부 여기 등록분 하나다**(#128). 예전에는 파이썬 함수로 박아 둔 '내장 커맨드' 7개가
+따로 있어서 편집도 삭제도 안 됐는데, 그 7개는 전부 LLM이 이미 아는 표준 리눅스 명령이라
+run_command로 실행하면 그만이다. 목록에서 없앴더니 매 요청 프롬프트도 그만큼 가벼워졌다.
 """
 import json
 import sys
@@ -30,18 +32,14 @@ from server_files import read_upload_or_server_file
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../../shared"))
 from execution_exec import (  # noqa: E402
-    DEFAULT_DENY_CSV, HOST_MODES, deny_set, placeholders_in, tool_name_for,
-    validate_definition,
+    DEFAULT_DENY_CSV, deny_set, placeholders_in, tool_name_for, validate_definition,
 )
-
-# 내장 커맨드는 **메타데이터만** 쓴다(핸들러는 호출하지 않는다). 이 파일만 이미지에 넣으면 되도록
-# builtin.py의 의존(ssh_exec, linux_exec)은 전부 shared에 있다.
-sys.path.append(os.path.join(os.path.dirname(__file__), "../../../mcp_servers/execution_mcp"))
-from builtin import BUILTIN_COMMANDS  # noqa: E402
 
 router = APIRouter(prefix="/api/execution", tags=["execution"])
 
 _DSN = "execution_db_dsn"
+# 툴 이름이 겹치면 안 되는 예약어. run_command는 MCP가 항상 노출하는 미등록 커맨드 실행 툴이다.
+_RESERVED_TOOL_NAMES = {"run_command"}
 
 
 async def _deny() -> set:
@@ -72,7 +70,6 @@ class CommandIn(BaseModel):
     description: str = ""
     exec_command: str
     args: list[ArgIn] = []
-    allow_extra_args: bool = True
     host_mode: str = "login_server"
     enabled: bool = True
     required_roles: list[str] = []
@@ -82,7 +79,7 @@ class CommandIn(BaseModel):
 async def list_commands(admin: str = Depends(require_admin)):
     pool = await get_pool(_DSN)
     rows = await pool.fetch(
-        "SELECT id, tool_name, title, description, exec_command, args, allow_extra_args, "
+        "SELECT id, tool_name, title, description, exec_command, args, "
         "host_mode, enabled, required_roles, updated_by, updated_at "
         "FROM execution_commands ORDER BY title")
     return [_row(r) for r in rows]
@@ -111,19 +108,19 @@ async def _validate(body: CommandIn, existing: set[str], tool_name: str):
 async def create_command(body: CommandIn, admin: str = Depends(require_admin)):
     pool = await get_pool(_DSN)
     taken = {r["tool_name"] for r in await pool.fetch("SELECT tool_name FROM execution_commands")}
-    taken |= set(BUILTIN_COMMANDS) | {"run_command"}
+    taken |= _RESERVED_TOOL_NAMES
     tool_name = tool_name_for(body.title, taken, body.exec_command)
     args = await _validate(body, taken, tool_name)
     try:
         row_id = await pool.fetchval(
             """
             INSERT INTO execution_commands
-                (tool_name, title, description, exec_command, args, allow_extra_args,
+                (tool_name, title, description, exec_command, args,
                  host_mode, enabled, required_roles, updated_by)
-            VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10) RETURNING id
+            VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9) RETURNING id
             """,
             tool_name, body.title.strip(), body.description.strip(), body.exec_command.strip(),
-            json.dumps(args, ensure_ascii=False), body.allow_extra_args, body.host_mode,
+            json.dumps(args, ensure_ascii=False), body.host_mode,
             body.enabled, [r.strip() for r in body.required_roles if r.strip()], admin)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"등록 실패 (이름 중복 가능): {e}")
@@ -139,16 +136,16 @@ async def update_command(command_id: int, body: CommandIn, admin: str = Depends(
         raise HTTPException(404, "커맨드를 찾을 수 없습니다.")
     taken = {r["tool_name"] for r in await pool.fetch(
         "SELECT tool_name FROM execution_commands WHERE id <> $1", command_id)}
-    args = await _validate(body, taken | set(BUILTIN_COMMANDS), cur["tool_name"])
+    args = await _validate(body, taken | _RESERVED_TOOL_NAMES, cur["tool_name"])
     await pool.execute(
         """
         UPDATE execution_commands
-        SET title=$2, description=$3, exec_command=$4, args=$5::jsonb, allow_extra_args=$6,
-            host_mode=$7, enabled=$8, required_roles=$9, updated_by=$10, updated_at=now()
+        SET title=$2, description=$3, exec_command=$4, args=$5::jsonb,
+            host_mode=$6, enabled=$7, required_roles=$8, updated_by=$9, updated_at=now()
         WHERE id=$1
         """,
         command_id, body.title.strip(), body.description.strip(), body.exec_command.strip(),
-        json.dumps(args, ensure_ascii=False), body.allow_extra_args, body.host_mode,
+        json.dumps(args, ensure_ascii=False), body.host_mode,
         body.enabled, [r.strip() for r in body.required_roles if r.strip()], admin)
     # enabled/역할은 실행 시점에 읽으므로 즉시 반영된다. 나머지는 툴 스키마라 재시작이 필요하다.
     return {"ok": True, "restart_required": True}
@@ -171,84 +168,6 @@ async def delete_command(command_id: int, admin: str = Depends(require_admin)):
     pool = await get_pool(_DSN)
     await pool.execute("DELETE FROM execution_commands WHERE id = $1", command_id)
     return {"ok": True, "restart_required": True}
-
-
-# ---------------------------------------------------------------- 내장 커맨드
-class BuiltinPatchIn(BaseModel):
-    """제공된 필드만 반영한다.
-    enabled/required_roles는 실시간, description/host_mode는 툴 스키마라 재시작이 필요하다."""
-    enabled: bool | None = None
-    required_roles: list[str] | None = None
-    description: str | None = None
-    host_mode: str | None = None
-
-
-@router.get("/builtin")
-async def list_builtin(admin: str = Depends(require_admin)):
-    pool = await get_pool(_DSN)
-    state = {r["tool_name"]: r for r in await pool.fetch(
-        "SELECT tool_name, enabled, required_roles, description_override, host_mode, "
-        "updated_by, updated_at FROM execution_builtin_state")}
-    out = []
-    for name, entry in BUILTIN_COMMANDS.items():
-        row = state.get(name)
-        override = row["description_override"] if row else None
-        roles = list(row["required_roles"]) if row and row["required_roles"] is not None \
-            else list(entry.get("required_roles") or [])
-        out.append({
-            "tool_name": name,
-            "description": (override or "").strip() or entry["description"],
-            "code_description": entry["description"],
-            "description_override": override,
-            "example_command": entry.get("example_command", ""),
-            "required_roles": roles,
-            "enabled": row["enabled"] if row else entry.get("enabled", False),
-            "host_mode": (row["host_mode"] if row else None) or entry.get("host_mode", "target_server"),
-            "updated_by": row["updated_by"] if row else None,
-            "updated_at": row["updated_at"] if row else None,
-        })
-    return out
-
-
-@router.patch("/builtin/{tool_name}")
-async def patch_builtin(tool_name: str, body: BuiltinPatchIn, admin: str = Depends(require_admin)):
-    if tool_name not in BUILTIN_COMMANDS:
-        raise HTTPException(404, "알 수 없는 내장 커맨드입니다.")
-    if body.host_mode is not None and body.host_mode not in HOST_MODES:
-        raise HTTPException(400, f"실행 위치는 {', '.join(HOST_MODES)} 중 하나여야 합니다.")
-    code = BUILTIN_COMMANDS[tool_name]
-    pool = await get_pool(_DSN)
-    row = await pool.fetchrow(
-        "SELECT enabled, required_roles, description_override, host_mode "
-        "FROM execution_builtin_state WHERE tool_name = $1", tool_name)
-
-    enabled = body.enabled if body.enabled is not None else (
-        row["enabled"] if row else code.get("enabled", False))
-    if body.required_roles is not None:
-        roles = [r.strip() for r in body.required_roles if r and r.strip()]
-    elif row and row["required_roles"] is not None:
-        roles = list(row["required_roles"])
-    else:
-        roles = list(code.get("required_roles") or [])
-    if body.description is not None:
-        desc = body.description.strip() or None      # 빈 문자열이면 오버라이드 해제
-    else:
-        desc = row["description_override"] if row else None
-    host_mode = body.host_mode or (row["host_mode"] if row else None) \
-        or code.get("host_mode", "target_server")
-
-    await pool.execute(
-        """
-        INSERT INTO execution_builtin_state
-            (tool_name, enabled, required_roles, description_override, host_mode,
-             updated_by, updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6, now())
-        ON CONFLICT (tool_name) DO UPDATE
-        SET enabled=$2, required_roles=$3, description_override=$4, host_mode=$5,
-            updated_by=$6, updated_at=now()
-        """, tool_name, enabled, roles, desc, host_mode, admin)
-    return {"ok": True,
-            "restart_required": body.host_mode is not None or body.description is not None}
 
 
 # ---------------------------------------------------------------- 실행 로그
@@ -301,9 +220,9 @@ class ExcelCommitIn(BaseModel):
 async def commit_excel(body: ExcelCommitIn, admin: str = Depends(require_admin)):
     """열 매핑으로 일괄 등록/갱신한다(title 기준 upsert).
 
-    일괄 등록분은 인자 정의 없이 `allow_extra_args=true`, 로그인 서버 고정으로 들어간다 -
-    매뉴얼에서 뽑은 커맨드 목록은 인자를 미리 알 수 없기 때문이다. 필요하면 개별 수정에서
-    자리표시자를 넣어 인자를 정의하면 된다.
+    일괄 등록분은 인자 정의 없이 로그인 서버 고정으로 들어간다 - 매뉴얼에서 뽑은 커맨드
+    목록은 인자를 미리 알 수 없기 때문이다(인자는 에이전트가 채운다). 필요하면 개별 수정에서
+    자리표시자를 넣어 타입을 정의하면 된다.
     """
     session = await get_upload_session(_DSN, body.upload_id, admin, "execution_commands")
     opts = clean_options_from_dict(load_options(session))
@@ -344,7 +263,7 @@ async def commit_excel(body: ExcelCommitIn, admin: str = Depends(require_admin))
     deny = await _deny()
     pool = await get_pool(_DSN)
     taken = {r["tool_name"] for r in await pool.fetch("SELECT tool_name FROM execution_commands")}
-    taken |= set(BUILTIN_COMMANDS) | {"run_command"}
+    taken |= _RESERVED_TOOL_NAMES
 
     inserted = updated = skipped = 0
     problems = []
@@ -367,9 +286,9 @@ async def commit_excel(body: ExcelCommitIn, admin: str = Depends(require_admin))
                 res = await conn.fetchrow(
                     """
                     INSERT INTO execution_commands
-                        (tool_name, title, description, exec_command, args, allow_extra_args,
+                        (tool_name, title, description, exec_command, args,
                          host_mode, enabled, updated_by)
-                    VALUES ($1,$2,$3,$4,'[]'::jsonb, true, 'login_server', true, $5)
+                    VALUES ($1,$2,$3,$4,'[]'::jsonb, 'login_server', true, $5)
                     ON CONFLICT (title) DO UPDATE
                     SET description=EXCLUDED.description, exec_command=EXCLUDED.exec_command,
                         updated_by=EXCLUDED.updated_by, updated_at=now()
