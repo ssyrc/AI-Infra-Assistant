@@ -1,42 +1,19 @@
-[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml run --rm db-init
-WARN[0000] Found orphan containers ([ai-infra-assistant-command-mcp-1 ai-infra-assistant-system-mcp-1]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.
-[+]  1/1t 1/11
- ✔ Container ai-infra-assistant-postgres-1 Running                                                                                                                                                                                  0.0s
-Container ai-infra-assistant-postgres-1 Waiting
-Container ai-infra-assistant-postgres-1 Healthy
-Container ai-infra-assistant-db-init-run-e258a028af3e Creating
-Container ai-infra-assistant-db-init-run-e258a028af3e Created
-[migrate] execution 레지스트리 모듈을 찾지 못해 이관을 건너뜁니다: No module named 'registry'
-[migrate] config seeded
-[migrate] done
-
-[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml up -d --no-build
-WARN[0000] Found orphan containers ([ai-infra-assistant-command-mcp-1 ai-infra-assistant-system-mcp-1]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.
-[+] up 10/11
-[+] up 11/12-infra-assistant_chart_files        Created                                                                                                                                                                             0.0s
- ✔ Volume ai-infra-assistant_chart_files        Created                                                                                                                                                                             0.0s
- ✔ Container ai-infra-assistant-postgres-1      Healthy                                                                                                                                                                             0.9s
- ✔ Container ai-infra-assistant-mock-vllm-1     Running                                                                                                                                                                             0.0s
- ✔ Container ai-infra-assistant-db-init-1       Exited                                                                                                                                                                              1.7s
- ✔ Container ai-infra-assistant-voc-mcp-1       Running                                                                                                                                                                             0.0s
- ✔ Container ai-infra-assistant-manual-mcp-1    Running                                                                                                                                                                             0.0s
- ✔ Container ai-infra-assistant-admin-console-1 Started                                                                                                                                                                             2.7s
- ⠴ Container ai-infra-assistant-execution-mcp-1 Starting                                                                                                                                                                            2.7s
- ✔ Container ai-infra-assistant-chart-mcp-1     Started                                                                                                                                                                             2.7s
- ✔ Container ai-infra-assistant-agent-server-1  Running                                                                                                                                                                             0.0s
- ✔ Container ai-infra-assistant-open-webui-1    Running                                                                                                                                                                             0.0s
- ✔ Container ai-infra-assistant-dev-config-1    Exited                                                                                                                                                                              0.7s
-Error response from daemon: driver failed programming external connectivity on endpoint ai-infra-assistant-execution-mcp-1 (2ee104121fa2085046d0ff661553fef96b391b942ffaa8a97628c2da25764a1e): Bind for 0.0.0.0:8504 failed: port is already allocated
-
-
 [root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml ps
-NAME                                IMAGE                                    COMMAND                  SERVICE        CREATED          STATUS                  PORTS
-ai-infra-assistant-agent-server-1   ai-infra-assistant-agent-server:latest   "uvicorn main:app --…"   agent-server   2 days ago       Up 14 hours             0.0.0.0:8500->8000/tcp, [::]:8500->8000/tcp
-ai-infra-assistant-chart-mcp-1      ai-infra-assistant-mcp:dev               "watchfiles --filter…"   chart-mcp      17 seconds ago   Up 14 seconds           8001/tcp, 0.0.0.0:8509->8005/tcp, [::]:8509->8005/tcp
-ai-infra-assistant-command-mcp-1    ai-infra-assistant-mcp:dev               "watchfiles --filter…"   command-mcp    18 hours ago     Up 14 hours             8001/tcp, 0.0.0.0:8504->8002/tcp, [::]:8504->8002/tcp
-ai-infra-assistant-manual-mcp-1     ai-infra-assistant-mcp:dev               "watchfiles --filter…"   manual-mcp     2 days ago       Up 14 hours             0.0.0.0:8503->8001/tcp, [::]:8503->8001/tcp
-ai-infra-assistant-mock-vllm-1      ai-infra-assistant-mock-vllm:latest      "uvicorn mock_vllm:a…"   mock-vllm      2 days ago       Up 14 hours             8000/tcp
-ai-infra-assistant-open-webui-1     ghcr.io/open-webui/open-webui:v0.6.5     "bash start.sh"          open-webui     18 hours ago     Up 18 hours (healthy)   0.0.0.0:8502->8080/tcp, [::]:8502->8080/tcp
-ai-infra-assistant-postgres-1       docker.io/pgvector/pgvector:pg16         "docker-entrypoint.s…"   postgres       39 hours ago     Up 39 hours (healthy)   0.0.0.0:8507->5432/tcp, [::]:8507->5432/tcp
-ai-infra-assistant-system-mcp-1     ai-infra-assistant-mcp:dev               "watchfiles --filter…"   system-mcp     18 hours ago     Up 14 hours             8001/tcp, 0.0.0.0:8506->8004/tcp, [::]:8506->8004/tcp
-ai-infra-assistant-voc-mcp-1        ai-infra-assistant-mcp:dev               "watchfiles --filter…"   voc-mcp        2 days ago       Up 14 hours             8001/tcp, 0.0.0.0:8505->8003/tcp, [::]:8505->8003/tcp
+NAME                                 IMAGE                                    COMMAND                  SERVICE         CREATED         STATUS                  PORTS
+ai-infra-assistant-agent-server-1    ai-infra-assistant-agent-server:latest   "uvicorn main:app --…"   agent-server    2 days ago      Up 14 hours             0.0.0.0:8500->8000/tcp, [::]:8500->8000/tcp
+ai-infra-assistant-chart-mcp-1       ai-infra-assistant-mcp:dev               "watchfiles --filter…"   chart-mcp       9 minutes ago   Up 9 minutes            8001/tcp, 0.0.0.0:8509->8005/tcp, [::]:8509->8005/tcp
+ai-infra-assistant-execution-mcp-1   ai-infra-assistant-mcp:dev               "watchfiles --filter…"   execution-mcp   9 minutes ago   Up 1 second             8001/tcp, 0.0.0.0:8504->8002/tcp, [::]:8504->8002/tcp
+ai-infra-assistant-manual-mcp-1      ai-infra-assistant-mcp:dev               "watchfiles --filter…"   manual-mcp      2 days ago      Up 15 hours             0.0.0.0:8503->8001/tcp, [::]:8503->8001/tcp
+ai-infra-assistant-mock-vllm-1       ai-infra-assistant-mock-vllm:latest      "uvicorn mock_vllm:a…"   mock-vllm       2 days ago      Up 15 hours             8000/tcp
+ai-infra-assistant-open-webui-1      ghcr.io/open-webui/open-webui:v0.6.5     "bash start.sh"          open-webui      18 hours ago    Up 18 hours (healthy)   0.0.0.0:8502->8080/tcp, [::]:8502->8080/tcp
+ai-infra-assistant-postgres-1        docker.io/pgvector/pgvector:pg16         "docker-entrypoint.s…"   postgres        39 hours ago    Up 39 hours (healthy)   0.0.0.0:8507->5432/tcp, [::]:8507->5432/tcp
+ai-infra-assistant-voc-mcp-1         ai-infra-assistant-mcp:dev               "watchfiles --filter…"   voc-mcp         2 days ago      Up 15 hours             8001/tcp, 0.0.0.0:8505->8003/tcp, [::]:8505->8003/tcp
+[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml run --rm db-init 2>&1 | grep -E "이관|건너뜁"
+
+[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml logs execution-mcp | grep 내장
+execution-mcp-1  | [execution-mcp] 내장 7개 · 등록 1개 · run_command 1개 = 툴 9개 (스키마 2,666자 ≈ 941토큰/요청)
+[root@24-gp19 AI-Infra-Assistant]#
+[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml run --rm db-init 2>&1 | grep -E "이관|건너뜁"
+[root@24-gp19 AI-Infra-Assistant]#
+[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml logs execution-mcp | grep 내장
+execution-mcp-1  | [execution-mcp] 내장 7개 · 등록 1개 · run_command 1개 = 툴 9개 (스키마 2,666자 ≈ 941토큰/요청)
