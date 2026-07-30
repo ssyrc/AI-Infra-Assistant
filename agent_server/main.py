@@ -18,6 +18,7 @@ import time
 import uuid
 import json
 import asyncio
+import traceback
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 
@@ -318,8 +319,21 @@ def _action_phrase(name: str, args: dict) -> str:
 def _result_phrase(name: str, resp) -> str:
     """도구 결과를 짧은 상태 문장으로 요약한다."""
     r = resp
-    if isinstance(r, dict) and "result" in r and "exit_code" not in r and "stdout" not in r:
-        r = r["result"]
+    # MCP 응답은 한두 겹 감싸여 올 수 있다(`{"result": {...}}`, 때로는 JSON 문자열).
+    # 안쪽을 못 찾으면 실행 툴인데도 "확인 완료"로 보여서, 실패했는지 성공했는지 알 수 없다.
+    for _ in range(3):
+        if isinstance(r, str):
+            try:
+                r = json.loads(r)
+                continue
+            except (ValueError, TypeError):
+                break
+        if isinstance(r, dict) and "exit_code" not in r and "stdout" not in r:
+            inner = r.get("result", r.get("content"))
+            if isinstance(inner, (dict, str)):
+                r = inner
+                continue
+        break
     if isinstance(r, list):
         return f"{len(r)}건 찾음" if r else "찾은 내용 없음"
     if isinstance(r, dict):
@@ -458,6 +472,12 @@ def _chart_inliner() -> ChartInliner:
 # 무엇을 해야 하는지 알 수 없다(실제로 59,360토큰 오류가 그렇게 노출됐다 - #123).
 _CONTEXT_ERROR_MARKERS = ("ContextWindowExceeded", "maximum context length",
                           "reduce the length of the input")
+# 툴 호출 인자를 JSON으로 못 읽은 경우. vLLM의 tool-call 파서(hermes)가 스트리밍 중에
+# 조각난/깨진 JSON을 내보내면 여기로 떨어진다. 사용자가 고칠 수 있는 게 없고 대개 재시도로 풀린다.
+# 원문(`Expecting value: line 1 column 11 (char 10)`)은 사용자에게 아무 의미가 없다.
+_JSON_ERROR_MARKERS = ("Expecting value:", "Expecting ',' delimiter",
+                       "Expecting property name", "Unterminated string starting at",
+                       "JSONDecodeError")
 
 
 async def _friendly_error(e: Exception) -> str:
@@ -477,6 +497,10 @@ async def _friendly_error(e: Exception) -> str:
                 "출력이 많은 커맨드를 여러 번 실행했거나 대화가 길어진 경우입니다. "
                 "새 대화에서 다시 물어보시거나, 조회 범위를 좁혀 주세요"
                 "(예: 서버 하나만, 기간을 줄여서)." + where)
+    if any(m in text for m in _JSON_ERROR_MARKERS):
+        return ("도구를 호출하는 형식이 깨져서 이번 요청을 끝내지 못했습니다. "
+                "같은 질문을 한 번 더 보내주세요(대개 다시 하면 됩니다). "
+                "반복되면 질문을 조금 짧게 나눠서 물어봐 주세요.")
     return f"오류가 발생했습니다: {text}"
 
 
@@ -617,7 +641,11 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001
-            print(f"[agent] 스트리밍 오류: {e}")
+            # **스택트레이스를 남긴다.** 예전에는 메시지만 찍어서
+            # `Expecting value: line 1 column 11 (char 10)` 같은 오류가 어디서 났는지
+            # (툴 인자 JSON 파싱인지, 응답 파싱인지) 알 수 없었다. 사용자에게는 그대로
+            # 보여주지 않고 로그에만 남긴다.
+            print(f"[agent] 스트리밍 오류: {type(e).__name__}: {e}\n{traceback.format_exc()}")
             yield _sse(request_id, model_name, f"\n\n[{await _friendly_error(e)}]")
             yield _sse(request_id, model_name, "", finish=True)
             yield "data: [DONE]\n\n"

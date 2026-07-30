@@ -17,6 +17,7 @@ Execution MCP의 argv 조립 + 차단 목록(blacklist). 등록 커맨드와 미
 무력화하므로 셸 자체를 차단 목록에 넣는다.
 """
 import hashlib
+import os
 import re
 import shlex
 
@@ -52,6 +53,16 @@ _WORD_SPLIT = re.compile(r"[\s;|&()`$<>\"']+")
 
 MAX_ARGS = 32
 MAX_ARG_LEN = 512
+
+# ADK는 에이전트 이름을 시스템 프롬프트에 넣는다. 모델이 그걸 **사용자 계정으로 착각해서**
+# `/home/ops_assistant` 같은 경로를 만들어 실행한 사고가 두 번 있었다(#125, #131).
+# 지시문으로 두 번 막았는데도 재발했으므로, 실행 직전에 거부하고 무엇이 틀렸는지 알려 준다.
+# 실제 계정은 호출자 헤더에서 주입되므로, 이 이름이 커맨드에 들어갈 이유가 전혀 없다.
+AGENT_SELF_NAMES = {
+    n.strip().lower()
+    for n in os.environ.get("AGENT_SELF_NAMES", "ops_assistant,ai_infra_assistant").split(",")
+    if n.strip()
+}
 PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 
 ARG_TYPES = ("str", "int", "enum")
@@ -137,6 +148,30 @@ def scan_denied(tokens: list[str], deny: set[str], *, strict: bool) -> str | Non
             if t and "/" not in t and not t.startswith("-") and t in deny:
                 return t
     return None
+
+
+def reject_self_name(argv: list[str], user_id: str) -> None:
+    """에이전트가 **자기 이름**을 계정/경로로 써서 만든 커맨드를 거부한다.
+
+    실제로 이런 일이 있었다: "내 홈 파일 리스트"에 `ls -la /home/ops_assistant`를 실행하고
+    "경로가 존재하지 않습니다"라고 답했다. `ops_assistant`는 ADK가 시스템 프롬프트에 넣는
+    **에이전트 자신의 이름**이지 사용자 계정이 아니다(#125에서 지어낸 `ls` 출력의 소유자로
+    쓴 것과 같은 뿌리다). 지시문으로 두 번 막았는데 재발했으므로 실행 단계에서 끊는다.
+
+    거부 메시지가 **다음에 무엇을 해야 하는지** 알려 주도록 썼다 — 실행은 언제나 본인 홈에서
+    시작하므로 경로를 비우면 된다.
+    """
+    if not AGENT_SELF_NAMES:
+        return
+    for token in argv:
+        low = str(token).lower()
+        for name in AGENT_SELF_NAMES:
+            if name and name in low and name != (user_id or "").lower():
+                raise PermissionError(
+                    f"'{token}'에 에이전트 자신의 이름이 들어 있어 실행하지 않았습니다. "
+                    f"그건 사용자 계정이 아닙니다(질문한 사용자는 '{user_id}'이고, 계정은 "
+                    "시스템이 자동으로 넣습니다). 홈 디렉토리를 보려면 **경로를 비우거나 '.'** 을 "
+                    "쓰세요 — 실행은 항상 본인 홈에서 시작합니다.")
 
 
 def check_token(token: str, where: str) -> str:
@@ -292,7 +327,9 @@ def build_registered_argv(exec_command: str, arg_specs: list, values: dict,
                     raise PermissionError(
                         f"'{token.split('=', 1)[0]}' 옵션은 호출자 계정으로 이미 고정돼 있어 "
                         "다시 지정할 수 없습니다(다른 사용자의 자원은 조회할 수 없습니다).")
-    return argv + extra
+    out = argv + extra
+    reject_self_name(out, user_id)
+    return out
 
 
 def build_free_argv(command: str, extra, user_id: str, deny: set[str]) -> list[str]:
@@ -307,4 +344,5 @@ def build_free_argv(command: str, extra, user_id: str, deny: set[str]) -> list[s
             f"'{hit}'는 파괴적이거나 다른 명령을 대신 실행할 수 있어 실행하지 않았습니다. "
             "실행이 필요한 커맨드라면 관리자 콘솔 실행 탭에 등록해 주세요"
             "(등록된 커맨드는 정해진 뼈대로만 실행됩니다).")
+    reject_self_name(argv, user_id)
     return argv

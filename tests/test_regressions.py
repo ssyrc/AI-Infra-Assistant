@@ -838,6 +838,52 @@ def test_session_history_is_written_without_reloading_the_session():
     assert "append_event" in body
 
 
+def test_agent_self_name_is_rejected_as_a_path_or_account():
+    """에이전트가 **자기 이름**을 계정/경로로 써서 만든 커맨드는 실행하지 않는다.
+
+    "내 홈 파일 리스트"에 `ls -la /home/ops_assistant`를 돌리고 "경로가 없습니다"라고
+    답한 사고가 있었다. ADK가 시스템 프롬프트에 넣는 에이전트 이름을 사용자 계정으로
+    착각한 것이다(#125와 같은 뿌리). 지시문으로 두 번 막았는데 재발해서 실행 단계에서 끊는다.
+    """
+    from execution_exec import build_free_argv, build_registered_argv, deny_set, DEFAULT_DENY_CSV
+    deny = deny_set(DEFAULT_DENY_CSV)
+
+    with pytest.raises(PermissionError) as e:
+        build_free_argv("ls", ["-la", "/home/ops_assistant"], "yr9.choi", deny)
+    # 거부만 하지 말고 다음에 뭘 해야 하는지 알려 준다.
+    assert "경로를 비우거나" in str(e.value)
+
+    # 등록 커맨드의 추가 인자로 들어와도 막는다.
+    with pytest.raises(PermissionError):
+        build_registered_argv("ls", [], {}, ["/home/ops_assistant"], "yr9.choi", deny, True)
+
+    # 정상 사용은 그대로 통과해야 한다(과잉 차단 금지).
+    assert build_free_argv("ls", ["-lh"], "yr9.choi", deny) == ["ls", "-lh"]
+    assert build_free_argv("ls", ["/home/gpu1/yr9.choi"], "yr9.choi", deny)[-1] \
+        == "/home/gpu1/yr9.choi"
+
+
+def test_tool_call_json_error_is_translated():
+    """vLLM tool-call 파서가 깨진 JSON을 내보내면 `Expecting value: line 1 column 11`이
+    그대로 사용자에게 갔다. 사용자가 할 수 있는 조치로 바꿔 말한다."""
+    import re as _re
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    i = src.index("_CONTEXT_ERROR_MARKERS")
+
+    async def get_config(_k, default=None):
+        return ""
+
+    ns = {"re": _re, "get_config": get_config}
+    exec(src[i:src.index("\ndef _trace_ctx(")], ns)
+    msg = asyncio.run(ns["_friendly_error"](
+        ValueError("Expecting value: line 1 column 11 (char 10)")))
+    assert "Expecting value" not in msg
+    assert "다시" in msg or "한 번 더" in msg
+
+    # 스택트레이스를 로그에 남겨야 어디서 났는지 알 수 있다(예전엔 메시지만 찍었다).
+    assert "traceback.format_exc()" in src
+
+
 def test_ssh_handshake_options_are_disabled_by_default():
     """첫 접속이 17.4초였다. TCP가 아니라 **인증 협상**이 원인이라 ConnectTimeout으로는 못 막는다.
     협상을 늘리는 것들(GSSAPI·여러 키 시도·IPv6)을 끈 상태로 유지한다."""
