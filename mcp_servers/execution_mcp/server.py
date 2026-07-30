@@ -146,13 +146,19 @@ async def _required_roles(tool_name: str, code_default: list) -> list:
 
 # ------------------------------------------------------------------ 툴 구성 (기동 시 1회)
 # host_mode와 설명은 LLM 스키마/프롬프트에 영향을 줘서 기동 시에만 반영한다(변경 후 재시작 필요).
-_OVERRIDES = load_overrides_sync(_DSN, _STATE, extra_columns=("host_mode",))
+_OVERRIDES = load_overrides_sync(_DSN, _STATE, extra_columns=("host_mode", "enabled"))
 
-BUILTIN = dict(BUILTIN_COMMANDS)
-for _name in BUILTIN_COMMANDS:
+# 비활성 내장 커맨드도 툴 목록에서 뺀다(등록 커맨드와 같은 이유 - 프롬프트 예산).
+# 끄는 즉시 막히는 건 _is_enabled가 호출 시점에 또 확인하므로 그대로다.
+BUILTIN, _OFF = {}, 0
+for _name, _e in BUILTIN_COMMANDS.items():
     _ov = _OVERRIDES.get(_name) or {}
-    if _ov.get("host_mode"):
-        BUILTIN[_name] = {**BUILTIN[_name], "host_mode": _ov["host_mode"]}
+    if _ov.get("enabled") is False:
+        _OFF += 1
+        continue
+    BUILTIN[_name] = {**_e, "host_mode": _ov["host_mode"]} if _ov.get("host_mode") else _e
+if _OFF:
+    print(f"[execution-mcp] 비활성 내장 커맨드 {_OFF}개는 툴 목록에서 제외했습니다.")
 
 REGISTERED, _DROPPED = load_registered_sync(_login_host)
 if _DROPPED:

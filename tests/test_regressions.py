@@ -804,3 +804,21 @@ def test_login_server_builtins_hide_host_from_llm():
     props = {t.name: t.inputSchema["properties"] for t in asyncio.run(m.mcp.list_tools())}
     for name in login_fixed:
         assert "host" not in props[name], f"{name}에 host가 노출됨(엉뚱한 서버에서 실행될 수 있다)"
+
+
+# --- 15번: 비활성 커맨드는 툴 목록에 실리지 않아야 한다 -------------------------------
+# 끄는 것만으로 막히긴 했지만(실행 시점 검사), 툴 설명이 매 요청 프롬프트에 계속 실렸다
+# (하나당 ~100토큰). 게다가 에이전트가 그걸 골라 호출한 뒤 "비활성입니다" 오류를 받는
+# 헛턴을 돈다. 목록 구성 단계에서 빼고, 즉시 차단은 실행 시점 검사로 유지한다.
+def test_disabled_commands_are_not_exposed_as_tools():
+    src = open(os.path.join(ROOT, "mcp_servers", "execution_mcp", "registry.py"),
+               encoding="utf-8").read()
+    assert "WHERE enabled ORDER BY title" in src, "등록 커맨드 조회가 enabled로 걸러지지 않는다"
+
+    server = open(os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"),
+                  encoding="utf-8").read()
+    assert '"enabled"' in server and 'extra_columns=("host_mode", "enabled")' in server, \
+        "내장 커맨드의 활성 상태를 기동 시 읽지 않는다"
+    assert 'if _ov.get("enabled") is False:' in server, "비활성 내장 커맨드를 건너뛰지 않는다"
+    # 즉시 차단(실행 시점 검사)은 그대로 남아 있어야 한다.
+    assert "async def _is_enabled" in server

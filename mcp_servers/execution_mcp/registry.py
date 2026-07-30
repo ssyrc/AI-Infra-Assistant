@@ -154,11 +154,18 @@ def load_registered_sync(login_host_getter, dsn_key: str = "execution_db_dsn") -
 
         c2 = await asyncpg.connect(dsn)
         try:
-            total = await c2.fetchval("SELECT count(*) FROM execution_commands")
+            # **비활성 커맨드는 툴로 내보내지 않는다.** 실행 시점 검사만으로 막으면 툴 설명이
+            # 매 요청 프롬프트에 계속 실리고(하나당 ~100토큰), 에이전트가 골라서 호출한 뒤
+            # "비활성입니다" 오류를 받는 헛턴을 돈다. 끄는 즉시 막히는 건 그대로다
+            # (_is_enabled가 호출 시점에 또 확인한다). 다시 켜면 재시작 후 목록에 나타난다.
+            total = await c2.fetchval(
+                "SELECT count(*) FROM execution_commands WHERE enabled")
+            disabled = await c2.fetchval(
+                "SELECT count(*) FROM execution_commands WHERE NOT enabled") or 0
             rows = await c2.fetch(
                 "SELECT tool_name, title, description, exec_command, args, allow_extra_args, "
                 "host_mode, enabled, required_roles FROM execution_commands "
-                "ORDER BY title LIMIT $1", max_tools)
+                "WHERE enabled ORDER BY title LIMIT $1", max_tools)
         finally:
             await c2.close()
 
@@ -171,6 +178,9 @@ def load_registered_sync(login_host_getter, dsn_key: str = "execution_db_dsn") -
                 name = tool_name_for(row["title"], taken, row["exec_command"])
             taken.add(name)
             tools[name] = build_entry(row, login_host_getter)
+        if disabled:
+            print(f"[execution-mcp] 비활성 커맨드 {disabled}개는 툴 목록에서 제외했습니다"
+                  "(프롬프트 예산 절약). 다시 켜면 재시작 후 나타납니다.")
         return tools, max(0, (total or 0) - len(rows))
 
     try:
