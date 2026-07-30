@@ -19,7 +19,6 @@
   - 등록 내용을 고치면 **Execution MCP 재시작**이 필요하다(툴 목록이 기동 시 1회 구성됨).
 """
 import asyncio
-import hashlib
 import inspect
 import json
 import os
@@ -31,7 +30,7 @@ import asyncpg
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../shared"))
 from ssh_exec import run_ssh_as_user  # noqa: E402
 from execution_exec import (  # noqa: E402
-    DEFAULT_DENY_CSV, build_registered_argv, deny_set,
+    DEFAULT_DENY_CSV, build_registered_argv, deny_set, tool_name_for,
 )
 
 # 실측(#108): 툴 하나가 매 요청 프롬프트에서 약 270자 ≈ 100토큰을 쓴다(스키마 고정분 + 설명).
@@ -43,41 +42,7 @@ DEFAULT_MAX_TOOLS = 80
 # 항상 따라붙는다 - 측정값 약 215자.
 _TOOL_SCHEMA_OVERHEAD = 215
 
-_UNSAFE = re.compile(r"[^A-Za-z0-9_]")
-
 _PY_TYPES = {"str": str, "int": int, "enum": str}
-
-
-def _stable_hash(text: str, length: int) -> str:
-    """프로세스가 바뀌어도 같은 값이 나오는 짧은 해시(툴 이름 고정용).
-    파이썬 hash()는 PYTHONHASHSEED로 매번 달라져 재시작할 때마다 툴 이름이 바뀐다."""
-    return hashlib.sha1((text or "").encode("utf-8")).hexdigest()[:length]
-
-
-def tool_name_for(title: str, taken: set[str], exec_command: str = "") -> str:
-    """사람이 읽는 이름 -> 충돌 없는 ASCII 툴 이름.
-
-    OpenAI 호환 함수 이름 규칙은 `[a-zA-Z0-9_-]{1,64}`라 한글 이름은 그대로 못 쓴다.
-    한글이면 남는 글자가 없어 전부 같은 이름으로 뭉개지므로 **실행 커맨드에서 이름을 만들고**
-    (`phd info -u {user_id}` -> `phd_info`), 그것도 없으면 고정 해시를 붙인다.
-    의미는 툴 '설명'이 담으므로 이름은 서로 구분만 되면 된다.
-    """
-    def _ascii(text: str) -> str:
-        cleaned = re.sub(r"\{[^}]*\}", " ", text or "")
-        toks = [t for t in _UNSAFE.sub(" ", cleaned).split() if t and not t.isdigit()]
-        return "_".join(toks[:2]).lower()
-
-    base = _ascii(title) or _ascii(exec_command) or ("k" + _stable_hash(title, 6))
-    if not base[0].isalpha():
-        base = f"c_{base}"
-    name = base[:60]
-    if name not in taken:
-        return name
-    for i in range(2, 100):
-        alt = f"{name[:57]}_{i}"
-        if alt not in taken:
-            return alt
-    return f"{name[:52]}_{_stable_hash(title, 4)}"
 
 
 def estimate_prompt_tokens(descriptions: list[str]) -> tuple[int, int]:

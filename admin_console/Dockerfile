@@ -31,7 +31,8 @@ RUN pip install --no-cache-dir --find-links /tmp/vendor-wheels -r admin_console/
     && pip install --no-cache-dir --find-links /tmp/vendor-wheels -r admin_console/backend/requirements-docling.txt
 ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY=
 COPY shared/ shared/
-COPY mcp_servers/system_mcp/whitelist.py mcp_servers/system_mcp/whitelist.py
+# 내장 커맨드 목록(메타데이터만 사용). 의존 모듈은 전부 shared/에 있다.
+COPY mcp_servers/execution_mcp/builtin.py mcp_servers/execution_mcp/builtin.py
 COPY admin_console/ admin_console/
 WORKDIR /app/admin_console/backend
 EXPOSE 8080

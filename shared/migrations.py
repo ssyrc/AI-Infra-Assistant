@@ -16,7 +16,7 @@ import json
 import asyncio
 import asyncpg
 
-from execution_exec import DEFAULT_DENY_CSV
+from execution_exec import DEFAULT_DENY_CSV, tool_name_for
 
 PG_HOST = os.environ.get("POSTGRES_HOST", "postgres")
 PG_PORT = os.environ.get("POSTGRES_PORT", "5432")
@@ -904,21 +904,15 @@ async def import_execution_registry():
       2) 한글 이름에서 ASCII 툴 이름을 만드는 규칙이 파이썬 코드(registry.tool_name_for)에 있다.
     여러 번 돌려도 안전하다 - 이미 있는 title은 건너뛴다(관리자가 콘솔에서 고친 값을 덮지 않는다).
     """
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                    "..", "mcp_servers", "execution_mcp"))
-    try:
-        from registry import tool_name_for
-    except ImportError as e:  # noqa: BLE001
-        print(f"[migrate] execution 레지스트리 모듈을 찾지 못해 이관을 건너뜁니다: {e}")
-        return
-
+    # tool_name_for는 shared에 있다. db-init 컨테이너에는 mcp_servers가 마운트되지 않으므로
+    # MCP 쪽 모듈을 import하려 하면 이관이 조용히 건너뛰어진다(실제로 그렇게 실패했다).
     conn = await asyncpg.connect(dsn("command_db"))
     try:
         taken = {r["tool_name"] for r in
                  await conn.fetch("SELECT tool_name FROM execution_commands")}
         have_titles = {r["title"] for r in
                        await conn.fetch("SELECT title FROM execution_commands")}
-        moved = 0
+        moved = unrunnable = 0
 
         # (1) 커맨드 카탈로그(매뉴얼 엑셀 업로드본). 인자 정의가 없고 자유 인자를 허용하던 것들이라
         #     allow_extra_args=true, 로그인 서버 고정으로 옮긴다(지금 동작과 같다).
@@ -928,6 +922,12 @@ async def import_execution_registry():
             if not title or title in have_titles:
                 continue
             exec_command = (r["exec_command"] or "").strip() or title
+            # 실행 커맨드 열이 비어 있으면 예전에는 '이름'을 그대로 실행했다. 이름이 한글이면
+            # 실행될 수 없는 커맨드인데, 툴로 노출되면 프롬프트 예산만 잡아먹고 매번 실패한다.
+            # 옮기기는 하되 **비활성**으로 넣어, 관리자가 콘솔에서 커맨드를 채워 켜게 한다.
+            runnable = exec_command.isascii()
+            if not runnable:
+                unrunnable += 1
             name = tool_name_for(title, taken, exec_command)
             taken.add(name)
             have_titles.add(title)
@@ -936,10 +936,10 @@ async def import_execution_registry():
                 INSERT INTO execution_commands
                     (tool_name, title, description, exec_command, args, allow_extra_args,
                      host_mode, enabled, updated_by)
-                VALUES ($1,$2,$3,$4,'[]'::jsonb, true, 'login_server', true, 'migrate')
+                VALUES ($1,$2,$3,$4,'[]'::jsonb, true, 'login_server', $5, 'migrate')
                 ON CONFLICT (tool_name) DO NOTHING
                 """,
-                name, title, (r["description"] or "").strip(), exec_command)
+                name, title, (r["description"] or "").strip(), exec_command, runnable)
             moved += 1
 
         # (2) 콘솔에서 등록한 System MCP 커스텀 커맨드(다른 DB). argv 리스트 + params를
@@ -1006,6 +1006,9 @@ async def import_execution_registry():
 
         if moved:
             print(f"[migrate] execution_commands로 {moved}건 이관")
+        if unrunnable:
+            print(f"[migrate] 그중 {unrunnable}건은 실행 커맨드가 비어 있어(이름이 한글) "
+                  "**비활성**으로 넣었습니다. 관리자 콘솔 실행 탭에서 실행 커맨드를 채우고 켜세요.")
     finally:
         await conn.close()
 

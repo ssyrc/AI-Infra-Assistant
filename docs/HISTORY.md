@@ -2206,6 +2206,70 @@ LLM에게는 `lines: integer`, `path: string (required)`로 **타입이 붙어**
 구 `system_db`는 지우지 않고 남겼다(되돌릴 수 있게). 예전 실행 로그도 거기 남아 있어서,
 콘솔 실행 로그 화면에는 통합 이후 기록만 보인다.
 
+## 112. #111 통합 배포에서 터진 것 3개 (완료)
+
+전부 내 실수다. 실서버 로그로 확인했다.
+
+### (1) 이관이 조용히 건너뛰어졌다 — 데이터가 하나도 안 옮겨졌다
+
+```
+[migrate] execution 레지스트리 모듈을 찾지 못해 이관을 건너뜁니다: No module named 'registry'
+```
+
+**원인**: `import_execution_registry`가 한글 이름 -> ASCII 툴 이름 규칙(`tool_name_for`)을
+`mcp_servers/execution_mcp/registry.py`에서 import했는데, **db-init 컨테이너에는
+`./shared`만 마운트된다**(`docker-compose.dev.yml`). mcp_servers가 없으니 ImportError.
+
+더 나쁜 건 내가 그 ImportError를 `except ImportError: print(...); return`으로 **삼켰다**는 것이다.
+db-init은 `[migrate] done`을 찍고 성공한 것처럼 끝났고, 카탈로그도 System 커스텀 커맨드도
+새 테이블로 옮겨지지 않았다. 실패를 삼키면 조용히 데이터가 사라진다.
+
+**조치**: `tool_name_for`/`_stable_hash`를 `shared/execution_exec.py`로 옮겼다. 이 규칙은
+Execution MCP·관리자 콘솔·db-init **셋이 모두** 써야 하는 것이라 애초에 shared가 맞는 자리였다.
+try/except도 걷어냈다(이제 못 찾으면 그냥 터진다 — 조용한 실패보다 낫다).
+
+`linux_exec.py`도 같은 이유로 `shared/`로 옮겼다.
+
+### (2) 포트 충돌로 execution-mcp가 못 떴다
+
+```
+Error response from daemon: Bind for 0.0.0.0:8504 failed: port is already allocated
+```
+
+**원인**: 내가 준 절차가 `up -d` **다음에** 예전 컨테이너를 지우게 되어 있었다. 순서가 거꾸로다 —
+`command-mcp`가 8504를 계속 쥐고 있으니 새 컨테이너가 바인딩에 실패한다.
+compose도 `Found orphan containers`로 경고하고 있었다.
+
+**조치**: NEXT-STEPS를 `up -d --no-build --remove-orphans` 한 줄로 고쳤다(별도 삭제 단계 불필요).
+
+### (3) 운영 이미지가 없어진 파일을 복사하고 있었다
+
+`admin_console/Dockerfile`이 `COPY mcp_servers/system_mcp/whitelist.py`를 하고 있었다.
+#111에서 그 파일을 `execution_mcp/builtin.py`로 옮겼으므로 운영 이미지 빌드가 실패한다.
+(dev는 볼륨 마운트라 안 걸렸다 — 그래서 못 봤다.)
+
+**조치**: `COPY mcp_servers/execution_mcp/builtin.py`로 고쳤다. 겸사겸사 발견한 건데
+**예전에도 깨져 있었다** — `whitelist.py` 한 개만 복사했는데 그 파일이 `linux_exec`를
+import했고 linux_exec는 이미지에 없었다. (1)에서 linux_exec를 shared로 옮기면서 함께 해결됐다.
+
+### 검증 방법을 바꿨다
+
+이번엔 **실제 Postgres를 띄워** 통합 전 상태(구 카탈로그 4건 + 커스텀 커맨드 2건 +
+화이트리스트 상태 2건)를 재현하고 이관을 돌렸다. 6건 이관 + 내장 상태 2건 복사 확인,
+세 번 연속 실행해도 6건 유지(멱등) 확인.
+
+회귀 테스트 2개를 추가했는데, **둘 다 고치기 전 코드에서 실패하는지 확인했다**:
+- `test_migration_imports_only_shared` — `PYTHONPATH=shared`, `cwd=/`로 격리해
+  이관에 필요한 모듈이 전부 shared에 있는지 본다. (1)을 되돌리면 실패한다.
+- `test_admin_console_builtin_deps_are_in_shared` — Dockerfile이 없어진 경로를 복사하는지 본다.
+
+### 이관 중에 발견한 것 — 실행할 수 없는 행
+
+구 카탈로그에는 `exec_command`가 비어 있는 행이 있다. 예전에는 그럴 때 **이름을 그대로**
+실행했는데, 이름이 한글이면 실행될 수 없는 커맨드다. 툴로 노출하면 프롬프트 예산만 먹고
+매번 실패한다. 옮기기는 하되 **비활성**으로 넣고, 몇 건인지 로그에 찍는다 —
+관리자가 콘솔에서 실행 커맨드를 채우고 켜면 된다.
+
 ---
 
 ## 다음 항목은 이어서 여기 아래에 추가

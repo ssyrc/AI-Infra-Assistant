@@ -18,11 +18,13 @@ rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker compose -f docker-compose.dev.yml run --rm db-init
-docker compose -f docker-compose.dev.yml up -d --no-build
-docker compose -f docker-compose.dev.yml rm -sf command-mcp system-mcp   # 예전 컨테이너 정리
+docker compose -f docker-compose.dev.yml run --rm --remove-orphans db-init
+docker compose -f docker-compose.dev.yml up -d --no-build --remove-orphans
 docker compose -f docker-compose.dev.yml ps
 ```
+
+⚠️ **`--remove-orphans`가 꼭 필요합니다.** 없으면 예전 `command-mcp`가 8504 포트를 계속 잡고
+있어서 `execution-mcp`가 못 뜹니다(`Bind for 0.0.0.0:8504 failed: port is already allocated`).
 
 `execution-mcp`와 `chart-mcp`가 떠 있고 `command-mcp`/`system-mcp`가 없으면 정상입니다.
 **이미지 재빌드는 필요 없습니다**(새 pip 패키지 없음).
@@ -34,12 +36,21 @@ db-init이 하는 일:
   `catalog_exec_deny_commands` → `execution_deny_commands`) — **바꿔 둔 값은 유지**됩니다
 - 쓰지 않던 커맨드 임베딩 컬럼 삭제(#105 이후로 아무도 읽지 않았는데 업로드가 느렸던 원인)
 
-이관 결과 확인:
+이관 결과 확인 — **`이관` 줄이 나와야 합니다**(지난번엔 안 나왔습니다):
 
 ```bash
-docker compose -f docker-compose.dev.yml logs db-init | grep 이관
+docker compose -f docker-compose.dev.yml run --rm db-init 2>&1 | grep -E "이관|건너뜁"
 docker compose -f docker-compose.dev.yml logs execution-mcp | grep 내장
 ```
+
+```
+[migrate] execution_commands로 N건 이관
+[execution-mcp] 내장 7개 · 등록 N개 · run_command 1개 = 툴 M개 (...)
+```
+
+- `건너뜁니다`가 보이면 알려주세요(지난번 실패 원인은 고쳤습니다).
+- `실행 커맨드가 비어 있어 ... 비활성` 줄이 나오면, 그 커맨드들은 실행 커맨드 열이 비어 있던
+  행입니다. 실행 탭에서 커맨드를 채우고 활성 체크박스를 켜세요.
 
 ## 3. [웹] 매뉴얼 탭 — 활용가이드를 **TSV로 다시 업로드**
 

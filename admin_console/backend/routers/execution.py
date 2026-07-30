@@ -28,14 +28,16 @@ from uploads import (
 )
 from server_files import read_upload_or_server_file
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "../../../mcp_servers/execution_mcp"))
-from builtin import BUILTIN_COMMANDS  # noqa: E402  (메타데이터만 사용, 핸들러는 호출하지 않음)
-from registry import tool_name_for  # noqa: E402
-
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../../shared"))
 from execution_exec import (  # noqa: E402
-    DEFAULT_DENY_CSV, HOST_MODES, deny_set, placeholders_in, validate_definition,
+    DEFAULT_DENY_CSV, HOST_MODES, deny_set, placeholders_in, tool_name_for,
+    validate_definition,
 )
+
+# 내장 커맨드는 **메타데이터만** 쓴다(핸들러는 호출하지 않는다). 이 파일만 이미지에 넣으면 되도록
+# builtin.py의 의존(ssh_exec, linux_exec)은 전부 shared에 있다.
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../../mcp_servers/execution_mcp"))
+from builtin import BUILTIN_COMMANDS  # noqa: E402
 
 router = APIRouter(prefix="/api/execution", tags=["execution"])
 

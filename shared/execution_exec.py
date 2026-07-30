@@ -16,6 +16,7 @@ Execution MCP의 argv 조립 + 차단 목록(blacklist). 등록 커맨드와 미
 치환·분리가 일어나지 않는다 - 다만 `bash -c "..."`처럼 **자기가 셸을 여는 커맨드**는 그 방어를
 무력화하므로 셸 자체를 차단 목록에 넣는다.
 """
+import hashlib
 import re
 import shlex
 
@@ -58,6 +59,46 @@ ARG_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 RESERVED_ARGS = {"user_id", "host"}
 HOST_MODES = ("login_server", "target_server")
+
+
+# MCP 툴 이름에 쓸 수 없는 문자. 등록 이름에는 공백·점·한글이 들어올 수 있다.
+_UNSAFE_NAME = re.compile(r"[^A-Za-z0-9_]")
+
+
+def _stable_hash(text: str, length: int) -> str:
+    """프로세스가 바뀌어도 같은 값이 나오는 짧은 해시(툴 이름 고정용).
+    파이썬 hash()는 PYTHONHASHSEED로 매번 달라져 재시작할 때마다 툴 이름이 바뀐다."""
+    return hashlib.sha1((text or "").encode("utf-8")).hexdigest()[:length]
+
+
+def tool_name_for(title: str, taken: set[str], exec_command: str = "") -> str:
+    """사람이 읽는 이름 -> 충돌 없는 ASCII 툴 이름.
+
+    OpenAI 호환 함수 이름 규칙은 `[a-zA-Z0-9_-]{1,64}`라 한글 이름은 그대로 못 쓴다.
+    한글이면 남는 글자가 없어 전부 같은 이름으로 뭉개지므로 **실행 커맨드에서 이름을 만들고**
+    (`phd info -u {user_id}` -> `phd_info`), 그것도 없으면 고정 해시를 붙인다.
+    의미는 툴 '설명'이 담으므로 이름은 서로 구분만 되면 된다.
+
+    **shared에 두는 이유**: 이 규칙을 Execution MCP·관리자 콘솔·db-init(이관)이 모두 써야 한다.
+    mcp_servers는 db-init/admin-console 컨테이너에 마운트되지 않아, MCP 쪽에 두면
+    이관 단계가 조용히 건너뛰어진다(실제로 그렇게 실패했다).
+    """
+    def _ascii(text: str) -> str:
+        cleaned = re.sub(r"\{[^}]*\}", " ", text or "")
+        toks = [t for t in _UNSAFE_NAME.sub(" ", cleaned).split() if t and not t.isdigit()]
+        return "_".join(toks[:2]).lower()
+
+    base = _ascii(title) or _ascii(exec_command) or ("k" + _stable_hash(title, 6))
+    if not base[0].isalpha():
+        base = f"c_{base}"
+    name = base[:60]
+    if name not in taken:
+        return name
+    for i in range(2, 100):
+        alt = f"{name[:57]}_{i}"
+        if alt not in taken:
+            return alt
+    return f"{name[:52]}_{_stable_hash(title, 4)}"
 
 
 def deny_set(csv_value: str | None) -> set[str]:

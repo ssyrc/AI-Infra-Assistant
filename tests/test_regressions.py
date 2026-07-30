@@ -571,3 +571,33 @@ def test_registered_tool_schema_exposes_declared_args():
     assert schema["required"] == ["path"]
     assert "user_id" not in props and "host" not in props
     assert "args" not in props, "추가 인자를 막았으면 args가 노출되면 안 됨"
+
+
+# --- 11번: 이관 코드가 db-init 컨테이너에서 실제로 import 되어야 한다 -----------------
+# db-init에는 `./shared`만 마운트된다. 이름 생성 규칙을 mcp_servers 쪽에 두었더니
+# `No module named 'registry'`로 이관이 조용히 건너뛰어졌다(실서버에서 그렇게 실패했다).
+# shared만 있는 상태를 흉내내서, 이관에 필요한 것이 전부 shared에 있는지 고정한다.
+def test_migration_imports_only_shared():
+    import subprocess
+    # PYTHONPATH=shared 만 주고, 작업 디렉토리도 저장소 밖으로 두어 mcp_servers를 못 찾게 한다.
+    env = {"PATH": os.environ.get("PATH", ""), "POSTGRES_PASSWORD": "x",
+           "PYTHONPATH": os.path.join(ROOT, "shared")}
+    for code in (
+        "from execution_exec import tool_name_for\n"
+        "assert tool_name_for('내 작업 조회', set(), 'phd info -u {user_id}') == 'phd_info'",
+        "import migrations\nassert hasattr(migrations, 'import_execution_registry')",
+    ):
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                           env=env, cwd="/")
+        assert r.returncode == 0, f"shared만으로 import되지 않음:\n{r.stderr}"
+
+
+def test_admin_console_builtin_deps_are_in_shared():
+    """관리자 콘솔 이미지는 builtin.py 한 개만 복사한다. 그 의존이 shared 밖에 있으면 깨진다
+    (예전엔 linux_exec가 mcp_servers에 있어 운영 이미지에서 ImportError였다)."""
+    for mod in ("ssh_exec", "linux_exec"):
+        assert os.path.exists(os.path.join(ROOT, "shared", f"{mod}.py")), \
+            f"{mod}는 shared/에 있어야 한다(콘솔 이미지가 mcp_servers를 통째로 넣지 않는다)"
+    dockerfile = open(os.path.join(ROOT, "admin_console", "Dockerfile"), encoding="utf-8").read()
+    assert "mcp_servers/execution_mcp/builtin.py" in dockerfile
+    assert "system_mcp" not in dockerfile, "없어진 경로를 복사하면 이미지 빌드가 실패한다"
