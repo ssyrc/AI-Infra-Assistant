@@ -879,3 +879,35 @@ def test_console_role_is_a_select_with_admin_user():
     for v in ('value: ""', 'value: "user"', 'value: "admin"'):
         assert v in html, f"역할 선택지에 {v}가 없다"
     assert 'onChange={ev => setE({ role: ev.target.value })}' in html
+
+
+# --- 17번: multi-turn 기억 오염 ------------------------------------------------------
+# "CPU에서 스크래치 사용법" 다음에 "GPU에서 스크래치 사용법"을 물으면 CPU 절차가 나왔다.
+# 경로가 셋이었다: (1) 요약기가 절차를 장기기억으로 승격, (2) 그 장기기억이 시스템 지시문에
+# '기억된 정보'로 주입돼 근거처럼 쓰임, (3) 대화 이력의 앞 답변 재사용.
+def test_summarizer_refuses_to_memorize_procedures():
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    i = src.index("async def _summarize_turns")
+    prompt = src[i:i + 2500]
+    assert "절대 뽑지 말 것" in prompt, "요약기가 무엇을 배제해야 하는지 명시하지 않는다"
+    for banned in ("사용법", "절차", "명령어", "경로", "옵션", "설정값"):
+        assert banned in prompt, f"요약기 프롬프트에 '{banned}' 배제가 없다"
+
+
+def test_memory_block_is_marked_as_not_evidence():
+    """장기기억 블록은 시스템 지시문에 실린다. '근거가 아니다'가 명시돼야 한다."""
+    from memory_store import format_memory_block
+    block = format_memory_block([{"kind": "fact", "content": "테스트 항목"}])
+    assert "근거가 아닙니다" in block
+    assert "다시 검색" in block
+    assert "테스트 항목" in block
+    # 비어 있으면 아무 것도 붙이지 않는다(빈 헤더가 프롬프트를 먹지 않게).
+    assert format_memory_block([]) == ""
+    assert format_memory_block([{"kind": "fact", "content": ""}]) == ""
+
+
+def test_instruction_covers_same_topic_different_target():
+    instr = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+    assert "주제가 같고 대상만 다른 질문" in instr
+    assert "스크래치" in instr, "실제로 틀렸던 사례가 지시문에 없다"
+    assert "확인되지 않습니다" in instr
