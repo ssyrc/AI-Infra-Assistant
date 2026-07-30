@@ -601,3 +601,72 @@ def test_admin_console_builtin_deps_are_in_shared():
     dockerfile = open(os.path.join(ROOT, "admin_console", "Dockerfile"), encoding="utf-8").read()
     assert "mcp_servers/execution_mcp/builtin.py" in dockerfile
     assert "system_mcp" not in dockerfile, "없어진 경로를 복사하면 이미지 빌드가 실패한다"
+
+
+# --- 12번: --reload-dir가 가리키는 경로는 실제로 있어야 한다 -------------------------
+# uvicorn은 없는 --reload-dir를 주면 "Invalid value" 로 **기동을 거부한다**(컨테이너 즉시 종료).
+# #111에서 mcp_servers/system_mcp을 없앴는데 admin-console 이미지의 CMD가 그걸 감시하고 있어
+# 관리자 콘솔(8501)이 뜨지 않았다. 이미지에 굳은 CMD라 코드만 고쳐도 안 낫는 종류의 사고다.
+def test_reload_dirs_point_at_existing_paths():
+    import re as _re
+    import yaml
+
+    # **git이 아는 파일**로 판단한다. 작업 트리에는 __pycache__만 남은 유령 디렉토리가 있을 수
+    # 있고(git rm은 무시 파일을 지우지 않는다), 서버는 rsync --delete로 그걸 지우므로
+    # os.path.exists로 보면 로컬만 통과하는 가짜 초록이 된다 - 실제로 그렇게 놓쳤다.
+    import subprocess
+    tracked = set(subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True,
+                                 text=True, check=True).stdout.split())
+    tracked_dirs = set()
+    for f in tracked:
+        parts = f.split("/")
+        for i in range(1, len(parts)):
+            tracked_dirs.add("/".join(parts[:i]))
+
+    def exists_in_repo(container_path: str) -> bool:
+        assert container_path.startswith("/app/"), container_path
+        rel = container_path[len("/app/"):]
+        return rel in tracked or rel in tracked_dirs
+
+    checked = 0
+    # compose의 command
+    for f in ("docker-compose.dev.yml", "docker-compose.yml"):
+        spec = yaml.safe_load(open(os.path.join(ROOT, f), encoding="utf-8"))
+        for name, svc in (spec.get("services") or {}).items():
+            cmd = svc.get("command") or []
+            if isinstance(cmd, str):
+                cmd = cmd.split()
+            for i, tok in enumerate(cmd):
+                if tok == "--reload-dir":
+                    assert exists_in_repo(cmd[i + 1]), \
+                        f"{f}:{name} 의 --reload-dir 경로가 저장소에 없음: {cmd[i + 1]}"
+                    checked += 1
+
+    # Dockerfile의 CMD
+    for f in ("dev/Dockerfile.admin-dev", "admin_console/Dockerfile",
+              "dev/Dockerfile.agent-dev", "agent_server/Dockerfile"):
+        path = os.path.join(ROOT, f)
+        if not os.path.exists(path):
+            continue
+        for line in open(path, encoding="utf-8"):
+            if not line.strip().startswith("CMD"):
+                continue
+            toks = _re.findall(r'"([^"]*)"', line)
+            for i, tok in enumerate(toks):
+                if tok == "--reload-dir":
+                    assert exists_in_repo(toks[i + 1]), \
+                        f"{f} 의 --reload-dir 경로가 저장소에 없음: {toks[i + 1]}"
+                    checked += 1
+
+    assert checked > 0, "검사한 --reload-dir가 하나도 없다(테스트가 무의미해짐)"
+
+
+def test_compose_command_overrides_stale_admin_cmd():
+    """관리자 콘솔은 compose에서 command를 지정해야 한다.
+    이미지에 굳은 CMD만 믿으면, 경로가 바뀔 때 **이미지 재빌드 없이는 고칠 수 없다**."""
+    import yaml
+    spec = yaml.safe_load(open(os.path.join(ROOT, "docker-compose.dev.yml"), encoding="utf-8"))
+    cmd = spec["services"]["admin-console"].get("command")
+    assert cmd, "admin-console에 command가 없으면 낡은 CMD가 그대로 쓰인다"
+    assert "/app/mcp_servers/execution_mcp" in cmd
+    assert not any("system_mcp" in str(t) for t in cmd)

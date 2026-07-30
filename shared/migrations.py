@@ -913,6 +913,10 @@ async def import_execution_registry():
         have_titles = {r["title"] for r in
                        await conn.fetch("SELECT title FROM execution_commands")}
         moved = unrunnable = 0
+        # **항상** 출처와 결과 건수를 찍는다. 옮길 게 없을 때 아무 말도 하지 않으면
+        # "이관이 된 건지 안 된 건지" 알 수 없다 - #112에서 실제로 그래서 헷갈렸다.
+        src_catalog = await conn.fetchval("SELECT count(*) FROM command_catalog") or 0
+        already = len(have_titles)
 
         # (1) 커맨드 카탈로그(매뉴얼 엑셀 업로드본). 인자 정의가 없고 자유 인자를 허용하던 것들이라
         #     allow_extra_args=true, 로그인 서버 고정으로 옮긴다(지금 동작과 같다).
@@ -944,6 +948,7 @@ async def import_execution_registry():
 
         # (2) 콘솔에서 등록한 System MCP 커스텀 커맨드(다른 DB). argv 리스트 + params를
         #     새 형식(커맨드 한 줄 + args 정의)으로 바꿔 옮긴다.
+        rows = []
         try:
             sysconn = await asyncpg.connect(dsn("system_db"))
         except Exception as e:  # noqa: BLE001
@@ -1004,8 +1009,14 @@ async def import_execution_registry():
                     s["tool_name"], s["enabled"], s["required_roles"],
                     s["description_override"], s["host_mode"] or "target_server")
 
-        if moved:
-            print(f"[migrate] execution_commands로 {moved}건 이관")
+        src_custom = 0 if sysconn is None else len(rows)
+        total_now = await conn.fetchval("SELECT count(*) FROM execution_commands") or 0
+        print(f"[migrate] execution 이관: 카탈로그 {src_catalog}건 · 구 커스텀 커맨드 "
+              f"{src_custom}건 · 이미 옮겨져 있던 것 {already}건 → 신규 {moved}건, "
+              f"현재 등록 커맨드 총 {total_now}건")
+        if src_catalog == 0 and src_custom == 0 and total_now == 0:
+            print("[migrate] 옮길 커맨드가 없습니다. 구 카탈로그가 비어 있다는 뜻이니, "
+                  "관리자 콘솔 실행 탭에서 직접 등록하거나 엑셀로 일괄 등록하세요.")
         if unrunnable:
             print(f"[migrate] 그중 {unrunnable}건은 실행 커맨드가 비어 있어(이름이 한글) "
                   "**비활성**으로 넣었습니다. 관리자 콘솔 실행 탭에서 실행 커맨드를 채우고 켜세요.")

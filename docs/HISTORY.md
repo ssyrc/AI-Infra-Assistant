@@ -2270,6 +2270,62 @@ import했고 linux_exec는 이미지에 없었다. (1)에서 linux_exec를 share
 매번 실패한다. 옮기기는 하되 **비활성**으로 넣고, 몇 건인지 로그에 찍는다 —
 관리자가 콘솔에서 실행 커맨드를 채우고 켜면 된다.
 
+## 113. 관리자 콘솔(8501)이 안 뜬 이유 + 이관 로그가 침묵한 이유 (완료)
+
+### 관리자 콘솔이 죽어 있었다 — 이미지에 굳은 CMD
+
+`docker compose ps`에 **admin-console이 없었다**(죽은 컨테이너는 목록에 안 나온다).
+Open WebUI(8502)는 되는데 8501만 안 되는 이유였다.
+
+원인은 `dev/Dockerfile.admin-dev`의 CMD다.
+
+```
+CMD [... "--reload", "--reload-dir", "/app/admin_console", "--reload-dir", "/app/shared",
+     "--reload-dir", "/app/mcp_servers/system_mcp"]
+```
+
+#111에서 `mcp_servers/system_mcp`를 없앴고, 서버에서는 rsync `--delete`가 그 디렉토리를
+지웠다. **uvicorn은 없는 `--reload-dir`를 주면 기동을 거부한다**:
+`Error: Invalid value for '--reload-dir': Path '...' does not exist.` → 컨테이너 즉시 종료.
+
+이 종류가 특히 나쁘다: **CMD는 이미지에 굳어 있어서 코드를 고치고 rsync해도 낫지 않는다.**
+그래서 `docker-compose.dev.yml`의 admin-console에 `command:`를 명시해 이미지의 CMD를
+덮어썼다 — **이미지 재빌드 없이** 고쳐진다. Dockerfile의 CMD도 함께 고쳤고(다음 빌드용),
+경로가 바뀔 수 있는 mcp_servers는 이제 Dockerfile에 넣지 않는다.
+
+### 이관 로그가 아무 말도 안 했다
+
+```
+$ docker compose run --rm db-init 2>&1 | grep -E "이관|건너뜁"
+(빈 출력)
+```
+
+`moved == 0`일 때 아무것도 찍지 않게 만들어 놨었다. 그러면 **"이관이 된 건지 안 된 건지"를
+구분할 수 없다** — #112를 겪은 직후인데 또 같은 방식으로 판단을 막았다.
+
+**항상** 출처와 결과를 찍게 했다.
+
+```
+[migrate] execution 이관: 카탈로그 2건 · 구 커스텀 커맨드 0건 · 이미 옮겨져 있던 것 2건
+          → 신규 0건, 현재 등록 커맨드 총 2건
+```
+
+세 상황(옮길 것 있음 / 이미 다 옮겨짐 / 원본이 빔)을 실제 Postgres로 각각 확인했다.
+원본이 완전히 비어 있으면 "콘솔에서 직접 등록하세요"까지 안내한다.
+
+### 테스트가 가짜 초록이었다 — 유령 디렉토리
+
+`--reload-dir` 경로 검사 테스트를 처음엔 `os.path.exists`로 썼는데 **통과했다.**
+`git rm`은 무시 파일(`__pycache__`)을 지우지 않아서 작업 트리에 `mcp_servers/system_mcp/`가
+빈 껍데기로 남아 있었다. 서버는 rsync `--delete`로 그걸 지우므로 로컬만 통과하는 초록이었다.
+
+→ `git ls-files`로 **git이 아는 경로**를 기준으로 판단하게 고쳤다. 고치기 전 CMD로 되돌려
+실패하는 것까지 확인했다(처음엔 그 확인에서도 통과해서 테스트가 잘못됐음을 알았다).
+로컬의 유령 디렉토리도 지웠다.
+
+**교훈**: 배포 환경과 로컬의 차이(rsync --delete, 이미지에 굳은 CMD, 컨테이너별 마운트)는
+`os.path.exists` 같은 로컬 사실로 검증할 수 없다. 저장소가 진실의 원천이어야 한다.
+
 ---
 
 ## 다음 항목은 이어서 여기 아래에 추가

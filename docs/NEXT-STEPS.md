@@ -52,6 +52,25 @@ docker compose -f docker-compose.dev.yml logs execution-mcp | grep 내장
 - `실행 커맨드가 비어 있어 ... 비활성` 줄이 나오면, 그 커맨드들은 실행 커맨드 열이 비어 있던
   행입니다. 실행 탭에서 커맨드를 채우고 활성 체크박스를 켜세요.
 
+## 2-1. [서버] 관리자 콘솔(8501)이 안 떴던 것 — 이번엔 뜹니다
+
+`admin-console` 컨테이너가 죽어 있었습니다. 이미지에 굳어 있던 실행 명령이 없어진
+`mcp_servers/system_mcp`를 감시하고 있었고, uvicorn은 없는 경로를 주면 **기동을 거부**합니다.
+compose에서 실행 명령을 덮어쓰도록 고쳤으니 **재빌드 없이** 됩니다.
+
+```bash
+cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
+docker compose -f docker-compose.dev.yml up -d --no-build admin-console
+docker compose -f docker-compose.dev.yml ps admin-console
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8501/
+```
+
+`ps`에 `Up` 으로 보이고 curl이 200(또는 401)이면 정상입니다. 그래도 안 뜨면:
+
+```bash
+docker compose -f docker-compose.dev.yml logs --tail=30 admin-console
+```
+
 ## 3. [웹] 매뉴얼 탭 — 활용가이드를 **TSV로 다시 업로드**
 
 TSV는 이미 매뉴얼 탭에서도 됩니다(파일 선택창에 `.tsv` 포함). 탭 구분이라

@@ -33,4 +33,7 @@ ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= no_proxy= NO_PROXY= \
 WORKDIR /app/admin_console/backend
 ENV DISABLE_DOCLING=1
 EXPOSE 8080
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload", "--reload-dir", "/app/admin_console", "--reload-dir", "/app/shared", "--reload-dir", "/app/mcp_servers/system_mcp"]
+# --reload-dir에 **없는 경로**를 주면 uvicorn이 아예 기동을 거부한다(컨테이너가 즉시 종료).
+# 경로가 바뀔 수 있는 mcp_servers는 여기 넣지 않고, compose의 command에서 지정한다
+# (이미지를 다시 만들지 않고 고칠 수 있게).
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload", "--reload-dir", "/app/admin_console", "--reload-dir", "/app/shared"]

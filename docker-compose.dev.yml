@@ -193,6 +193,12 @@ services:
   admin-console:
     image: ai-infra-assistant-admin-console:latest
     build: { context: ., dockerfile: dev/Dockerfile.admin-dev, args: *pyargs }
+    # 이미지에 굳어 있는 CMD를 여기서 덮어쓴다. 예전 CMD는 없어진 mcp_servers/system_mcp를
+    # --reload-dir로 감시했고, uvicorn은 없는 경로를 주면 **기동을 거부**한다(컨테이너 즉시 종료).
+    # compose에서 지정하면 이미지를 다시 만들지 않고 고칠 수 있다.
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload",
+              "--reload-dir", "/app/admin_console", "--reload-dir", "/app/shared",
+              "--reload-dir", "/app/mcp_servers/execution_mcp"]
     volumes:
       - ./admin_console:/app/admin_console:ro
       - ./shared:/app/shared:ro
