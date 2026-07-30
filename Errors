@@ -14,3 +14,6 @@
 - job 리스트 보여달라고 하면 원래 잘 빠르게 됐었고 표로 잘 정리해서 보여줬었는데, 이제 너무 느리게 실행되고 간단하게 리스트 형식으로 보여줌. 
   마찬가지로 세션이 제대로 시작되고 있는지, mcp 가 제대로 동작하고 있는지, 결과를 agent 가 적절히 보여줄 수 있어야 함.
 
+3. chart_mcp
+- gpu 인프라 현황 차트로 보여달라고 하면, 이런 에러가 뜸. [오류가 발생했습니다: litellm.ContextWindowExceededError: litellm.BadRequestError: ContextWindowExceededError: OpenAIException - Error code: 400 - {'error': {'message': "This model's maximum context length is 32768 tokens. However, your request has 59360 input tokens. Please reduce the length of the input messages. None", 'type': 'BadRequestError', 'param': None, 'code': 400}}]
+  제대로 작동하고 있지 않음. git 코드를 그대로 가져와야하는지? 아직도 관리자 콘솔에 chart_public_base_url 파라미터가 있던데 뭔지?
