@@ -65,7 +65,7 @@ class ArgIn(BaseModel):
 
 class CommandIn(BaseModel):
     """title: 사람이 읽는 이름(한글 가능). tool_name은 서버가 만들어 준다(ASCII 규칙).
-    exec_command: `phd info -u {user_id}` / `head -n {lines} {path}` 형태의 커맨드 한 줄."""
+    exec_command: `myquota` / `head -n {lines} {path}` 형태의 커맨드 한 줄."""
     title: str
     description: str = ""
     exec_command: str

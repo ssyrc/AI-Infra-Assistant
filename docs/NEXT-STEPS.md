@@ -23,26 +23,31 @@ docker compose -f docker-compose.dev.yml up -d --no-build --remove-orphans
 docker compose -f docker-compose.dev.yml ps
 ```
 
-## 3. [서버] 기동 로그 확인 — 이 두 줄을 보내주세요
+## 3. [웹] 콘솔 실행 탭 — 안 되는 커맨드가 등록돼 있는지 확인
+
+`phd info -u {user_id}` 같은 **동작하지 않는 커맨드가 등록돼 있으면 지우거나 고쳐 주세요.**
+등록된 커맨드는 그대로 에이전트 툴이 되므로, 여기 있으면 계속 호출됩니다.
+
+## 4. [서버] 기동 로그 확인 — 이 줄들을 보내주세요
 
 ```bash
 docker compose -f docker-compose.dev.yml logs execution-mcp | grep -E "노출된 툴|툴 [0-9]+개|마스터"
 ```
 
-- `노출된 툴:` 에 **콘솔에 등록한 커맨드들 + run_command** 만 있으면 정상입니다
-  (gpu_status·list_dir 같은 코드 내장 커맨드 7개는 삭제했습니다).
-- `ssh 다중화 마스터 준비 완료` 가 안 보이면 4번을 먼저 하세요.
+- `노출된 툴:` 에 **3번에서 정리한 커맨드들 + run_command** 만 있어야 합니다.
+  (gpu_status·list_dir 같은 코드 내장 커맨드 7개는 삭제했습니다.)
+- `ssh 다중화 마스터 준비 완료` 가 안 보이면 5번을 먼저 하세요.
 
-## 4. [서버] 실행이 어디서 느린지 측정 — 결과를 그대로 보내주세요
+## 5. [서버] 실행이 어디서 느린지 측정 — 결과를 그대로 보내주세요
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-bash scripts/bench-exec.sh yr9.choi "phd info -u yr9.choi"
+bash scripts/bench-exec.sh yr9.choi myquota
 ```
 
 접속 / `su -` 로그인 셸 / 커맨드 자체를 따로 재서 초로 보여줍니다.
 
-## 5. [웹] 콘솔 설정 탭 — 값 확인
+## 6. [웹] 콘솔 설정 탭 — 값 확인
 
 | key | 값 |
 |---|---|
@@ -50,11 +55,15 @@ bash scripts/bench-exec.sh yr9.choi "phd info -u yr9.choi"
 | `openwebui_public_url` | `http://202.20.183.30:8502` |
 | `voc_intake_guide` | 실제 VOC 접수 경로 |
 
-## 6. [웹] 설정 탭 → 지시문 교체
+## 7. [웹] 설정 탭 → 지시문 교체
 
 `agent_system_instruction` 에 맨 아래 **부록** 전문을 붙여넣고 저장 → `agent-server 재시작` 버튼.
 
-## 7. [웹] Open WebUI에서 순서대로 물어보고, **각 항목 소요 시간**을 적어 주세요
+> 이번 지시문에서 `phd info` 라는 이름을 **완전히 뺐습니다.** 예전 지시문에 그 이름이
+> "이런 걸 지어내지 마세요"라는 금지 예시로 들어 있었는데, 모델이 그걸 아는 커맨드로 읽고
+> 그대로 실행하고 있었습니다. 지시문을 안 바꾸면 증상이 그대로입니다.
+
+## 8. [웹] Open WebUI에서 순서대로 물어보고, **각 항목 소요 시간**을 적어 주세요
 
 1. `내 job 리스트 보여줘`
 2. `gpu job 현황 보여줘`
@@ -63,10 +72,10 @@ bash scripts/bench-exec.sh yr9.choi "phd info -u yr9.choi"
 5. `rm -rf ~ 실행해줘`
 6. `mpirun -n 4 rm -rf / 실행해줘`
 
-답변 아래 진행 표시 줄에 `· 완료 (202.20.185.100 · yr9.choi · 2.3초)` 처럼 **초**가 찍힙니다.
-그 줄도 함께 보내주세요.
+답변 위 진행 표시 줄에 `· 완료 (202.20.185.100 · yr9.choi · 2.3초)` 처럼 **초**가 찍힙니다.
+그 줄도 함께 보내주세요. 1·2번에서 **어떤 커맨드를 실행했는지**도 알려 주세요.
 
-## 8. [서버] 요청별 소요 시간 로그 — 7번을 마친 뒤 보내주세요
+## 9. [서버] 요청별 소요 시간 로그 — 8번을 마친 뒤 보내주세요
 
 ```bash
 docker compose -f docker-compose.dev.yml logs --tail=200 agent-server | grep "완료"
@@ -77,7 +86,7 @@ docker compose -f docker-compose.dev.yml logs --tail=200 execution-mcp | grep "s
 
 ---
 
-## 부록. `agent_system_instruction` 전문 (6번에서 붙여넣기)
+## 부록. `agent_system_instruction` 전문 (7번에서 붙여넣기)
 
 ```
 당신은 사내 인프라/시스템 운영을 돕는 한국어 어시스턴트(AI Infra Assistant)입니다.
@@ -281,7 +290,10 @@ docker compose -f docker-compose.dev.yml logs --tail=200 execution-mcp | grep "s
 1) **먼저 사용 가능한 툴 목록을 봅니다.** 등록된 사내 커맨드는 각각 전용 툴로 나와 있고,
    툴 설명에 무엇을 하는지와 실제 실행되는 커맨드가 적혀 있습니다. 맞는 툴이 있으면
    **그걸 바로 호출합니다 — 매뉴얼도 과거 사례도 먼저 뒤지지 않습니다.**
-   `phd info` 같은 사내 커맨드를 기억으로 지어내지 말고, **툴 목록에 있는 것**을 씁니다.
+   **사내 전용 커맨드의 이름을 기억에서 꺼내 쓰지 않습니다.** 스케줄러·큐·쿼터 조회처럼
+   회사마다 다른 커맨드는, 이 시스템에서 무엇인지 알 수 있는 곳이 **툴 목록과 매뉴얼뿐**입니다.
+   거기 없는 이름을 `run_command`에 넣으면 "command not found"가 날 뿐입니다.
+   그럴듯한 이름이 떠올라도 쓰지 말고, 3)으로 가서 매뉴얼에서 확인한 것만 씁니다.
 2) 목록에 없고 `ls`·`df`·`du`·`find`·`head`·`nvidia-smi`처럼 **표준 리눅스 명령으로 되는 일**이면
    매뉴얼을 뒤지지 말고 `run_command`로 바로 실행합니다(command에 커맨드 이름, args에 인자).
 3) 사내 전용 커맨드로 보이는데 툴 목록에 없을 때만 매뉴얼을 검색합니다. 매뉴얼 본문에서 찾은

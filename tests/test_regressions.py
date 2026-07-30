@@ -70,7 +70,7 @@ def _make_pptx_with_table(path):
     s.shapes.title.text = "커맨드 표"
     tbl = s.shapes.add_table(2, 2, Inches(1), Inches(2), Inches(6), Inches(1)).table
     tbl.cell(0, 0).text = "명령어"; tbl.cell(0, 1).text = "설명"
-    tbl.cell(1, 0).text = "phd info"; tbl.cell(1, 1).text = "job 정보 조회"
+    tbl.cell(1, 0).text = "quota report"; tbl.cell(1, 1).text = "job 정보 조회"
     prs.save(path)
 
 
@@ -79,7 +79,7 @@ def test_pptx_extracts_table_text(tmp_path):
     _make_pptx_with_table(p)
     chunks = parse_file(p)
     joined = "\n".join(c.chunk_text for c in chunks)
-    assert "phd info" in joined
+    assert "quota report" in joined
     assert "job 정보 조회" in joined
 
 
@@ -213,8 +213,8 @@ def test_catalog_tool_names_are_ascii_and_stable():
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
 
-    cases = [("myquota", "myquota"), ("phd info", "phd info -u {user_id}"),
-             ("내 작업 조회", "phd info -u {user_id}"), ("작업목록", ""), ("작업이력", "")]
+    cases = [("myquota", "myquota"), ("quota report", "quota report -u {user_id}"),
+             ("내 작업 조회", "quota report -u {user_id}"), ("작업목록", ""), ("작업이력", "")]
     taken, names = set(), []
     for name, exe in cases:
         n = m.tool_name_for(name, taken, exe)
@@ -275,7 +275,7 @@ def test_estimate_prompt_tokens_counts_schema_overhead():
 # --- 8번: 카탈로그 커맨드의 args는 자유 입력이다 - 두 가지를 막아야 한다 ---------------
 # (1) deny 목록을 argv[0]에만 걸면 '인자를 실행하는 커맨드'로 빠져나간다(`srun rm -rf ~`).
 #     srun/sbatch는 정상 사용이라 커맨드 자체는 막을 수 없으므로 인자 쪽에서 막는다.
-# (2) `{user_id}`로 고정한 옵션을 뒤에 다시 주면 값이 덮인다(`phd info -u 나 -u 남`).
+# (2) `{user_id}`로 고정한 옵션을 뒤에 다시 주면 값이 덮인다(`<커맨드> -u 나 -u 남`).
 #     대부분의 CLI가 뒤엣것을 쓰므로, "user_id는 호출자 신원에서 강제 주입한다"는 보장이
 #     이 경로에서만 깨진다. OS 권한은 본인이지만 커맨드가 남의 정보를 뿌릴 수 있다.
 def test_registered_args_cannot_bypass_deny_or_impersonate():
@@ -286,9 +286,9 @@ def test_registered_args_cannot_bypass_deny_or_impersonate():
         return build_registered_argv(exec_command, [], {}, args, "yr9.choi", deny, True)
 
     # 인자 없이도 그대로 실행된다({user_id}만 치환).
-    assert build("phd info -u {user_id}", None) == ["phd", "info", "-u", "yr9.choi"]
-    assert build("phd info -u {user_id}", []) == ["phd", "info", "-u", "yr9.choi"]
-    assert build("phd info -u {user_id}", ["-a"])[-1] == "-a"
+    assert build("quota report -u {user_id}", None) == ["quota", "report", "-u", "yr9.choi"]
+    assert build("quota report -u {user_id}", []) == ["quota", "report", "-u", "yr9.choi"]
+    assert build("quota report -u {user_id}", ["-a"])[-1] == "-a"
 
     # (1) 래퍼 커맨드의 인자로 파괴적 명령을 넘기면 거부.
     for args in (["rm", "-rf", "~"], ["chmod", "777", "/"], ["sudo", "id"]):
@@ -303,16 +303,16 @@ def test_registered_args_cannot_bypass_deny_or_impersonate():
     # (2) 호출자로 고정된 옵션의 재지정은 거부(= 형태 포함).
     for args in (["-u", "someone_else"], ["-u=someone_else"]):
         with pytest.raises(PermissionError):
-            build("phd info -u {user_id}", args)
+            build("quota report -u {user_id}", args)
 
     # 셸 주입은 예전처럼 '통과하되 무해'해야 한다(quote되어 한 덩어리 인자가 됨).
-    assert build("phd info -u {user_id}", ["; rm -rf /"])[-1] == "; rm -rf /"
+    assert build("quota report -u {user_id}", ["; rm -rf /"])[-1] == "; rm -rf /"
 
 
 def test_remote_command_quotes_injection_attempts():
     """`su - user -c <문자열>`은 셸을 거치므로 인용이 유일한 방어선이다."""
     from ssh_exec import _remote_command
-    cmd = _remote_command("yr9.choi", ["phd", "info", "; rm -rf /", "`whoami`", "$(id)"])
+    cmd = _remote_command("yr9.choi", ["quota", "report", "; rm -rf /", "`whoami`", "$(id)"])
     assert cmd.startswith("su - yr9.choi -c ")
     # 메타문자가 인용 밖으로 새 나가면 안 된다.
     for danger in ("; rm -rf /", "`whoami`", "$(id)"):
@@ -483,7 +483,7 @@ def test_execution_registration_rejects_dangerous_templates():
         validate_definition("my_tool", "myquota", [{"name": "x", "type": "str"}],
                             "login_server", deny)
     # 정상 등록은 통과해야 한다.
-    validate_definition("my_tool", "phd info -u {user_id}", [], "login_server", deny)
+    validate_definition("my_tool", "quota report -u {user_id}", [], "login_server", deny)
     validate_definition("my_tool", "head -n {lines} {path}",
                         [{"name": "lines", "type": "int"}, {"name": "path", "type": "str"}],
                         "login_server", deny)
@@ -563,7 +563,7 @@ def test_migration_imports_only_shared():
            "PYTHONPATH": os.path.join(ROOT, "shared")}
     for code in (
         "from execution_exec import tool_name_for\n"
-        "assert tool_name_for('내 작업 조회', set(), 'phd info -u {user_id}') == 'phd_info'",
+        "assert tool_name_for('내 작업 조회', set(), 'quota report -u {user_id}') == 'quota_report'",
         "import migrations\nassert hasattr(migrations, 'import_execution_registry')",
     ):
         r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
@@ -836,6 +836,23 @@ def test_session_history_is_written_without_reloading_the_session():
     body = _re.search(r"async def _create_session\(.*?\n    return session_id", src, _re.S).group(0)
     assert "svc.get_session(" not in body, "이력 한 턴마다 세션을 다시 읽고 있다"
     assert "append_event" in body
+
+
+def test_instruction_names_no_in_house_command():
+    """지시문에 **사내 전용 커맨드 이름을 쓰지 않는다** — 금지 예시로도 쓰지 않는다.
+
+    "`phd info` 같은 커맨드를 지어내지 마세요"라고 적어 뒀더니, 모델이 그 이름을 그대로
+    가져다 실행했다. 지시문은 매 요청 시스템 프롬프트라, 거기 적힌 문자열은 '금지 목록'이
+    아니라 '아는 커맨드'로 읽힌다. #74에서 컴파일 옵션을 예시로 들었다가 같은 사고를 냈다.
+    표준 리눅스 명령(ls·df·find …)은 실제로 존재하므로 예외다.
+    """
+    import re as _re
+    src = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+    instr = _re.search(r'AGENT_INSTRUCTION = """(.*?)"""', src, _re.S).group(1)
+    # 이 시스템에 있는지 우리가 확인할 수 없는 커맨드 이름들(과거에 지시문에 새어 들어간 것 포함).
+    forbidden = ["phd ", "myquota", "squeue", "sinfo", "sbatch", "bsub", "qstat", "lsload"]
+    hits = [w for w in forbidden if w in instr]
+    assert not hits, f"지시문에 사내 커맨드 이름이 있다(모델이 그대로 쓴다): {hits}"
 
 
 def test_instruction_routes_own_resource_checks_straight_to_execution():

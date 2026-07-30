@@ -2,7 +2,7 @@
 # 커맨드 실행이 **어디서** 느린지 초 단위로 쪼개 본다. 폐쇄망 배포 호스트(202.20.183.30)에서 실행.
 #
 #   bash scripts/bench-exec.sh <계정> [커맨드] [호스트IP]
-#   예) bash scripts/bench-exec.sh yr9.choi "phd info -u yr9.choi"
+#   예) bash scripts/bench-exec.sh yr9.choi myquota
 #
 # 한 번의 커맨드 실행 시간은 세 덩어리로 나뉜다.
 #   (1) 접속        TCP + 키교환. 다중화 마스터가 서 있으면 0에 가깝다.

@@ -76,7 +76,7 @@ def tool_name_for(title: str, taken: set[str], exec_command: str = "") -> str:
 
     OpenAI 호환 함수 이름 규칙은 `[a-zA-Z0-9_-]{1,64}`라 한글 이름은 그대로 못 쓴다.
     한글이면 남는 글자가 없어 전부 같은 이름으로 뭉개지므로 **실행 커맨드에서 이름을 만들고**
-    (`phd info -u {user_id}` -> `phd_info`), 그것도 없으면 고정 해시를 붙인다.
+    (`quota report -u {user_id}` -> `quota_report`), 그것도 없으면 고정 해시를 붙인다.
     의미는 툴 '설명'이 담으므로 이름은 서로 구분만 되면 된다.
 
     **shared에 두는 이유**: 이 규칙을 Execution MCP·관리자 콘솔·db-init(이관)이 모두 써야 한다.
@@ -283,7 +283,7 @@ def build_registered_argv(exec_command: str, arg_specs: list, values: dict,
             raise PermissionError(
                 f"인자로 준 '{hit}'는 파괴적이거나 다른 명령을 대신 실행할 수 있어 거부했습니다.")
         # `{user_id}`로 호출자를 고정한 커맨드에서 같은 옵션을 다시 주면 값이 덮인다
-        # (`phd info -u 나 -u 남` -> 대부분의 CLI가 뒤엣것을 쓴다). 남의 자원을 볼 수 있게 되므로
+        # (`<커맨드> -u 나 -u 남` -> 대부분의 CLI가 뒤엣것을 쓴다). 남의 자원을 볼 수 있게 되므로
         # 이미 고정된 옵션의 재지정 자체를 막는다.
         if "{user_id}" in (exec_command or ""):
             fixed = {t for t in split_command(exec_command) if t.startswith("-") and len(t) > 1}
