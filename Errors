@@ -1,19 +1,14 @@
-[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml ps
-NAME                                 IMAGE                                    COMMAND                  SERVICE         CREATED         STATUS                  PORTS
-ai-infra-assistant-agent-server-1    ai-infra-assistant-agent-server:latest   "uvicorn main:app --…"   agent-server    2 days ago      Up 14 hours             0.0.0.0:8500->8000/tcp, [::]:8500->8000/tcp
-ai-infra-assistant-chart-mcp-1       ai-infra-assistant-mcp:dev               "watchfiles --filter…"   chart-mcp       9 minutes ago   Up 9 minutes            8001/tcp, 0.0.0.0:8509->8005/tcp, [::]:8509->8005/tcp
-ai-infra-assistant-execution-mcp-1   ai-infra-assistant-mcp:dev               "watchfiles --filter…"   execution-mcp   9 minutes ago   Up 1 second             8001/tcp, 0.0.0.0:8504->8002/tcp, [::]:8504->8002/tcp
-ai-infra-assistant-manual-mcp-1      ai-infra-assistant-mcp:dev               "watchfiles --filter…"   manual-mcp      2 days ago      Up 15 hours             0.0.0.0:8503->8001/tcp, [::]:8503->8001/tcp
-ai-infra-assistant-mock-vllm-1       ai-infra-assistant-mock-vllm:latest      "uvicorn mock_vllm:a…"   mock-vllm       2 days ago      Up 15 hours             8000/tcp
-ai-infra-assistant-open-webui-1      ghcr.io/open-webui/open-webui:v0.6.5     "bash start.sh"          open-webui      18 hours ago    Up 18 hours (healthy)   0.0.0.0:8502->8080/tcp, [::]:8502->8080/tcp
-ai-infra-assistant-postgres-1        docker.io/pgvector/pgvector:pg16         "docker-entrypoint.s…"   postgres        39 hours ago    Up 39 hours (healthy)   0.0.0.0:8507->5432/tcp, [::]:8507->5432/tcp
-ai-infra-assistant-voc-mcp-1         ai-infra-assistant-mcp:dev               "watchfiles --filter…"   voc-mcp         2 days ago      Up 15 hours             8001/tcp, 0.0.0.0:8505->8003/tcp, [::]:8505->8003/tcp
-[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml run --rm db-init 2>&1 | grep -E "이관|건너뜁"
+1. manual_mcp
+ 답변은 잘 하는데, 마지막에 문서 참고하라고 할 때 문서 위치 보여주기는 하는데, 좀 간추려서 보여짐. url 이 안 나옴.
+ 문서 위치(참고 경로) 로 지정한 위치가 아래와 같이 보여야 함. 
 
-[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml logs execution-mcp | grep 내장
-execution-mcp-1  | [execution-mcp] 내장 7개 · 등록 1개 · run_command 1개 = 툴 9개 (스키마 2,666자 ≈ 941토큰/요청)
-[root@24-gp19 AI-Infra-Assistant]#
-[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml run --rm db-init 2>&1 | grep -E "이관|건너뜁"
-[root@24-gp19 AI-Infra-Assistant]#
-[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml logs execution-mcp | grep 내장
-execution-mcp-1  | [execution-mcp] 내장 7개 · 등록 1개 · run_command 1개 = 툴 9개 (스키마 2,666자 ≈ 941토큰/요청)
+ 자세한 내용은 다음 문서를 참고하세요: 
+  - 가이드 위치: "내가 지정한 문서 위치"
+  - 가이드 문서: "가이드 문서 제목들 나열"
+
+2. execution_mcp
+- 내 홈디렉토리 파일들 보여달라고 하면, 202.20.185.100 서버에 user id로 ssh 한 세션에서 실행한 ls 값이 아니라 이상한 다른 값을 보여줌.
+ 채팅이 시작될 때 ssh 가 제대로 되는지, execution_mcp가 그 세션을 제대로 활용하고 있는지 확인 필요
+- job 리스트 보여달라고 하면 원래 잘 빠르게 됐었고 표로 잘 정리해서 보여줬었는데, 이제 너무 느리게 실행되고 간단하게 리스트 형식으로 보여줌. 
+  마찬가지로 세션이 제대로 시작되고 있는지, mcp 가 제대로 동작하고 있는지, 결과를 agent 가 적절히 보여줄 수 있어야 함.
+
