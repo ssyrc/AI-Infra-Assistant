@@ -26,3 +26,17 @@
 
 그리고 왜자꾸 phd info -u (user.id) 는 쓰는거야? 잘못된 커맨드야 절대 쓰지마.
 
+2. openwebui 에서 질문 후 로그
+[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml logs --tail=200 execution-mcp | grep "ssh_exec"
+execution-mcp-1  | [ssh_exec] phd 25,048ms (새 접속 · 202.20.185.100 · yr9.choi)
+
+또 gpu job 현황 보여달라고 하니 오류 발생
+[오류가 발생했습니다: Expecting value: line 1 column 11 (char 10)]
+
+홈 파일 리스트 보여달라고 하니 또 이상한 얘기함. command_mcp 가 제대로 동작하는거야? user.id 로 실행해야 한다고 말귀를 못알아들어?
+· 'ls' 실행하는 중
+· 확인 완료 
+
+/home/ops_assistant 경로가 존재하지 않습니다. 홈 디렉터리 경로를 확인해 주세요. 
+
+
