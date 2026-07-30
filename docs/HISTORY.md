@@ -2377,6 +2377,67 @@ MCP 툴 결과는 **그대로 다음 요청 프롬프트에 실린다**(#110에�
 `chart_public_base_url`을 넣으면 예전처럼 URL 방식으로 돈다. 답변을 가볍게 하고 브라우저 캐시를
 쓰고 싶을 때의 선택지다. **기본값은 비움이고 그게 권장값이다**(콘솔 안내문도 그렇게 고쳤다).
 
+## 115. "내 홈 파일 리스트"가 로그인 서버에서 실행되지 않은 원인 (완료)
+
+원인을 찾았다. **자동 생성되는 상태 행이 실행 위치를 조용히 덮어쓰고 있었다.**
+
+`_is_enabled`는 처음 실행되는 내장 커맨드의 상태 행을 이렇게 만든다.
+
+```sql
+INSERT INTO execution_builtin_state (tool_name, enabled) VALUES ($1, $2)
+```
+
+`host_mode`를 안 넣었으니 **컬럼 기본값 `'target_server'`가 박힌다.** 그런데 코드는
+`list_dir`/`find_files`/`read_file_head`를 `login_server`로 고정해 뒀다(로그인 서버에서
+본인 홈을 보는 툴이다). 다음 재시작 때 `_OVERRIDES`가 DB 값을 우선하므로 실행 위치가
+`target_server`로 바뀌고, 그러면 **`host`가 LLM 스키마에 노출된다.** 모델이 서버를 골라
+넣으면 "내 홈 파일 리스트"가 엉뚱한 서버에서 조회된다.
+
+실제 Postgres로 재현했다.
+
+```
+INSERT INTO execution_builtin_state (tool_name, enabled) VALUES ('list_dir', true);
+ tool_name | enabled |   host_mode   | updated_by
+ list_dir  | t       | target_server |            ← 코드는 login_server인데
+```
+
+**구 System MCP에서 그대로 물려온 버그다**(같은 패턴, 같은 컬럼 기본값). 통합 전에도 있었고,
+이관이 그 값을 옮겨 오면서 따라왔다.
+
+### 조치
+
+`host_mode`를 **nullable로 바꾸고 기본값을 없앴다. NULL = 코드 기본값을 쓰라는 뜻**이다.
+관리자가 콘솔에서 고른 값만 DB에 들어간다.
+
+기존 배포를 고치는 마이그레이션(command_db v9)도 넣었다.
+- `updated_by`가 비어 있는 행(= 자동 생성) 의 host_mode를 NULL로.
+- 코드가 로그인 서버로 고정한 툴이 `target_server`로 되어 있으면 NULL로. 그건 관리자의
+  선택이 아니라 사고다(관리자가 정말 그러길 원하면 콘솔에서 다시 고르면 된다).
+
+회귀 테스트 2개를 넣었다: 컬럼이 nullable이고 DEFAULT가 없는지, 자동 생성 INSERT가
+host_mode를 건드리지 않는지, 그리고 로그인 서버 고정 툴의 스키마에 `host`가 없는지.
+
+### 남은 가능성
+
+이 버그가 원인이라면 재시작 후 `list_dir`의 실행 위치가 "로그인 서버 고정"으로 보인다.
+그래도 엉뚱한 곳에서 돌면 남은 후보는 두 개다.
+  · 에이전트가 `list_dir` 대신 `run_command`를 골랐다(`run_command`는 host가 노출된다).
+  · `scheduler_login_host` 설정값이 다른 주소다.
+둘 다 답변의 `· 완료 (IP · 계정)` 줄과 실행 로그의 툴 이름으로 바로 가려진다.
+
+## 116. 관리자 콘솔: 내장/등록 커맨드를 한 목록으로 (완료)
+
+"설정탭에서 내장 command, 등록 command 따로 나누지 말고 모두 등록 command 로 해줘"
+
+화면을 하나로 합쳤다. 이름순 한 표에 내장·등록이 섞여 나오고, 활성·실행 위치·설명·역할은
+**둘 다 똑같이** 편집한다(행마다 저장 버튼).
+
+내장을 완전히 등록 커맨드로 바꾸지는 않았다. 이유는 값 검증이다 — `read_file_head`의
+`lines` 1~2000, `disk_usage`의 `max_depth` 0~10, `system_info`의 `kind` enum,
+`safe_path()` 경로 검사는 `exec_command` 템플릿으로 표현할 수 없다. 템플릿으로 옮기면
+그 검증이 사라진다. 그래서 **저장 위치는 코드로 남기고 화면만 합쳤다.** 행에 `코드 내장`이
+표시되고 커맨드·인자 칸만 회색으로 잠긴다("이건 어느 목록에 있지?"는 없어졌다).
+
 ---
 
 ## 다음 항목은 이어서 여기 아래에 추가

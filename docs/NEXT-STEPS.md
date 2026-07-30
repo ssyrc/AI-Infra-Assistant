@@ -206,6 +206,24 @@ docker compose -f docker-compose.dev.yml logs execution-mcp | grep 내장
   설정 탭에 `chart_public_base_url = http://202.20.183.30:8509` 를 넣으면 URL 방식으로 돕니다
   (사내 주소입니다. 8509 포트는 이미 열려 있습니다).
 
+## 9-4. [서버] "내 홈 파일 리스트"가 엉뚱한 서버에서 돌던 원인 — 고쳤습니다
+
+내장 커맨드의 상태 행이 **자동 생성될 때** 실행 위치가 `서버 지정`으로 박히고 있었습니다.
+그러면 `host`가 에이전트에 노출돼 모델이 서버를 골라 넣습니다. 코드는 `list_dir`을
+로그인 서버 고정으로 지정해 뒀는데 DB 값이 그걸 덮어썼습니다(구 System MCP에서 물려온 버그).
+
+```bash
+cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
+docker compose -f docker-compose.dev.yml run --rm db-init          # v9 마이그레이션
+docker compose -f docker-compose.dev.yml restart execution-mcp
+```
+
+그 다음 **실행 탭**에서 `list_dir`의 **실행 위치**가 `로그인 서버 고정`인지 확인해 주세요.
+
+그래도 엉뚱한 곳에서 돌면 다음 두 가지를 보내주세요(원인이 바로 갈립니다).
+- 답변의 `· 완료 (IP · 계정)` 줄 — 어느 IP였는지
+- 실행 탭 → **실행 로그** 맨 위 한 줄 — 툴 이름이 `list_dir`인지 `run_command`인지
+
 ## 9-3. [웹] 성능 테스트 — 이 표를 채워서 주세요
 
 질문을 순서대로 넣고 **답변 전문 + 걸린 시간**을 기록해 주세요. 한 항목이라도 어긋나면

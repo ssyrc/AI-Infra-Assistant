@@ -754,3 +754,53 @@ def test_charts_base_url_derivation():
     assert charts_base_url("http://chart-mcp:8005/mcp") == "http://chart-mcp:8005"
     assert charts_base_url("http://chart-mcp:8005/") == "http://chart-mcp:8005"
     assert charts_base_url("") == ""
+
+
+# --- 14번: 자동 생성된 상태 행이 실행 위치를 덮어쓰면 안 된다 -------------------------
+# `_is_enabled`는 처음 실행되는 내장 커맨드의 상태 행을 (tool_name, enabled)만 넣어 만든다.
+# 그때 host_mode가 컬럼 기본값('target_server')으로 채워지면, 코드가 login_server로 고정한
+# 툴(list_dir 등)의 host가 LLM에 노출돼 **엉뚱한 서버에서 실행된다**(#115).
+# 그래서 컬럼은 nullable이어야 하고(NULL = 코드 기본값), 기본값이 없어야 한다.
+def test_builtin_state_host_mode_is_nullable_without_default():
+    import re as _re
+    src = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+
+    create = _re.search(r"CREATE TABLE IF NOT EXISTS execution_builtin_state \((.*?)\);",
+                        src, _re.S).group(1)
+    host_line = [ln for ln in create.split("\n") if "host_mode" in ln and "CONSTRAINT" not in ln]
+    assert host_line, "host_mode 컬럼 정의를 찾지 못했다"
+    assert "NOT NULL" not in host_line[0], \
+        "host_mode가 NOT NULL이면 자동 생성 행이 코드 기본값을 덮어쓴다"
+    assert "DEFAULT" not in host_line[0], \
+        "host_mode에 DEFAULT가 있으면 자동 생성 행이 코드 기본값을 덮어쓴다"
+
+    # 기존 배포를 고치는 마이그레이션이 있어야 한다(이미 오염된 DB가 있다).
+    assert "ALTER COLUMN host_mode DROP NOT NULL" in src
+    assert "ALTER COLUMN host_mode DROP DEFAULT" in src
+
+    # 자동 생성 INSERT는 host_mode를 건드리지 않아야 한다.
+    server = open(os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"),
+                  encoding="utf-8").read()
+    insert = _re.search(r"INSERT INTO \{_STATE\} \(([^)]*)\)", server).group(1)
+    assert "host_mode" not in insert, f"자동 생성 INSERT가 host_mode를 채운다: {insert}"
+
+
+def test_login_server_builtins_hide_host_from_llm():
+    """로그인 서버 고정 툴은 host를 LLM에 노출하지 않아야 한다.
+    노출되면 모델이 서버를 골라 넣어 '내 홈'이 엉뚱한 서버에서 조회된다."""
+    import importlib.util
+    os.environ.setdefault("CONFIG_DB_DSN", "postgresql://x:x@localhost/x")
+    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "execution_mcp"))
+    spec = importlib.util.spec_from_file_location(
+        "execmcp_host", os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+
+    from builtin import BUILTIN_COMMANDS
+    login_fixed = [n for n, e in BUILTIN_COMMANDS.items()
+                   if e.get("host_mode") == "login_server"]
+    assert "list_dir" in login_fixed, "'내 홈 파일 리스트'용 툴은 로그인 서버 고정이어야 한다"
+
+    props = {t.name: t.inputSchema["properties"] for t in asyncio.run(m.mcp.list_tools())}
+    for name in login_fixed:
+        assert "host" not in props[name], f"{name}에 host가 노출됨(엉뚱한 서버에서 실행될 수 있다)"

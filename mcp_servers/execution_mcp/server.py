@@ -117,6 +117,9 @@ async def _is_enabled(tool_name: str, default: bool) -> bool:
         row = await pool.fetchrow(
             f"SELECT enabled FROM {_STATE} WHERE tool_name = $1", tool_name)
         if row is None:
+            # host_mode는 **넣지 않는다**. 여기서 값을 채우면 컬럼 기본값이 코드가 지정한
+            # 실행 위치(login_server)를 덮어써서, host가 LLM에 노출되고 엉뚱한 서버에서
+            # 실행된다(#115). NULL로 두면 builtin.py의 값이 쓰인다.
             await pool.execute(
                 f"INSERT INTO {_STATE} (tool_name, enabled) VALUES ($1, $2) "
                 "ON CONFLICT (tool_name) DO NOTHING", tool_name, default)

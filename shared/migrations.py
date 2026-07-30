@@ -437,12 +437,29 @@ MIGRATIONS: list[tuple[str, int, str]] = [
             enabled              BOOLEAN NOT NULL DEFAULT true,
             required_roles       TEXT[],
             description_override TEXT,
-            host_mode            TEXT NOT NULL DEFAULT 'target_server',
+            -- NULL = 코드 기본값(builtin.py)을 쓴다. 관리자가 고른 값만 들어간다(#115).
+            host_mode            TEXT,
             updated_by           TEXT,
             updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT execution_builtin_host_mode_check
                 CHECK (host_mode IN ('login_server', 'target_server'))
         );
+    """),
+    # v9: 내장 커맨드 상태 행이 **자동 생성**될 때 host_mode가 컬럼 기본값('target_server')으로
+    #     들어가면서, 코드가 login_server로 지정한 툴(list_dir/find_files/read_file_head)의
+    #     실행 위치를 조용히 덮어썼다. 그러면 host가 LLM에 노출돼 엉뚱한 서버에서 실행된다
+    #     ("내 홈 파일 리스트"가 로그인 서버가 아닌 곳에서 돌던 원인 - #115).
+    #     이제 **NULL = 코드 기본값을 쓰라는 뜻**이다. 관리자가 콘솔에서 고른 값만 들어간다.
+    ("command_db", 9, """
+        ALTER TABLE execution_builtin_state ALTER COLUMN host_mode DROP NOT NULL;
+        ALTER TABLE execution_builtin_state ALTER COLUMN host_mode DROP DEFAULT;
+        -- 자동 생성된 행(updated_by가 비어 있음)의 host_mode는 의미 없는 값이다.
+        UPDATE execution_builtin_state SET host_mode = NULL WHERE updated_by IS NULL;
+        -- 이관해 온 행도 같은 경로로 오염됐을 수 있다. 코드가 로그인 서버로 고정한 툴이
+        -- target_server로 되어 있으면 그건 관리자의 선택이 아니라 사고다.
+        UPDATE execution_builtin_state SET host_mode = NULL
+        WHERE host_mode = 'target_server'
+          AND tool_name IN ('list_dir', 'find_files', 'read_file_head');
     """),
     # v8: 커맨드 RAG 검색은 #105에서 없앴다(툴로 노출한다). 임베딩 컬럼은 그때부터 아무도 읽지
     #     않는데 업로드할 때마다 수천 건을 임베딩하느라 몇 분씩 걸리고 있었다. 통합하며 정리한다.

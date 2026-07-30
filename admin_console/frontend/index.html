@@ -1192,9 +1192,45 @@ function ExecutionPanel() {
     </label>
   );
 
+  // 내장/등록을 **한 목록**으로 합쳐 보여준다(사용자 요청: "따로 나누지 말고 모두 등록 커맨드로").
+  // 내장은 파이썬 함수라 커맨드·인자를 여기서 바꿀 수 없지만(값 검증이 코드에 있다), 활성·실행
+  // 위치·설명·역할은 등록 커맨드와 똑같이 다룬다. 그래서 표는 하나로 두고 편집 가능한 범위만
+  // 행마다 다르게 한다 — "이건 어느 목록에 있지?"가 없어진다.
+  const merged = [
+    ...builtin.map(b => ({ ...b, kind: "builtin", title: b.tool_name,
+                           exec_command: b.example_command, args: [],
+                           allow_extra_args: false })),
+    ...items.map(c => ({ ...c, kind: "registered" })),
+  ].sort((a, b) => String(a.title).localeCompare(String(b.title), "ko"));
+
+  const rowKey = (c) => (c.kind === "builtin" ? `b:${c.tool_name}` : `r:${c.id}`);
+
+  // 한 행의 공통 필드(활성 제외)를 저장한다. 내장/등록에 따라 다른 API로 보낸다.
+  const saveRow = async (c, e) => {
+    const roles = e.roles.split(",").map(s => s.trim()).filter(Boolean);
+    try {
+      if (c.kind === "builtin") {
+        await patchBuiltin(c.tool_name, {
+          description: e.description, required_roles: roles, host_mode: e.host_mode,
+        }, e.host_mode !== c.host_mode || e.description !== (c.description_override || ""));
+      } else {
+        await api(`/api/execution/commands/${c.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            title: c.title, description: e.description, exec_command: c.exec_command,
+            args: c.args || [], allow_extra_args: c.allow_extra_args,
+            host_mode: e.host_mode, enabled: c.enabled, required_roles: roles,
+          }),
+        });
+        await loadCommands();
+        setNeedsRestart(true);
+      }
+      const next = { ...edits }; delete next[rowKey(c)]; setEdits(next);
+    } catch (err) { alert("저장 실패: " + err.message); }
+  };
+
   const views = [
-    { id: "commands", label: `등록 커맨드 (${items.length})` },
-    { id: "builtin", label: `내장 커맨드 (${builtin.length})` },
+    { id: "commands", label: `커맨드 (${merged.length})` },
     { id: "logs", label: "실행 로그" },
   ];
 
@@ -1247,8 +1283,8 @@ function ExecutionPanel() {
               <div style={{ marginBottom: 8 }}>
                 <strong>열 매핑</strong> · {excel.filename} · {excel.total_rows}행 · 헤더 {excel.header_row}행
               </div>
-              <div className="subtitle">이름 기준으로 등록/갱신됩니다. 인자 정의 없이 들어가므로,
-                인자가 필요한 커맨드는 등록 후 개별 편집에서 {"{이름}"}을 넣으세요.</div>
+              <div className="subtitle">이름 기준으로 등록/갱신됩니다. 인자가 필요한 커맨드는
+                등록 후 개별 편집에서 {"{이름}"}을 넣으세요.</div>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
                 {colSelect("title_column", "이름", true)}
                 {colSelect("description_column", "설명", true)}
@@ -1263,63 +1299,44 @@ function ExecutionPanel() {
 
           <table>
             <thead>
-              <tr><th>활성</th><th>이름</th><th>실행 커맨드</th><th>인자</th><th>실행 위치</th>
-                  <th>설명</th><th></th></tr>
+              <tr><th>활성</th><th>이름</th><th>실행 커맨드</th><th>인자</th>
+                  <th>실행 위치</th><th>설명</th><th>역할</th><th></th></tr>
             </thead>
             <tbody>
-              {items.map(c => (
-                <tr key={c.id}>
-                  <td style={{ textAlign: "center" }}>
-                    <input type="checkbox" checked={c.enabled} onChange={() => toggleCommand(c)} />
-                  </td>
-                  <td>{c.title}<div style={{ fontSize: 11, color: "var(--muted)", fontFamily: "var(--mono)" }}>{c.tool_name}</div></td>
-                  <td style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{c.exec_command}</td>
-                  <td style={{ fontSize: 11.5 }}>
-                    {(c.args || []).map(a => a.name).join(", ") || <span style={{ color: "var(--muted)" }}>없음</span>}
-                    {c.allow_extra_args && <div style={{ color: "var(--muted)" }}>+ 자유 인자</div>}
-                  </td>
-                  <td style={{ fontSize: 11.5 }}>{HOST_MODE_LABEL[c.host_mode]}</td>
-                  <td style={{ fontSize: 12.5 }}>{c.description}</td>
-                  <td className="row-actions">
-                    <button onClick={() => edit(c)}>편집</button>
-                    <button className="danger" onClick={() => remove(c.id)}>삭제</button>
-                  </td>
-                </tr>
-              ))}
-              {items.length === 0 && <tr><td colSpan="7" className="empty">등록된 커맨드가 없습니다.</td></tr>}
-            </tbody>
-          </table>
-        </React.Fragment>
-      )}
-
-      {view === "builtin" && (
-        <React.Fragment>
-          <div className="subtitle">
-            코드로 만든 read-only 리눅스 명령입니다(값 검증이 있어 템플릿으로 옮길 수 없습니다).
-            여기서는 활성/역할/설명/실행 위치만 바꿉니다.
-          </div>
-          <table>
-            <thead>
-              <tr><th>활성</th><th>툴</th><th>실행되는 명령</th><th>실행 위치</th>
-                  <th>설명(비우면 코드 기본값)</th><th>필요 역할</th><th></th></tr>
-            </thead>
-            <tbody>
-              {builtin.map(w => {
-                const e = edits[w.tool_name] || {
-                  description: w.description_override || "",
-                  roles: (w.required_roles || [])[0] || "",
-                  host_mode: w.host_mode,
+              {merged.map(c => {
+                const isBuiltin = c.kind === "builtin";
+                const key = rowKey(c);
+                const e = edits[key] || {
+                  description: isBuiltin ? (c.description_override || "") : (c.description || ""),
+                  roles: (c.required_roles || []).join(","),
+                  host_mode: c.host_mode,
                 };
-                const setE = (patch) => setEdits({ ...edits, [w.tool_name]: { ...e, ...patch } });
+                const setE = (patch) => setEdits({ ...edits, [key]: { ...e, ...patch } });
                 return (
-                  <tr key={w.tool_name}>
+                  <tr key={key}>
                     <td style={{ textAlign: "center" }}>
-                      <input type="checkbox" checked={w.enabled}
-                             onChange={() => patchBuiltin(w.tool_name, { enabled: !w.enabled }, false)} />
+                      <input type="checkbox" checked={c.enabled}
+                             onChange={() => (isBuiltin
+                               ? patchBuiltin(c.tool_name, { enabled: !c.enabled }, false)
+                               : toggleCommand(c))} />
                     </td>
-                    <td style={{ fontFamily: "var(--mono)" }}>{w.tool_name}</td>
-                    <td style={{ fontFamily: "var(--mono)", fontSize: 11.5, color: "var(--muted)" }}>
-                      {w.example_command}
+                    <td>
+                      {c.title}
+                      <div style={{ fontSize: 11, color: "var(--muted)", fontFamily: "var(--mono)" }}>
+                        {c.tool_name}{isBuiltin ? " · 코드 내장" : ""}
+                      </div>
+                    </td>
+                    <td style={{ fontFamily: "var(--mono)", fontSize: 12,
+                                 color: isBuiltin ? "var(--muted)" : undefined }}>
+                      {c.exec_command}
+                    </td>
+                    <td style={{ fontSize: 11.5 }}>
+                      {isBuiltin
+                        ? <span style={{ color: "var(--muted)" }}>코드에서 검증</span>
+                        : ((c.args || []).map(a => a.name).join(", ") ||
+                           <span style={{ color: "var(--muted)" }}>없음</span>)}
+                      {!isBuiltin && c.allow_extra_args
+                        ? <div style={{ color: "var(--muted)" }}>+ 자유 인자</div> : null}
                     </td>
                     <td>
                       <select value={e.host_mode} onChange={ev => setE({ host_mode: ev.target.value })}>
@@ -1329,28 +1346,33 @@ function ExecutionPanel() {
                       </select>
                     </td>
                     <td>
-                      <input value={e.description} placeholder={w.code_description}
-                             style={{ width: "100%" }}
+                      <input value={e.description} style={{ width: "100%" }}
+                             placeholder={isBuiltin ? c.code_description : ""}
                              onChange={ev => setE({ description: ev.target.value })} />
                     </td>
                     <td>
-                      <input value={e.roles} placeholder="비우면 제한 없음" style={{ width: 110 }}
+                      <input value={e.roles} placeholder="제한 없음" style={{ width: 90 }}
                              onChange={ev => setE({ roles: ev.target.value })} />
                     </td>
                     <td className="row-actions">
-                      <button onClick={() => patchBuiltin(w.tool_name, {
-                        description: e.description,
-                        required_roles: e.roles ? [e.roles] : [],
-                        host_mode: e.host_mode,
-                      }, e.host_mode !== w.host_mode || e.description !== (w.description_override || ""))}>
-                        저장
-                      </button>
+                      {key in edits
+                        ? <button className="primary" onClick={() => saveRow(c, e)}>저장</button>
+                        : null}
+                      {!isBuiltin ? <button onClick={() => edit(c)}>편집</button> : null}
+                      {!isBuiltin
+                        ? <button className="danger" onClick={() => remove(c.id)}>삭제</button> : null}
                     </td>
                   </tr>
                 );
               })}
+              {merged.length === 0
+                ? <tr><td colSpan="8" className="empty">커맨드가 없습니다.</td></tr> : null}
             </tbody>
           </table>
+          <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 8 }}>
+            <strong>코드 내장</strong>으로 표시된 것은 값 검증이 코드에 있어(줄 수 1~2000, 경로 검사 등)
+            커맨드와 인자를 여기서 바꿀 수 없습니다. 활성·실행 위치·설명·역할은 다른 커맨드와 같습니다.
+          </div>
         </React.Fragment>
       )}
 
