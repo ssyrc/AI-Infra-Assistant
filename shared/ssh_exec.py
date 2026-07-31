@@ -221,8 +221,14 @@ def master_socket_exists(ip: str) -> bool:
         return False
 
 
-def _base_ssh_opts(ip: str = "") -> list[str]:
-    """모든 ssh 호출이 공유하는 옵션(다중화 포함). ip를 주면 그 호스트 전용 소켓을 쓴다."""
+def _base_ssh_opts(ip: str = "", master: bool = False) -> list[str]:
+    """모든 ssh 호출이 공유하는 옵션(다중화 포함). ip를 주면 그 호스트 전용 소켓을 쓴다.
+
+    master=True는 **상주 마스터 프로세스**용이다(`ControlMaster=yes`, `ControlPersist=no`).
+    ControlPersist를 주면 ssh가 스스로 백그라운드로 넘어가 버려서 우리 자식 프로세스가
+    바로 끝나 버린다 - 그러면 살아 있는지 감시할 수가 없다. 전경에 붙들어 둬야 감시가 된다.
+    ControlPath는 두 경우가 **반드시 같아야** 한다(다르면 재사용이 안 된다).
+    """
     opts = [
         "-o", "BatchMode=yes",
         "-o", "PasswordAuthentication=no",
@@ -245,9 +251,9 @@ def _base_ssh_opts(ip: str = "") -> list[str]:
     ]
     if SSH_MULTIPLEX and _ensure_control_dir():
         opts += [
-            "-o", "ControlMaster=auto",
+            "-o", "ControlMaster=yes" if master else "ControlMaster=auto",
             "-o", f"ControlPath={control_path(ip)}",
-            "-o", f"ControlPersist={SSH_CONTROL_PERSIST}",
+            "-o", "ControlPersist=no" if master else f"ControlPersist={SSH_CONTROL_PERSIST}",
         ]
     if SSH_KEY and os.path.isfile(SSH_KEY):
         # IdentitiesOnly: 지정한 이 키 **하나만** 시도한다(다른 키를 던져 보는 왕복을 없앤다).
@@ -307,6 +313,144 @@ async def master_alive(host: str) -> bool:
     except (asyncio.TimeoutError, OSError):
         return False
     return proc.returncode == 0
+
+
+# --- 상주 마스터 -------------------------------------------------------------------
+# "서비스가 뜨면 202.20.185.100에 root 세션을 계속 띄워 두고, agent가 바로 su를 날릴 수 있게"
+# (사용자 요구). 예전 방식은 `ssh … true`로 연결만 만들어 두고 ControlPersist에 수명을 맡기는
+# 것이었다 - 어떤 이유로든 마스터가 죽으면 다음 확인(180초)까지 구멍이 났고, 그 사이 커맨드는
+# 매번 새로 접속했다(실측 17~25초).
+# 이제는 **마스터 ssh를 우리 자식 프로세스로 붙들고**(`-M -N`, 원격 명령 없음) 감시한다.
+# 죽으면 즉시 다시 띄운다. 커맨드 실행 쪽은 그대로 `ControlMaster=auto`라, 마스터가 없더라도
+# 스스로 접속해서 동작은 한다(느려질 뿐 끊기지 않는다).
+_master_procs: dict = {}
+
+
+async def _drain_stderr(ip: str, proc):
+    """마스터의 stderr를 계속 읽어 로그로 넘긴다.
+    읽지 않고 두면 파이프가 차서 ssh가 멈춘다(조용히 죽는 것보다 나쁘다)."""
+    try:
+        while True:
+            line = await proc.stderr.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", "replace").strip()
+            if text:
+                print(f"[ssh_exec] 마스터({ip}) stderr: {text[:200]}")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def ensure_master(host: str) -> dict:
+    """상주 마스터가 살아 있게 만든다(이미 살아 있으면 아무것도 하지 않는다).
+
+    돌려주는 dict는 그대로 `/warm` 응답과 로그에 쓴다 - 밖에서 상태를 볼 수 있어야
+    "느리다"를 추측하지 않는다.
+    """
+    if not SSH_MULTIPLEX:
+        return {"ok": False, "reason": "다중화 꺼짐(SSH_MULTIPLEX=false)"}
+    try:
+        ip = resolve_host(host)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": f"호스트 해석 실패({host}): {e}"}
+
+    proc = _master_procs.get(ip)
+    if proc is not None and proc.returncode is None and master_socket_exists(ip):
+        return {"ok": True, "host": host, "ip": ip, "already_up": True}
+    if proc is not None and proc.returncode is not None:
+        print(f"[ssh_exec] 마스터({ip})가 종료돼 있었습니다(코드 {proc.returncode}). 다시 띄웁니다.")
+        _master_procs.pop(ip, None)
+
+    # 우리 프로세스가 아니어도 살아 있는 마스터가 있으면 그대로 쓴다(예: 재시작 직전에
+    # ControlPersist로 백그라운드에 남아 있던 것). 여기서 새로 띄우면 소켓이 겹쳐 실패한다.
+    if await master_alive(host):
+        return {"ok": True, "host": host, "ip": ip, "already_up": True, "adopted": True}
+    # 죽은 소켓 파일이 남아 있으면 새 마스터가 'already exists'로 못 뜬다. 지운다.
+    try:
+        os.unlink(control_path(ip))
+    except OSError:
+        pass
+
+    started = time.monotonic()
+    argv = ["ssh", *_base_ssh_opts(ip, master=True), "-M", "-N", f"{SSH_ROOT_USER}@{ip}"]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv, stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+    except OSError as e:
+        return {"ok": False, "reason": f"마스터를 띄우지 못했습니다: {type(e).__name__}: {e}"}
+    asyncio.create_task(_drain_stderr(ip, proc))
+
+    # `-N`은 원격 명령이 없어 계속 살아 있는 게 정상이다. 소켓이 생길 때까지만 잠깐 기다린다.
+    deadline = time.monotonic() + SSH_CONNECT_TIMEOUT + 20
+    while time.monotonic() < deadline:
+        if proc.returncode is not None:
+            return {"ok": False,
+                    "reason": f"마스터가 곧바로 종료됐습니다(코드 {proc.returncode}). "
+                              "ssh 키·호스트 키·네트워크를 확인하세요."}
+        if master_socket_exists(ip) and await master_alive(host):
+            _master_procs[ip] = proc
+            took = int((time.monotonic() - started) * 1000)
+            print(f"[ssh_exec] 상주 마스터 준비 완료({ip} · {took:,}ms). "
+                  "이후 커맨드는 이 연결에 채널만 얹습니다.")
+            return {"ok": True, "host": host, "ip": ip, "already_up": False,
+                    "duration_ms": took}
+        await asyncio.sleep(0.3)
+
+    try:
+        proc.kill()
+    except ProcessLookupError:
+        pass
+    return {"ok": False, "reason": "마스터 연결이 제한 시간 안에 서지 않았습니다."}
+
+
+def start_master_supervisor(host_getter, interval: int = 15):
+    """상주 마스터를 감시한다. 죽어 있으면 곧바로 다시 띄운다.
+
+    간격이 짧은 이유: 살아 있으면 소켓 파일 확인 한 번으로 끝나 거의 공짜다. 반대로 죽었을 때의
+    대가는 크다(다음 커맨드가 17~25초). 예전 240초/180초 주기는 그 구멍을 그대로 뒀다.
+    연속 실패 시에는 간격을 늘려(최대 5분) 안 되는 대상을 계속 두드리지 않는다.
+    """
+    async def _loop():
+        fails = 0
+        while True:
+            wait = interval
+            try:
+                host = await host_getter()
+                if host:
+                    ip = resolve_host(host)
+                    # 살아 있으면 여기서 끝(파일 확인 한 번).
+                    if not (_master_procs.get(ip) is not None
+                            and _master_procs[ip].returncode is None
+                            and master_socket_exists(ip)):
+                        res = await ensure_master(host)
+                        if res.get("ok"):
+                            fails = 0
+                        else:
+                            fails += 1
+                            wait = min(interval * 2 ** min(fails, 5), 300)
+                            print(f"[ssh_exec] 상주 마스터 실패({fails}회): "
+                                  f"{res.get('reason')} · {wait}초 뒤 재시도")
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                fails += 1
+                wait = min(interval * 2 ** min(fails, 5), 300)
+                print(f"[ssh_exec] 마스터 감시 오류(계속 진행): {type(e).__name__}: {e}")
+            await asyncio.sleep(wait)
+
+    return asyncio.create_task(_loop())
+
+
+async def stop_masters():
+    """상주 마스터를 정리한다(서비스 종료 시)."""
+    for ip, proc in list(_master_procs.items()):
+        try:
+            if proc.returncode is None:
+                proc.terminate()
+        except ProcessLookupError:
+            pass
+        _master_procs.pop(ip, None)
 
 
 def start_master_keepalive(host_getter, interval: int = 240):

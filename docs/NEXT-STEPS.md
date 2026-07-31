@@ -3,8 +3,9 @@
 **[WSL]** `/home/yrc/AI-Infra-Assistant` · **[서버]** 202.20.183.30
 `/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant` · **[웹]** 콘솔 `http://202.20.183.30:8501`
 
-측정값에서 나온 결론: **첫 접속 17.4초가 범인**입니다(TCP가 아니라 ssh 인증 협상).
-그 협상을 끄는 옵션을 넣었고, 새로고침·새 채팅 때 미리 연결을 세우도록 했습니다.
+측정값 기준 결론: **첫 접속 17~25초가 범인**(TCP가 아니라 ssh 인증 협상).
+협상을 끄는 옵션을 넣었고, **서비스가 뜨면 202.20.185.100에 root 세션을 상주**시킵니다
+(15초마다 감시, 죽으면 즉시 재접속). 이후 커맨드는 그 연결에 바로 `su - <계정>`을 얹습니다.
 
 ## 1. [WSL] 코드 반영
 
@@ -38,10 +39,16 @@ bash scripts/bench-exec.sh yr9.choi "phd list"
 
 ```bash
 curl -s http://localhost:8504/warm; echo
-docker compose -f docker-compose.dev.yml logs execution-mcp | grep -E "마스터|예열|노출된 툴"
+docker compose -f docker-compose.dev.yml logs execution-mcp | grep -E "상주 마스터|다중화 마스터|노출된 툴"
 ```
 
-`{"ok":true,...}` 가 나오고, 두 번째 호출은 `"already_warm":true` 여야 합니다.
+- 기동 로그에 **`상주 마스터 준비 완료`** 가 있어야 합니다.
+- `curl`은 `{"ok":true,...,"already_up":true}` 여야 합니다(이미 떠 있다는 뜻).
+- 커맨드를 한 번 실행한 뒤 아래가 **`연결 재사용`** 으로 찍히는지 보세요. 여기가 핵심입니다.
+
+```bash
+docker compose -f docker-compose.dev.yml logs --tail=50 execution-mcp | grep ssh_exec
+```
 
 ## 5. [서버] 로그인 셸 2초를 없앨 수 있는지 확인 — 결과를 보내주세요
 

@@ -17,15 +17,16 @@ Execution MCP - 커맨드 실행을 담당하는 **단 하나의** MCP. (구 Com
 - user_id는 LLM 스키마에서 감추고 호출자 헤더에서 강제 주입한다(남의 자원 접근 불가).
 - 전건 감사 로그(job_logs).
 
-속도(#128): 툴 호출 하나가 사용자를 기다리게 하는 시간은 (a) 상태 조회 DB 왕복,
+속도(#128, #132): 툴 호출 하나가 사용자를 기다리게 하는 시간은 (a) 상태 조회 DB 왕복,
 (b) 감사 로그 INSERT, (c) ssh 접속, (d) 원격 커맨드다. (a)는 한 번으로 합쳤고, (b)는 성공
-경로에서 응답 뒤로 미뤘으며, (c)는 마스터 연결 예열로 없앤다. 남는 것은 (d)뿐이고
-그 값은 결과의 `duration_ms`로 그대로 보인다.
+경로에서 응답 뒤로 미뤘다. (c)는 **서비스가 뜰 때 로그인 서버로 root ssh 세션을 상주시켜서**
+없앤다 - 이후 모든 커맨드는 그 연결에 채널만 얹어 곧바로 `su - <user_id>`를 실행한다.
+감시 루프가 15초마다 확인해 죽어 있으면 즉시 다시 띄운다.
+남는 것은 (d)뿐이고 그 값은 결과의 `duration_ms`로 그대로 보인다.
 """
 import sys
 import os
 import json
-import time
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../shared"))
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -35,8 +36,8 @@ from mcp_caller import (  # noqa: E402
     get_caller, CallerContextMiddleware, tool_description, build_wrapped,
 )
 from ssh_exec import (  # noqa: E402
-    master_alive, master_socket_exists, resolve_host, run_ssh_as_user,
-    set_output_limit_getter, warm_master, start_master_keepalive,
+    ensure_master, run_ssh_as_user, set_output_limit_getter,
+    start_master_supervisor, stop_masters,
 )
 from execution_exec import DEFAULT_DENY_CSV, build_free_argv, deny_set  # noqa: E402
 from registry import (  # noqa: E402
@@ -177,11 +178,12 @@ for _name, _entry in ALL_TOOLS.items():
 
 
 async def warm_endpoint(request):
-    """`GET /warm` — 로그인 서버로의 ssh 마스터 연결을 지금 열어 둔다(이미 서 있으면 즉시 반환).
+    """`GET /warm` — 로그인 서버로의 상주 마스터가 살아 있는지 확인하고, 없으면 지금 띄운다.
 
-    왜 HTTP로 노출하나: 사용자가 Open WebUI를 새로 열거나 새 채팅을 시작하는 시점에
+    왜 HTTP로 노출하나: 사용자가 Open WebUI를 새로 열거나 질문을 던지는 시점에
     **연결이 이미 서 있어야** 첫 커맨드가 곧바로 실행된다. 마스터가 없으면 첫 접속에만
-    실측 17초가 들었다(인증 협상). agent-server가 이 주소를 요청 시작 시 한 번 두드린다.
+    실측 17~25초가 들었다(인증 협상). agent-server가 이 주소를 요청 시작 시 두드린다.
+    감시 루프가 이미 돌고 있으므로 평소에는 `already_up: true`로 즉시 끝난다.
     MCP 툴이 아니라 평범한 HTTP 라우트라 LLM 프롬프트에는 실리지 않는다.
     """
     from starlette.responses import JSONResponse
@@ -189,14 +191,8 @@ async def warm_endpoint(request):
     host = await _login_host()
     if not host:
         return JSONResponse({"ok": False, "reason": "execution_host 미설정"}, status_code=503)
-    ip = resolve_host(host)
-    if master_socket_exists(ip):
-        return JSONResponse({"ok": True, "host": host, "already_warm": True})
-    started = time.monotonic()
-    ok = await warm_master(host)
-    took = int((time.monotonic() - started) * 1000)
-    print(f"[execution-mcp] 요청 시점 ssh 예열 {'성공' if ok else '실패'} ({host} · {took:,}ms)")
-    return JSONResponse({"ok": ok, "host": host, "already_warm": False, "duration_ms": took})
+    result = await ensure_master(host)
+    return JSONResponse(result, status_code=200 if result.get("ok") else 503)
 
 
 if __name__ == "__main__":
@@ -207,26 +203,28 @@ if __name__ == "__main__":
     inner = mcp.streamable_http_app()
     inner.router.routes.append(Route("/warm", warm_endpoint, methods=["GET"]))
 
-    # 기동하자마자 로그인 서버로 ssh 마스터 연결을 열어 둔다. 사용자가 첫 질문을 던질 때
-    # 이미 연결이 서 있으므로 커맨드가 곧바로 실행된다(첫 접속 비용이 체감 지연의 대부분).
-    async def _warm_ssh():
+    # 서비스가 뜨는 순간 로그인 서버로 root ssh 세션을 **상주**시킨다. 이후 모든 커맨드는
+    # 그 연결에 채널만 얹어 곧바로 `su - <user_id>`를 실행한다(접속 비용 0).
+    # 감시 루프가 15초마다 살아 있는지 보고, 죽어 있으면 즉시 다시 띄운다.
+    async def _start_master():
         try:
             host = await _login_host()
         except Exception as e:  # noqa: BLE001
-            print(f"[execution-mcp] 로그인 서버 설정을 읽지 못해 예열을 건너뜁니다: {e}")
+            print(f"[execution-mcp] 로그인 서버 설정을 읽지 못해 마스터를 띄우지 못했습니다: {e}")
             return
         if host:
-            ok = await warm_master(host)
-            alive = await master_alive(host) if ok else False
+            result = await ensure_master(host)
             # "ssh 세션이 제대로 열렸는지"를 기동 로그에서 바로 확인할 수 있게 남긴다.
-            if alive:
+            if result.get("ok"):
                 print(f"[execution-mcp] ssh 다중화 마스터 준비 완료({host}). "
                       "첫 커맨드부터 곧바로 실행됩니다.")
             else:
-                print(f"[execution-mcp] ssh 마스터를 열지 못했습니다({host}). 커맨드는 실행되지만 "
-                      "매번 새로 접속해 1~3초씩 더 걸립니다. "
+                print(f"[execution-mcp] ssh 마스터를 열지 못했습니다({host}): "
+                      f"{result.get('reason')}. 커맨드는 실행되지만 "
+                      "매번 새로 접속해 수십 초씩 더 걸립니다. "
                       "scripts/diag-ssh.sh 로 원인을 확인하세요.")
-        start_master_keepalive(lambda: get_config("execution_host", host), interval=180)
+        start_master_supervisor(lambda: get_config("execution_host", host), interval=15)
 
-    inner.add_event_handler("startup", _warm_ssh)
+    inner.add_event_handler("startup", _start_master)
+    inner.add_event_handler("shutdown", stop_masters)
     uvicorn.run(CallerContextMiddleware(inner), host="0.0.0.0", port=port)

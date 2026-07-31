@@ -781,15 +781,38 @@ def test_instruction_asks_for_table_on_multi_column_output():
 
 def test_ssh_master_health_is_observable():
     """'ssh 세션이 제대로 열렸는지'를 로그로 확인할 수 있어야 한다.
-    추측으로 느림을 진단할 수 없다 - 마스터가 죽으면 커맨드마다 1~3초가 더 붙는다."""
+    추측으로 느림을 진단할 수 없다 - 마스터가 죽으면 커맨드마다 수십 초가 더 붙는다."""
     ssh = open(os.path.join(ROOT, "shared", "ssh_exec.py"), encoding="utf-8").read()
     assert "async def master_alive" in ssh
     assert '"-O", "check"' in ssh, "ssh -O check로 실제 상태를 확인해야 한다"
 
     server = open(os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"),
                   encoding="utf-8").read()
-    assert "master_alive" in server and "다중화 마스터 준비 완료" in server
+    assert "다중화 마스터 준비 완료" in server
     assert "매번 새로 접속해" in server, "마스터가 없을 때의 영향을 로그로 알려야 한다"
+
+
+def test_master_session_is_resident_and_supervised():
+    """로그인 서버로의 root ssh 세션을 **상주**시키고 감시해야 한다(사용자 요구).
+
+    예전에는 `ssh … true`로 연결만 만들고 수명을 ControlPersist에 맡겼다. 죽으면 다음
+    확인(180초)까지 구멍이 났고, 그 사이 커맨드는 매번 새로 접속했다(실측 17~25초).
+    이제 마스터 ssh를 우리 자식 프로세스로 붙들고(-M -N) 15초마다 살아 있는지 본다.
+    """
+    ssh = open(os.path.join(ROOT, "shared", "ssh_exec.py"), encoding="utf-8").read()
+    assert "async def ensure_master" in ssh and "def start_master_supervisor" in ssh
+    assert '"-M", "-N"' in ssh, "원격 명령 없는 마스터 전용 연결이어야 한다"
+    # ControlPersist를 주면 ssh가 스스로 백그라운드로 가버려 감시가 불가능해진다.
+    assert '"ControlPersist=no" if master' in ssh
+    assert '"ControlMaster=yes" if master' in ssh
+    assert "async def stop_masters" in ssh, "종료 시 정리가 없다"
+
+    server = open(os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"),
+                  encoding="utf-8").read()
+    assert "start_master_supervisor" in server
+    assert 'add_event_handler("startup"' in server and 'add_event_handler("shutdown"' in server
+    # 감시 주기는 짧아야 한다(살아 있으면 파일 확인 한 번이라 거의 공짜다).
+    assert "interval=15" in server
 
 
 # --- 18번: 커맨드 실행이 왜 느린지 **측정**할 수 있어야 한다 --------------------------
@@ -836,6 +859,78 @@ def test_session_history_is_written_without_reloading_the_session():
     body = _re.search(r"async def _create_session\(.*?\n    return session_id", src, _re.S).group(0)
     assert "svc.get_session(" not in body, "이력 한 턴마다 세션을 다시 읽고 있다"
     assert "append_event" in body
+
+
+_FAKE_SSH = '''#!/usr/bin/env python3
+"""테스트용 가짜 ssh: 마스터 동작만 흉내낸다(소켓 파일 생성 + -N이면 계속 살아 있음)."""
+import os, sys, time
+args = sys.argv[1:]
+cp = ""
+for a in args:
+    if a.startswith("ControlPath="):
+        cp = a.split("=", 1)[1]
+if "-O" in args and "check" in args:
+    sys.exit(0 if cp and os.path.exists(cp) else 255)
+if "-M" in args and "-N" in args:
+    open(cp, "w").close()
+    while True:
+        time.sleep(1)
+sys.exit(0)
+'''
+
+
+def test_resident_master_is_spawned_adopted_and_restarted(tmp_path, monkeypatch):
+    """상주 마스터의 상태 기계를 실제로 돌려서 확인한다(가짜 ssh 사용).
+
+    띄운다 → 이미 있으면 그대로 쓴다 → 죽으면 감시 루프가 다시 띄운다.
+    이 셋 중 하나라도 깨지면 커맨드마다 새 접속(실측 17~25초)을 물게 된다.
+    """
+    import ssh_exec
+
+    fake_dir = tmp_path / "bin"
+    fake_dir.mkdir()
+    fake = fake_dir / "ssh"
+    fake.write_text(_FAKE_SSH, encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setattr(ssh_exec, "SSH_CONTROL_DIR", str(tmp_path / "mux"))
+    monkeypatch.setattr(ssh_exec, "SSH_KEY", "")
+    monkeypatch.setattr(ssh_exec, "_control_dir_ready", False)
+    monkeypatch.setattr(ssh_exec, "_master_procs", {})
+
+    host = "203.0.113.9"          # 문서용 예약 대역(TEST-NET-3) - 실제로 붙지 않는다
+
+    async def scenario():
+        first = await ssh_exec.ensure_master(host)
+        assert first["ok"] and first["already_up"] is False, first
+        assert await ssh_exec.master_alive(host)
+
+        # 두 번째 호출은 새로 띄우지 않는다(소켓이 겹치면 실패한다).
+        again = await ssh_exec.ensure_master(host)
+        assert again["ok"] and again["already_up"] is True, again
+
+        # 마스터가 죽은 상황을 만든다.
+        ip = ssh_exec.resolve_host(host)
+        proc = ssh_exec._master_procs[ip]
+        proc.kill()
+        await proc.wait()
+        os.unlink(ssh_exec.control_path(ip))
+        assert not await ssh_exec.master_alive(host)
+
+        # 감시 루프가 스스로 복구해야 한다.
+        task = ssh_exec.start_master_supervisor(
+            lambda: asyncio.sleep(0, result=host), interval=1)
+        try:
+            for _ in range(40):
+                if await ssh_exec.master_alive(host):
+                    break
+                await asyncio.sleep(0.25)
+            assert await ssh_exec.master_alive(host), "감시 루프가 마스터를 복구하지 못했다"
+        finally:
+            task.cancel()
+            await ssh_exec.stop_masters()
+
+    asyncio.run(scenario())
 
 
 def test_agent_self_name_is_rejected_as_a_path_or_account():

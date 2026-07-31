@@ -134,9 +134,8 @@ services:
       SSH_FORCE_TTY: ${SSH_FORCE_TTY:-false}
       # 연결 다중화: 첫 커맨드만 핸드셰이크하고 이후는 같은 연결에 얹는다(체감 지연의 대부분).
       SSH_MULTIPLEX: ${SSH_MULTIPLEX:-true}
-      # **3600.** 여기 300(5분)이 박혀 있어서, 코드 기본값을 3600으로 올린 뒤에도(#127)
-      # 실제로는 5분마다 마스터가 죽고 있었다. 드문드문 오는 채팅이라 그때마다 첫 커맨드에
-      # 1~3초가 다시 붙는다. compose가 코드 기본값을 덮어쓰는 값이니 함께 올린다.
+      # 마스터는 서비스가 뜰 때 상주 프로세스로 띄우고 15초마다 감시한다(#132).
+      # 이 값은 그 상주 마스터가 없을 때 커맨드가 직접 만든 연결의 수명(폴백)이다.
       SSH_CONTROL_PERSIST: ${SSH_CONTROL_PERSIST:-3600}
       # 유휴 TCP를 끊는 방화벽이 있으면 소켓만 남고 연결은 죽는다. keepalive로 스스로 확인.
       SSH_ALIVE_INTERVAL: ${SSH_ALIVE_INTERVAL:-30}
