@@ -64,3 +64,21 @@ async def update_setting(key: str, body: SettingIn, admin: str = Depends(require
         except Exception as e:  # noqa: BLE001
             return {"ok": True, "openwebui_sync_error": f"{type(e).__name__}: {e}"}
     return {"ok": True}
+
+
+@router.post("/agent_system_instruction/reset")
+async def reset_agent_instruction(admin: str = Depends(require_admin)):
+    """지시문을 **코드의 현재 기본값**으로 되돌린다.
+
+    왜 필요한가: `agent_system_instruction`은 non-force 시드라 db-init을 다시 돌려도
+    기존 DB 값을 덮지 않는다(관리자가 손댄 문구를 지우면 안 되므로). 그래서 지시문을 고칠
+    때마다 1만 자짜리 전문을 문서에 붙이고 사람이 복사·붙여넣기 해 왔다 - 매번 반복이고
+    중간에 잘리면 조용히 깨진다. 버튼 하나로 끝나게 한다.
+
+    직접 수정한 문구가 있으면 사라지므로, 프런트에서 확인창을 띄운다.
+    """
+    from agent_instruction import AGENT_INSTRUCTION      # noqa: PLC0415  (부수효과 없는 모듈)
+
+    await set_config("agent_system_instruction", AGENT_INSTRUCTION, updated_by=admin)
+    # hot_reload=false 키라 agent-server를 재시작해야 반영된다(프런트가 버튼을 띄운다).
+    return {"ok": True, "chars": len(AGENT_INSTRUCTION), "restart_required": True}

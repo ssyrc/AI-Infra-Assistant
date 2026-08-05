@@ -95,13 +95,13 @@ docker compose -f docker-compose.dev.yml up -d --no-build
 | `rerank_model` | `bge-reranker-v2-m3` |
 | `execution_host` | `202.20.185.100` (**이름 금지 — IP로**. login07은 /etc/hosts에서 75.11.29.7로 풀려 전부 실패했다. 구 `scheduler_login_host`, #128에서 개명) |
 | `openwebui_public_url` | `http://202.20.183.30:8502` (사용자 접속 주소. 콘솔이 API를 부르는 `openwebui_base_url`(8080)과 다르다) |
-| `agent_system_instruction` | `docs/NEXT-STEPS.md` **부록**의 전문 |
+| `agent_system_instruction` | 콘솔 설정 탭 **"지시문을 최신 기본값으로 되돌리기"** 버튼(#136) |
 
 - **왜 초기화되나**: `docker-compose.dev.yml`의 `dev-config` 서비스가 `up` 할 때마다 vLLM 주소를
   mock으로 되돌린다. 콘솔에서 저장한 값(`updated_by`가 관리자 계정)과 `.env`에 실제 주소를 넣은
   환경은 건드리지 않도록 이중 가드를 걸어뒀다(RUN-LOG #28, #48). 그래도 **postgres 볼륨이
   삭제되면**(`docker compose down -v`) 설정·매뉴얼·VOC가 전부 사라진다 — `down -v`는 쓰지 말 것.
-- 실서버의 `.env`에 `VLLM_LLM_BASE_URL`/`VLLM_EMBED_BASE_URL`/`RERANK_*`/`SCHEDULER_LOGIN_HOST`를
+- 실서버의 `.env`에 `VLLM_LLM_BASE_URL`/`VLLM_EMBED_BASE_URL`/`RERANK_*`/`EXECUTION_HOST`를
   실제 값으로 넣어두면 DB를 새로 만들어도 시드 단계에서 올바른 값이 들어간다.
 
 ## 3. 절대 규칙
@@ -140,7 +140,7 @@ docker compose -f docker-compose.dev.yml up -d --no-build
 | 새 설정 키 / 마이그레이션 | `db-init` 재실행 필수 |
 | **등록 커맨드 추가·수정·인자·`host_mode`·설명** | `execution-mcp` 재시작(툴 목록 재구성) |
 | `enabled` / `required_roles` | 실시간 반영(재시작 불필요) |
-| `agent_system_instruction` | non-force 시드라 **기존 DB에 자동 반영 안 됨** → 콘솔 설정 탭에 직접 붙여넣고 agent-server 재시작 |
+| `agent_system_instruction` | non-force 시드라 **기존 DB에 자동 반영 안 됨** → 콘솔 설정 탭 "지시문을 최신 기본값으로 되돌리기" 버튼 → agent-server 재시작. 원문은 `shared/agent_instruction.py` 한 곳뿐(NEXT-STEPS에 전문을 붙이지 말 것) |
 | `hot_reload=false` 설정값 | 해당 서비스 재시작(콘솔에 "지금 재시작" 버튼 있음) |
 | requirements 변경 | 이미지 재빌드(재시작만으로는 pip 패키지가 안 깔림) |
 

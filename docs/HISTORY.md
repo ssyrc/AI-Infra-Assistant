@@ -3200,6 +3200,30 @@ CLAUDE.md §3의 "셸을 쓰지 않는다(argv 리스트로 실행)"가 깨지�
 
 가짜 ssh(프로필 있어야 찾아지는 커맨드 + runuser 없는 서버)로 회귀 테스트에 고정했다.
 
+## 136. 지시문 복사·붙여넣기를 없앴다 — 버튼 하나로 (완료)
+
+*"tsv 발행 했다고 다시 적지말라고. 지시문도 마찬가지고."* — 매 라운드 NEXT-STEPS에 1만 자짜리
+지시문 전문을 붙이고 사람이 복사·붙여넣기 하게 만든 것이 반복 불만이었다.
+
+**왜 그래야 했나**: `agent_system_instruction`은 non-force 시드다. db-init을 다시 돌려도
+기존 DB 값을 덮지 않는다(관리자가 손댄 문구를 지우면 안 되므로). 그래서 코드에서 지시문을
+고칠 때마다 사람이 옮겨야 했고, 중간에 잘리면 조용히 깨졌다.
+
+- 콘솔 설정 탭 에이전트 그룹에 **"지시문을 최신 기본값으로 되돌리기"** 버튼을 넣었다.
+  누르면 코드의 현재 값으로 덮고, 이어서 agent-server 재시작까지 물어본다.
+  직접 고친 문구가 사라지므로 확인창을 띄운다.
+- `POST /api/settings/agent_system_instruction/reset`.
+
+**옮기다 걸린 것**: 처음엔 콘솔이 `from migrations import AGENT_INSTRUCTION` 하게 짰는데,
+`migrations.py`는 **import 시점에 `POSTGRES_PASSWORD`를 요구한다**(`os.environ[...]`).
+admin-console 컨테이너에는 그 환경변수가 없어서 그대로 뒀으면 500이 났다.
+→ 지시문을 부수효과 없는 `shared/agent_instruction.py`로 분리했다. 쓰는 곳이 셋이라
+(db-init 시드 · 콘솔 되돌리기 · 테스트) 애초에 거기가 맞는 자리였다.
+`PYTHONPATH=shared`만 주고 `POSTGRES_PASSWORD` 없이 import되는지 회귀 테스트로 고정했다
+(#112에서 이관 코드가 같은 방식으로 조용히 실패했던 것과 같은 종류의 함정이다).
+
+NEXT-STEPS도 그만큼 짧아졌다 — 부록 1만 자가 통째로 빠지고, 할 일 6단계 + 문제별 대처표만 남았다.
+
 ---
 
 ## 다음 항목은 이어서 여기 아래에 추가

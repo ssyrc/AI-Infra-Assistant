@@ -22,6 +22,12 @@ from cleaning import clean_text, CleanOptions  # noqa: E402
 from parser import parse_file  # noqa: E402
 
 
+def _instruction_text() -> str:
+    """에이전트 지시문 원문. shared/agent_instruction.py 한 곳에만 있다(#136)."""
+    return open(os.path.join(ROOT, "shared", "agent_instruction.py"), encoding="utf-8").read()
+
+
+
 # --- 5번: 정제가 인프라 placeholder를 지우면 안 된다 ------------------------------
 @pytest.mark.parametrize("text", [
     "ssh <user>@<host> 로 접속",
@@ -766,7 +772,7 @@ def test_manual_search_exposes_location_and_document_separately():
     assert 'item["guide_location"] = item.get("reference_path")' in src
     assert 'item["guide_document"]' in src
 
-    instr = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+    instr = _instruction_text()
     assert "가이드 위치:" in instr and "가이드 문서:" in instr, \
         "지시문에 참고 문서 출력 형식이 없다"
     assert "guide_location" in instr and "guide_document" in instr
@@ -775,7 +781,7 @@ def test_manual_search_exposes_location_and_document_separately():
 
 def test_instruction_asks_for_table_on_multi_column_output():
     """job 목록처럼 열이 있는 실행 결과는 표로 정리해야 한다(예전엔 그렇게 나왔다)."""
-    instr = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+    instr = _instruction_text()
     assert "마크다운 테이블" in instr and "job 목록" in instr
 
 
@@ -1206,6 +1212,35 @@ def test_privilege_drop_defaults_to_login_shell_and_keeps_legacy_flag():
     assert {"su", "runuser", "setpriv", "sudo"} <= DENY_BASE_COMMANDS
 
 
+def test_instruction_can_be_reset_from_console_without_db_env():
+    """지시문을 **버튼 하나로** 최신 기본값으로 되돌릴 수 있어야 한다(#136).
+
+    non-force 시드라 db-init이 기존 값을 안 덮으므로, 예전에는 1만 자짜리 전문을 문서에 붙이고
+    사람이 복사·붙여넣기 했다 - 매번 반복이고 중간에 잘리면 조용히 깨진다.
+    그리고 원문은 **부수효과 없는 모듈**에 있어야 한다. migrations.py는 import 시점에
+    POSTGRES_PASSWORD를 요구하는데, 콘솔 컨테이너에는 그 환경변수가 없어 터진다.
+    """
+    import subprocess
+    env = {"PATH": os.environ.get("PATH", ""),
+           "PYTHONPATH": os.path.join(ROOT, "shared")}     # POSTGRES_PASSWORD 없음 = 콘솔과 같은 조건
+    r = subprocess.run(
+        [sys.executable, "-c",
+         "from agent_instruction import AGENT_INSTRUCTION as A; assert len(A) > 1000; print(len(A))"],
+        capture_output=True, text=True, env=env, cwd="/")
+    assert r.returncode == 0, f"콘솔 환경에서 지시문을 읽지 못한다:\n{r.stderr}"
+
+    router = open(os.path.join(ROOT, "admin_console", "backend", "routers", "settings.py"),
+                  encoding="utf-8").read()
+    assert '@router.post("/agent_system_instruction/reset")' in router
+    assert "from agent_instruction import AGENT_INSTRUCTION" in router
+    assert "from migrations import" not in router, "콘솔이 migrations를 import하면 터진다"
+
+    html = open(os.path.join(ROOT, "admin_console", "frontend", "index.html"),
+                encoding="utf-8").read()
+    assert "지시문을 최신 기본값으로 되돌리기" in html
+    assert "/api/settings/agent_system_instruction/reset" in html
+
+
 def test_instruction_names_no_in_house_command():
     """지시문에 **사내 전용 커맨드 이름을 쓰지 않는다** — 금지 예시로도 쓰지 않는다.
 
@@ -1214,9 +1249,7 @@ def test_instruction_names_no_in_house_command():
     아니라 '아는 커맨드'로 읽힌다. #74에서 컴파일 옵션을 예시로 들었다가 같은 사고를 냈다.
     표준 리눅스 명령(ls·df·find …)은 실제로 존재하므로 예외다.
     """
-    import re as _re
-    src = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
-    instr = _re.search(r'AGENT_INSTRUCTION = """(.*?)"""', src, _re.S).group(1)
+    instr = _instruction_text()
     # 이 시스템에 있는지 우리가 확인할 수 없는 커맨드 이름들(과거에 지시문에 새어 들어간 것 포함).
     forbidden = ["phd ", "myquota", "squeue", "sinfo", "sbatch", "bsub", "qstat", "lsload"]
     hits = [w for w in forbidden if w in instr]
@@ -1226,7 +1259,7 @@ def test_instruction_names_no_in_house_command():
 def test_instruction_routes_own_resource_checks_straight_to_execution():
     """'내 job 현황'처럼 본인 자원을 물으면 매뉴얼을 뒤지지 말고 바로 실행해야 한다.
     '현황'이라는 낱말 때문에 매뉴얼 검색이 앞에 붙으면 답이 몇 초씩 늦어진다."""
-    instr = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+    instr = _instruction_text()
     assert "내 job 현황" in instr, "'현황'이 붙은 본인 자원 질문의 예외가 지시문에 없다"
     assert "매뉴얼도 과거 사례도 먼저 뒤지지 않습니다" in instr
 
@@ -1267,7 +1300,7 @@ def test_memory_block_is_marked_as_not_evidence():
 
 
 def test_instruction_covers_same_topic_different_target():
-    instr = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+    instr = _instruction_text()
     assert "주제가 같고 대상만 다른 질문" in instr
     assert "스크래치" in instr, "실제로 틀렸던 사례가 지시문에 없다"
     assert "확인되지 않습니다" in instr
@@ -1388,7 +1421,7 @@ def test_user_facing_error_hides_internal_settings():
 def test_instruction_prefers_manual_for_infra_inventory():
     """'GPU 인프라 현황'은 매뉴얼에 정리돼 있다. 서버마다 커맨드를 돌리면 출력이 쌓여
     컨텍스트를 넘긴다(#123에서 33,413토큰으로 실패했다)."""
-    instr = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+    instr = _instruction_text()
     assert "인프라 \"현황·구성\"을 물으면" in instr
     assert "매뉴얼을 먼저 검색합니다" in instr
     assert "## 도구를 이어서 씁니다" in instr
@@ -1396,7 +1429,7 @@ def test_instruction_prefers_manual_for_infra_inventory():
 
 def test_instruction_forbids_using_agent_name_as_account():
     """지어낸 파일 목록에 소유자를 `ops_assistant`(에이전트 자기 이름)로 적은 사고가 있었다."""
-    instr = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+    instr = _instruction_text()
     assert "ops_assistant" in instr
     assert "실행할 수 있는 도구가 없어 확인하지 못했습니다" in instr
 

@@ -1421,6 +1421,18 @@ function SettingsPanel() {
     }
   };
 
+  const resetInstruction = async () => {
+    if (!confirm("지시문을 코드의 최신 기본값으로 되돌릴까요?\n직접 고친 문구가 있으면 사라집니다."))
+      return;
+    try {
+      const r = await api("/api/settings/agent_system_instruction/reset", { method: "POST" });
+      const next = { ...edits }; delete next.agent_system_instruction; setEdits(next);
+      await load();
+      alert(`되돌렸습니다(${r.chars.toLocaleString()}자). agent-server 재시작이 필요합니다.`);
+      await restartService("agent-server");     // 이 함수가 확인창을 띄운다
+    } catch (e) { alert("되돌리기 실패: " + e.message); }
+  };
+
   const byKey = {};
   settings.filter(s => !s.env_managed).forEach(s => { byKey[s.key] = s; });
 
@@ -1444,6 +1456,16 @@ function SettingsPanel() {
                      onChange={e => setEdits({ ...edits, [s.key]: e.target.value })} />}
           <button className="primary" disabled={!dirty} onClick={() => save(s.key)}>저장</button>
         </div>
+        {isLong && (
+          // 지시문은 non-force 시드라 db-init을 다시 돌려도 기존 값을 안 덮는다. 그래서 코드가
+          // 바뀔 때마다 1만 자짜리 전문을 사람이 복사·붙여넣기 해 왔다 - 그걸 버튼으로 끝낸다.
+          <div style={{marginTop: 6}}>
+            <button onClick={resetInstruction}>지시문을 최신 기본값으로 되돌리기</button>
+            <span style={{fontSize: 11.5, color: "var(--muted)", marginLeft: 8}}>
+              직접 고친 문구가 있으면 사라집니다.
+            </span>
+          </div>
+        )}
       </div>
     );
   };
