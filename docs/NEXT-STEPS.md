@@ -44,19 +44,24 @@ bash scripts/bench-exec.sh yr9.choi "phd list"
 
 ## 5. [서버] 강등 방식 결정 — 4번 결과를 보고 정합니다
 
-4번 출력의 **2번(고정 비용)과 3번(실제 커맨드)** 을 보고 정합니다.
+**바로 켜도 됩니다.** 안 되는 커맨드는 시스템이 알아서 로그인 셸로 되돌려 실행합니다
+(그리고 그 커맨드는 다음부터 처음부터 로그인 셸로 갑니다). `runuser` 가 없는 서버면
+자동으로 `su` 로 내려갑니다.
 
-- 3번에서 `su` 또는 `runuser` 가 **정상 출력**이면 → `.env` 에 아래 한 줄 추가 후 재생성
+```bash
+cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
+echo "SSH_PRIVDROP=runuser" >> .env
+docker compose -f docker-compose.dev.yml up -d --no-build execution-mcp
+```
 
-  ```bash
-  echo "SSH_PRIVDROP=runuser" >> .env      # 또는 SSH_PRIVDROP=su
-  docker compose -f docker-compose.dev.yml up -d --no-build execution-mcp
-  ```
+켠 뒤 로그에서 어떤 방식으로 돌았는지 보입니다. 이 줄들을 보내주세요.
 
-- `command not found` 가 나면 그 커맨드가 프로필 PATH에 의존하는 것이니 **바꾸지 마세요**
-  (`su-login` 유지). `runuser` 자체가 없으면 127로 실패합니다 — 그때도 유지입니다.
+```bash
+docker compose -f docker-compose.dev.yml logs --tail=100 execution-mcp | grep -E "ssh_exec|로그인 셸|runuser"
+```
 
-셋 다 호출자 본인 계정으로 실행되는 건 동일합니다. 차이는 커맨드 하나당 붙는 고정 비용뿐입니다.
+- `[ssh_exec] phd 320ms (연결 재사용 · runuser · ...)` ← 이상적
+- `'phd'은 로그인 셸이 필요합니다` 가 보이면 그 커맨드만 프로필이 필요한 것입니다(정상 동작).
 
 ## 6. [웹] 콘솔 실행 탭 — 안 되는 커맨드 정리
 

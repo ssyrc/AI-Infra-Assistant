@@ -879,6 +879,7 @@ sys.exit(0)
 '''
 
 
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
 def test_resident_master_is_spawned_adopted_and_restarted(tmp_path, monkeypatch):
     """상주 마스터의 상태 기계를 실제로 돌려서 확인한다(가짜 ssh 사용).
 
@@ -1122,6 +1123,64 @@ def test_privilege_drop_modes_build_safe_remote_commands(mode, expect_prefix, mo
             assert f" {danger} " not in cmd, f"인용되지 않은 채 노출됨: {danger}"
     finally:
         monkeypatch.delenv("SSH_PRIVDROP", raising=False)
+        importlib.reload(ssh_exec)
+
+
+_FAKE_SSH_PROFILE_ONLY = '''#!/usr/bin/env python3
+"""가짜 ssh: `phd`는 로그인 셸에서만 찾아지고, runuser는 아예 없는 서버를 흉내낸다."""
+import sys
+remote = sys.argv[-1]
+if remote.startswith("runuser"):
+    sys.stderr.write("bash: runuser: command not found\\n"); sys.exit(127)
+if remote.startswith("su - "):
+    sys.stdout.write("JOBID  STATE\\n1234   RUN\\n"); sys.exit(0)
+if remote.startswith("su "):
+    sys.stderr.write("bash: phd: command not found\\n"); sys.exit(127)
+sys.exit(0)
+'''
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
+def test_non_login_privdrop_recovers_without_failing_the_user(tmp_path, monkeypatch):
+    """비로그인 강등을 켜도 **사용자에게는 실패가 보이면 안 된다**.
+
+    두 가지가 겹칠 수 있다: 대상 서버에 runuser가 없고, 그 커맨드는 프로필(PATH)이 있어야
+    찾아진다. 한 번만 재시도하면 첫 실행이 그대로 실패하므로 루프로 돈다.
+    그리고 무엇이 프로필을 필요로 하는지 **기억해서** 다음부터는 처음부터 로그인 셸로 간다.
+    """
+    import importlib
+    fake_dir = tmp_path / "bin"
+    fake_dir.mkdir()
+    fake = fake_dir / "ssh"
+    fake.write_text(_FAKE_SSH_PROFILE_ONLY, encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("SSH_PRIVDROP", "runuser")
+    monkeypatch.setenv("SSH_MULTIPLEX", "false")
+
+    sys.path.insert(0, os.path.join(ROOT, "shared"))
+    import ssh_exec
+    importlib.reload(ssh_exec)
+    try:
+        async def limit():
+            return 4000
+        ssh_exec.set_output_limit_getter(limit)
+
+        async def scenario():
+            first = await ssh_exec.run_ssh_as_user("203.0.113.9", "yr9.choi", ["phd", "list"])
+            assert first["exit_code"] == 0, f"첫 실행이 실패했다: {first}"
+            assert first["privdrop"] == "su-login"
+            assert "1234" in first["stdout"]
+
+            second = await ssh_exec.run_ssh_as_user("203.0.113.9", "yr9.choi", ["phd", "list"])
+            assert second["privdrop"] == "su-login", "배운 걸 안 쓰고 또 돌아갔다"
+            assert "phd" in ssh_exec._NEEDS_LOGIN_SHELL
+            assert ssh_exec._privdrop_downgrade == "su", "runuser 미지원을 기억하지 않았다"
+
+        asyncio.run(scenario())
+    finally:
+        for k in ("SSH_PRIVDROP", "SSH_MULTIPLEX"):
+            monkeypatch.delenv(k, raising=False)
         importlib.reload(ssh_exec)
 
 

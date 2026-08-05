@@ -195,7 +195,7 @@ def validate_user(user_id: str) -> str:
     return user_id
 
 
-def _remote_command(user: str, argv: list) -> str:
+def _remote_command(user: str, argv: list, mode: str | None = None) -> str:
     """원격에서 'su - user -c <inner>' 형태로 사용자 권한 실행 명령을 만든다.
     inner의 동적 인자는 사용자 셸용으로 quote하고, inner 전체는 root 셸용으로 다시 quote한다.
 
@@ -205,11 +205,12 @@ def _remote_command(user: str, argv: list) -> str:
     `runuser`는 인용이 **한 겹**이다(argv를 그대로 받는다). `su -c`는 문자열 하나를 받으므로
     사용자 셸용으로 한 번, root 셸용으로 또 한 번 - 두 겹으로 감싼다.
     """
-    if SSH_PRIVDROP == "runuser":
+    mode = mode or SSH_PRIVDROP
+    if mode == "runuser":
         parts = ["runuser", "-u", user, "--", *(str(a) for a in argv)]
         return " ".join(shlex.quote(p) for p in parts)       # root 셸 파싱용 한 겹뿐
     inner = " ".join(shlex.quote(str(a)) for a in argv)      # 사용자 셸 파싱용
-    dash = "- " if SSH_PRIVDROP == "su-login" else ""
+    dash = "- " if mode == "su-login" else ""
     return f"su {dash}{user} -c {shlex.quote(inner)}"        # root 셸 파싱용 (user는 정규식 검증됨)
 
 
@@ -493,13 +494,46 @@ def start_master_keepalive(host_getter, interval: int = 240):
     return asyncio.create_task(_loop())
 
 
+# 로그인 셸이 있어야 찾아지는 커맨드를 **런타임에 배운다**(커맨드 이름 -> 프로필 필요).
+# 비로그인 모드(su/runuser)로 돌렸는데 `command not found`가 나면, 그건 그 커맨드가
+# 프로필에서 잡히는 PATH에 있다는 뜻이다. 그 한 건만 로그인 셸로 다시 돌리고 여기 기억해 둔다.
+# 다음부터 그 커맨드는 처음부터 로그인 셸로 간다 - 두 번 돌지 않는다.
+_NEEDS_LOGIN_SHELL: set = set()
+# 대상 서버에 runuser 자체가 없으면 모드를 통째로 내린다(커맨드마다 127을 반복할 이유가 없다).
+_privdrop_downgrade: str | None = None
+
+_NOT_FOUND_MARKERS = ("command not found", "no such file or directory", "not found")
+
+
+def _effective_privdrop(argv: list) -> str:
+    """이번 실행에 쓸 강등 방식. 학습된 예외와 서버 미지원을 반영한다."""
+    mode = _privdrop_downgrade or SSH_PRIVDROP
+    if mode != "su-login" and str(argv[0]).rsplit("/", 1)[-1] in _NEEDS_LOGIN_SHELL:
+        return "su-login"
+    return mode
+
+
+def _looks_like_missing_command(returncode: int, stderr_low: str, argv: list) -> bool:
+    """`command not found`인지. 커맨드 이름이 함께 보이는지까지 확인해 오탐을 줄인다."""
+    if returncode not in (126, 127):
+        return False
+    name = str(argv[0]).rsplit("/", 1)[-1].lower()
+    return any(m in stderr_low for m in _NOT_FOUND_MARKERS) and name in stderr_low
+
+
 async def run_ssh_as_user(host: str, user_id: str, argv: list,
                           timeout: int = DEFAULT_TIMEOUT, max_output: int | None = None) -> dict:
-    """host(=/etc/hosts 등록)로 ssh(root) 후 user_id 권한으로 argv를 실행한다(셸 주입 불가)."""
+    """host(=/etc/hosts 등록)로 ssh(root) 후 user_id 권한으로 argv를 실행한다(셸 주입 불가).
+
+    비로그인 강등(`su`/`runuser`)으로 돌다가 커맨드를 못 찾으면 **로그인 셸로 한 번 더** 돌린다.
+    그래서 `SSH_PRIVDROP`을 바꿔도 "안 되면 어쩌지"를 걱정할 필요가 없다 - 프로필이 필요한
+    커맨드만 2초를 내고, 나머지는 계속 빠르다.
+    """
+    global _privdrop_downgrade
     ip = resolve_host(host)
     user = validate_user(user_id)
     max_output = await _resolve_output_limit(max_output)
-    remote_cmd = _remote_command(user, argv)
+    mode = _effective_privdrop(argv)
 
     # SSH_KEY 경로가 '파일'일 때만 -i로 넘긴다(_base_ssh_opts에서 처리). compose가 없는
     # 경로를 bind mount하면 도커가 그 자리에 '빈 디렉토리'를 만들어 버리는데, 그걸 -i로 주면
@@ -507,37 +541,69 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
     if SSH_KEY and not os.path.isfile(SSH_KEY):
         print(f"[ssh_exec] SSH_KEY가 파일이 아니라 무시합니다: {SSH_KEY} "
               "(docker가 빈 디렉토리를 만든 상태일 수 있음 - .env의 SSH_KEY_PATH 확인)")
-    ssh_argv = ["ssh", *_base_ssh_opts(ip)]
-    if SSH_FORCE_TTY:
-        ssh_argv.append("-tt")
-    ssh_argv += [f"{SSH_ROOT_USER}@{ip}", remote_cmd]
+
+    async def _attempt(run_mode: str):
+        """주어진 강등 방식으로 한 번 실행한다."""
+        argv_ssh = ["ssh", *_base_ssh_opts(ip)]
+        if SSH_FORCE_TTY:
+            argv_ssh.append("-tt")
+        argv_ssh += [f"{SSH_ROOT_USER}@{ip}", _remote_command(user, argv, run_mode)]
+        try:
+            p = await asyncio.create_subprocess_exec(
+                *argv_ssh,
+                stdin=asyncio.subprocess.DEVNULL,   # -tt로 pty를 붙여도 입력 대기에 걸리지 않게
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError:
+            raise RuntimeError(
+                "ssh 클라이언트가 없습니다. MCP 컨테이너에 openssh-client가 필요합니다.")
+        try:
+            o, e = await asyncio.wait_for(p.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            try:
+                p.kill()
+            except ProcessLookupError:
+                pass
+            raise TimeoutError(
+                f"명령이 {timeout}초 안에 끝나지 않아 중단했습니다({host}). 원래 오래 걸리는 "
+                "커맨드라면 .env의 SSH_COMMAND_TIMEOUT을 늘리세요(권한/인증 문제가 아닙니다).")
+        return p, o, e
 
     # "느리다"를 추측하지 않기 위한 두 값이다.
     #   reused=True  -> 접속은 공짜였다. 느렸다면 원격 커맨드나 `su -` 로그인 셸이 느린 것.
     #   reused=False -> 이 호출이 TCP+키교환+로그인까지 새로 했다(1~3초). 예열이 안 된 것.
     reused = master_socket_exists(ip)
     started = time.monotonic()
+    proc, out, err = await _attempt(mode)
 
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *ssh_argv,
-            stdin=asyncio.subprocess.DEVNULL,   # -tt로 pty를 붙여도 입력 대기에 걸리지 않게
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-    except FileNotFoundError:
-        raise RuntimeError("ssh 클라이언트가 없습니다. MCP 컨테이너에 openssh-client가 필요합니다.")
-
-    try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-        raise TimeoutError(
-            f"명령이 {timeout}초 안에 끝나지 않아 중단했습니다({host}). 원래 오래 걸리는 "
-            "커맨드라면 .env의 SSH_COMMAND_TIMEOUT을 늘리세요(권한/인증 문제가 아닙니다).")
+    # --- 비로그인 강등이 실패했을 때의 자동 복구 --------------------------------------
+    # 여기서 되돌려 주지 않으면 `SSH_PRIVDROP`을 바꾸는 것이 도박이 된다.
+    # 두 가지가 겹칠 수 있어서 **루프**로 돈다(runuser가 없는 서버에서 프로필이 필요한 커맨드).
+    #   runuser 없음  -> 모드를 통째로 su로 내린다(한 번만, 이후 모든 커맨드에 적용).
+    #   커맨드 못 찾음 -> 그 커맨드만 로그인 셸로. 이름을 기억해 다음부터는 처음부터 그렇게 간다.
+    name = str(argv[0]).rsplit("/", 1)[-1]
+    for _ in range(2):
+        if mode == "su-login" or proc.returncode not in (126, 127):
+            break
+        err_low = err.decode("utf-8", "replace").lower()
+        if mode == "runuser" and "runuser" in err_low and any(
+                m in err_low for m in _NOT_FOUND_MARKERS):
+            _privdrop_downgrade = "su"
+            next_mode = "su" if name not in _NEEDS_LOGIN_SHELL else "su-login"
+            print("[ssh_exec] 대상 서버에 runuser가 없어 강등 방식을 su로 내립니다"
+                  "(이번 실행부터 자동 적용, .env를 고칠 필요 없음).")
+        elif _looks_like_missing_command(proc.returncode, err_low, argv):
+            _NEEDS_LOGIN_SHELL.add(name)
+            next_mode = "su-login"
+            print(f"[ssh_exec] '{name}'은 로그인 셸이 필요합니다 → 이번 실행만 su -로 다시 "
+                  "합니다(다음부터는 처음부터 로그인 셸로 갑니다).")
+        else:
+            break
+        if next_mode == mode:
+            break
+        mode = next_mode
+        proc, out, err = await _attempt(mode)
 
     elapsed_ms = int((time.monotonic() - started) * 1000)
 
@@ -571,11 +637,12 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
         "stderr": _clip(err),
         "duration_ms": elapsed_ms,
         "connection_reused": reused,
+        "privdrop": mode,
     }
-    # 커맨드 하나가 몇 초 걸렸는지, 접속을 새로 맺었는지를 **항상** 남긴다.
+    # 커맨드 하나가 몇 초 걸렸는지, 접속을 새로 맺었는지, 어떤 강등 방식이었는지를 **항상** 남긴다.
     # 이게 없으면 "느리다"는 리포트가 올 때마다 다시 추측하게 된다.
     print(f"[ssh_exec] {argv[0]} {elapsed_ms:,}ms "
-          f"({'연결 재사용' if reused else '새 접속'} · {ip} · {user})")
+          f"({'연결 재사용' if reused else '새 접속'} · {mode} · {ip} · {user})")
     # 실패 원인을 에이전트가 엉뚱하게 해석하지 않도록, 흔한 두 가지는 명시적으로 알려준다.
     # **어느 IP로 붙었는지를 반드시 함께 적는다** - 손으로 IP를 직접 넣으면 되는데 에이전트만
     # 실패하는 경우, 원인은 거의 항상 "이름이 /etc/hosts에서 다른 IP로 풀렸다"이기 때문이다.
@@ -613,11 +680,9 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
         result["error"] = (
             f"서버 '{host}'에 '{user}' 계정이 없어 실행하지 못했습니다(권한 문제가 아님). "
             "Open WebUI 계정 이메일의 '@' 앞부분이 서버 계정명과 같아야 합니다.")
-    elif (SSH_PRIVDROP == "runuser" and proc.returncode == 127
-          and "runuser" in low and "not found" in low):
-        # 커맨드가 없는 게 아니라 **우리가 고른 강등 도구**가 대상 서버에 없는 것이다.
-        # 이걸 구분해 주지 않으면 "그 커맨드가 없다"로 오해하게 된다.
+    elif mode == "runuser" and proc.returncode == 127 and "runuser" in low:
+        # 위 자동 복구로도 안 됐다는 뜻이다(재시도까지 runuser로 돌았을 리는 없지만 방어).
         result["error"] = (
             f"서버 '{host}'에 runuser가 없어 실행하지 못했습니다(커맨드 문제가 아님). "
-            ".env의 SSH_PRIVDROP을 su 또는 su-login으로 되돌리고 컨테이너를 재생성하세요.")
+            ".env의 SSH_PRIVDROP을 su 또는 su-login으로 되돌리세요.")
     return result
