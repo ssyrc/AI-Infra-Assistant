@@ -107,8 +107,11 @@ docker compose -f docker-compose.dev.yml up -d --no-build
 ## 3. 절대 규칙
 
 - **커맨드는 어떤 경우에도 root로 실행하지 않는다.** 모든 실행은
-  `shared/ssh_exec.run_ssh_as_user()` 하나만 거치며, 항상 `ssh root@host` → `su - <user_id> -c`로
-  호출자 본인 권한으로 강등해 실행한다. 우회 경로를 만들지 않는다.
+  `shared/ssh_exec.run_ssh_as_user()` 하나만 거치며, 항상 `ssh root@host` → 호출자 본인 계정으로
+  강등해 실행한다. 우회 경로를 만들지 않는다.
+  강등 방식은 `SSH_PRIVDROP`으로 고른다(`su-login` 기본 / `su` / `runuser`) — 셋 다 본인 계정으로
+  내려가는 것은 같고, 커맨드당 고정 비용만 다르다(#134). **사용자별 셸을 상주시키지 않는다**:
+  파이프에 커맨드 문자열을 써 넣어야 해서 "셸 미사용" 원칙이 깨진다(#103, #134).
 - 셸을 쓰지 않는다(argv 리스트로 실행). 파괴적 명령은 등록/실행 단계에서 거부한다.
 - `user_id`는 LLM 스키마에서 숨기고 호출자 헤더(`X-User-Id`)에서 강제 주입한다(남의 자원 접근 불가).
 

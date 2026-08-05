@@ -1097,17 +1097,54 @@ def test_warm_endpoint_exists_and_is_not_a_tool():
     assert main.count("warm_execution_host()") >= 3, "예열 호출 지점이 부족하다"
 
 
-def test_su_login_shell_is_switchable_but_defaults_on():
-    """`su -`는 커맨드마다 약 2초를 쓴다. 끌 수 있게 하되, 기본은 유지한다
-    (사내 커맨드가 프로필의 PATH에 의존하면 끄는 순간 command not found가 된다)."""
-    ssh = open(os.path.join(ROOT, "shared", "ssh_exec.py"), encoding="utf-8").read()
-    assert 'os.environ.get("SSH_SU_LOGIN", "true")' in ssh, "기본값이 로그인 셸이 아니다"
+@pytest.mark.parametrize("mode,expect_prefix", [
+    ("su-login", "su - yr9.choi -c "),
+    ("su", "su yr9.choi -c "),
+    ("runuser", "runuser -u yr9.choi -- "),
+])
+def test_privilege_drop_modes_build_safe_remote_commands(mode, expect_prefix, monkeypatch):
+    """권한 강등 방식 3가지. **어느 쪽이든 호출자 본인 계정으로 내려간다**(우회 경로 없음).
 
+    차이는 커맨드 하나당 고정 비용이다 - `su -`는 원격 프로필을 매번 읽어 실측 약 2초를 쓰고,
+    `runuser`는 PAM 인증과 프로필을 모두 건너뛴다. 어느 쪽을 쓰든 셸 메타문자는 인용 밖으로
+    새면 안 된다(그게 새면 `; rm -rf /`가 그대로 실행된다).
+    """
+    import importlib
+    monkeypatch.setenv("SSH_PRIVDROP", mode)
     sys.path.insert(0, os.path.join(ROOT, "shared"))
     import ssh_exec
-    assert ssh_exec.SSH_SU_LOGIN is True
-    cmd = ssh_exec._remote_command("yr9.choi", ["quota", "report"])
-    assert cmd.startswith("su - yr9.choi -c "), cmd
+    importlib.reload(ssh_exec)
+    try:
+        assert ssh_exec.SSH_PRIVDROP == mode
+        cmd = ssh_exec._remote_command("yr9.choi", ["ls", "-lh", "; rm -rf /", "`whoami`"])
+        assert cmd.startswith(expect_prefix), cmd
+        for danger in ("; rm -rf /", "`whoami`"):
+            assert f" {danger} " not in cmd, f"인용되지 않은 채 노출됨: {danger}"
+    finally:
+        monkeypatch.delenv("SSH_PRIVDROP", raising=False)
+        importlib.reload(ssh_exec)
+
+
+def test_privilege_drop_defaults_to_login_shell_and_keeps_legacy_flag():
+    """기본은 로그인 셸이다 - 사내 커맨드가 프로필의 PATH에 의존하면 다른 방식은 깨진다.
+    먼저 재 보고(bench-exec.sh) 확인된 환경에서만 바꾼다. 구 SSH_SU_LOGIN도 계속 통해야 한다."""
+    import importlib
+    sys.path.insert(0, os.path.join(ROOT, "shared"))
+    import ssh_exec
+    importlib.reload(ssh_exec)
+    assert ssh_exec.SSH_PRIVDROP == "su-login"
+
+    os.environ["SSH_SU_LOGIN"] = "false"
+    try:
+        importlib.reload(ssh_exec)
+        assert ssh_exec.SSH_PRIVDROP == "su", "구 설정(SSH_SU_LOGIN=false)이 안 먹는다"
+    finally:
+        os.environ.pop("SSH_SU_LOGIN", None)
+        importlib.reload(ssh_exec)
+
+    # 강등 도구 자체는 사용자 커맨드로 실행될 수 없어야 한다(우회 방지).
+    from execution_exec import DENY_BASE_COMMANDS
+    assert {"su", "runuser", "setpriv", "sudo"} <= DENY_BASE_COMMANDS
 
 
 def test_instruction_names_no_in_house_command():

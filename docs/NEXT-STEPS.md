@@ -42,18 +42,21 @@ bash scripts/bench-exec.sh yr9.choi "phd list"
 
 새 스크립트는 **"최적화 끔 / 켬"을 나란히** 보여줍니다. 켬이 확 작아지면 인증 협상이 원인이었던 게 확정됩니다.
 
-## 5. [서버] 로그인 셸 2초 없앨 수 있는지 — 결과를 보내주세요
+## 5. [서버] 강등 방식 결정 — 4번 결과를 보고 정합니다
 
-비교 대상(spagent)이 빠른 이유 중 하나입니다. 그쪽은 로그인 셸을 안 거칩니다.
+4번 출력의 **2번(고정 비용)과 3번(실제 커맨드)** 을 보고 정합니다.
 
-```bash
-docker compose -f docker-compose.dev.yml exec -T execution-mcp \
-  ssh -o BatchMode=yes -o GSSAPIAuthentication=no -i /root/.ssh/id_ed25519 \
-  root@202.20.185.100 "su yr9.choi -c 'phd list'"
-```
+- 3번에서 `su` 또는 `runuser` 가 **정상 출력**이면 → `.env` 에 아래 한 줄 추가 후 재생성
 
-정상 출력이면 `.env`에 `SSH_SU_LOGIN=false` 추가 후 `up -d` → 커맨드마다 2초가 사라집니다.
-`command not found` 면 넣지 마세요.
+  ```bash
+  echo "SSH_PRIVDROP=runuser" >> .env      # 또는 SSH_PRIVDROP=su
+  docker compose -f docker-compose.dev.yml up -d --no-build execution-mcp
+  ```
+
+- `command not found` 가 나면 그 커맨드가 프로필 PATH에 의존하는 것이니 **바꾸지 마세요**
+  (`su-login` 유지). `runuser` 자체가 없으면 127로 실패합니다 — 그때도 유지입니다.
+
+셋 다 호출자 본인 계정으로 실행되는 건 동일합니다. 차이는 커맨드 하나당 붙는 고정 비용뿐입니다.
 
 ## 6. [웹] 콘솔 실행 탭 — 안 되는 커맨드 정리
 

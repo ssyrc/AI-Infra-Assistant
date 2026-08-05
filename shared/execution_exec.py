@@ -32,7 +32,7 @@ DENY_BASE_COMMANDS = {
     "kill", "killall", "pkill",
     # 계정/권한
     "useradd", "userdel", "usermod", "groupadd", "groupdel", "passwd", "visudo",
-    "chmod", "chown", "chattr", "setfacl", "su", "sudo", "doas",
+    "chmod", "chown", "chattr", "setfacl", "su", "sudo", "doas", "runuser", "setpriv",
     # 시스템 상태 변경
     "mount", "umount", "iptables", "nft", "crontab", "at",
     # **셸/실행 위임** - 이게 열려 있으면 위의 모든 차단이 무의미해진다.

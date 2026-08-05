@@ -64,10 +64,23 @@ SSH_CONTROL_PERSIST = os.environ.get("SSH_CONTROL_PERSIST", "3600")
 # 커맨드가 죽은 소켓을 잡고 타임아웃까지 기다린다. keepalive로 살아 있는지 스스로 확인하게 한다.
 SSH_ALIVE_INTERVAL = os.environ.get("SSH_ALIVE_INTERVAL", "30")
 SSH_ALIVE_COUNT = os.environ.get("SSH_ALIVE_COUNT", "3")
-# `su - <user>`(로그인 셸)는 커맨드마다 원격 계정 프로필을 전부 읽는다(실측 약 2초).
-# 기본은 true - 사내 커맨드가 프로필의 PATH/모듈에 의존하는 경우가 많다.
-# 그런 의존이 없다고 확인한 환경에서만 .env에 SSH_SU_LOGIN=false를 넣어 2초를 없앤다.
-SSH_SU_LOGIN = os.environ.get("SSH_SU_LOGIN", "true").strip().lower() != "false"
+# 권한 강등 방식. **어느 쪽이든 호출자 본인 계정으로 내려가는 것은 같다**(우회 경로 없음).
+# 차이는 커맨드 하나당 붙는 고정 비용이다.
+#   su-login (기본) `su - <user> -c '...'` - 로그인 셸. 원격 계정 프로필(/etc/profile, .bashrc,
+#                   모듈 초기화)을 매번 읽는다. 실측 약 2초. 사내 커맨드가 프로필의 PATH에
+#                   의존하면 이것만 동작한다.
+#   su              `su <user> -c '...'`   - 프로필을 안 읽는다. PATH가 기본값이 된다.
+#   runuser         `runuser -u <user> -- <argv>` - PAM 인증 단계를 통째로 건너뛰고
+#                   (root 전용 도구라 애초에 인증이 필요 없다) 프로필도 안 읽는다. 보통 제일 빠르다.
+#                   **argv를 그대로 받아 셸 인용이 한 겹으로 줄어든다** - 안전 면에서도 낫다.
+#                   util-linux에 들어 있어 RHEL/CentOS/Debian 계열엔 대개 있지만, 없으면 127로
+#                   실패하므로 반드시 먼저 확인하고 바꾼다(scripts/bench-exec.sh가 셋 다 잰다).
+_PRIVDROP_MODES = ("su-login", "su", "runuser")
+SSH_PRIVDROP = os.environ.get("SSH_PRIVDROP", "").strip().lower()
+if SSH_PRIVDROP not in _PRIVDROP_MODES:
+    # 구 설정과의 호환: SSH_SU_LOGIN=false 는 `su`(비로그인)를 뜻했다.
+    _legacy_login = os.environ.get("SSH_SU_LOGIN", "true").strip().lower() != "false"
+    SSH_PRIVDROP = "su-login" if _legacy_login else "su"
 
 # LLM에 넘길 출력 상한. **컨텍스트 예산 때문에 반드시 작아야 한다.**
 # 예전엔 64KB였는데, 그 출력이 그대로 다음 요청 프롬프트에 실려 32768 컨텍스트를 넘겼다
@@ -186,14 +199,17 @@ def _remote_command(user: str, argv: list) -> str:
     """원격에서 'su - user -c <inner>' 형태로 사용자 권한 실행 명령을 만든다.
     inner의 동적 인자는 사용자 셸용으로 quote하고, inner 전체는 root 셸용으로 다시 quote한다.
 
-    `-`(로그인 셸)는 커맨드마다 원격 계정의 프로필을 전부 읽는다 - 실측 약 2초였고,
-    연결 다중화로는 줄지 않으며 도구 호출 횟수만큼 그대로 곱해진다. 그래도 **기본은 로그인
-    셸이다**: 사내 커맨드가 프로필에서 잡히는 PATH/모듈에 의존하는 경우가 많아, 끄면
-    "command not found"로 바뀔 수 있다. 확인한 환경에서만 SSH_SU_LOGIN=false로 끈다.
-    어느 쪽이든 권한 강등(`su - <user>`)은 그대로다 - 우회 경로가 생기지 않는다.
+    방식은 `SSH_PRIVDROP`으로 고른다(위 상수 설명 참고). **어느 쪽이든 호출자 본인 계정으로
+    내려가는 것은 같다.**
+
+    `runuser`는 인용이 **한 겹**이다(argv를 그대로 받는다). `su -c`는 문자열 하나를 받으므로
+    사용자 셸용으로 한 번, root 셸용으로 또 한 번 - 두 겹으로 감싼다.
     """
-    inner = " ".join(shlex.quote(str(a)) for a in argv)     # 사용자 셸 파싱용
-    dash = "- " if SSH_SU_LOGIN else ""
+    if SSH_PRIVDROP == "runuser":
+        parts = ["runuser", "-u", user, "--", *(str(a) for a in argv)]
+        return " ".join(shlex.quote(p) for p in parts)       # root 셸 파싱용 한 겹뿐
+    inner = " ".join(shlex.quote(str(a)) for a in argv)      # 사용자 셸 파싱용
+    dash = "- " if SSH_PRIVDROP == "su-login" else ""
     return f"su {dash}{user} -c {shlex.quote(inner)}"        # root 셸 파싱용 (user는 정규식 검증됨)
 
 
@@ -597,4 +613,11 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
         result["error"] = (
             f"서버 '{host}'에 '{user}' 계정이 없어 실행하지 못했습니다(권한 문제가 아님). "
             "Open WebUI 계정 이메일의 '@' 앞부분이 서버 계정명과 같아야 합니다.")
+    elif (SSH_PRIVDROP == "runuser" and proc.returncode == 127
+          and "runuser" in low and "not found" in low):
+        # 커맨드가 없는 게 아니라 **우리가 고른 강등 도구**가 대상 서버에 없는 것이다.
+        # 이걸 구분해 주지 않으면 "그 커맨드가 없다"로 오해하게 된다.
+        result["error"] = (
+            f"서버 '{host}'에 runuser가 없어 실행하지 못했습니다(커맨드 문제가 아님). "
+            ".env의 SSH_PRIVDROP을 su 또는 su-login으로 되돌리고 컨테이너를 재생성하세요.")
     return result

@@ -76,12 +76,18 @@ t "최적화 끔 (기존 옵션)"        "\$SLOW" true
 t "최적화 켬 (GSSAPI/키/IPv4)"   "\$BASE" true
 
 echo
-echo "=== 2. 마스터를 세운 뒤 ==="
+echo "=== 2. 마스터를 세운 뒤: 권한 강등 방식별 고정 비용 ==="
 ssh \$BASE \$MUX "root@\$HOST" true >/dev/null 2>&1 </dev/null
-t "접속만"                         "\$BASE \$MUX" true
-t "su - 로그인 셸 (기본)"          "\$BASE \$MUX" "su - \$USER_ID -c true"
-t "su 비로그인 셸 (SSH_SU_LOGIN=false)" "\$BASE \$MUX" "su \$USER_ID -c true"
-t "실제 커맨드 (su - 로) "         "\$BASE \$MUX" "su - \$USER_ID -c '\$CMD'"
+t "접속만 (강등 없음)"                    "\$BASE \$MUX" true
+t "su-login  : su - user -c true"         "\$BASE \$MUX" "su - \$USER_ID -c true"
+t "su        : su user -c true"           "\$BASE \$MUX" "su \$USER_ID -c true"
+t "runuser   : runuser -u user -- true"   "\$BASE \$MUX" "runuser -u \$USER_ID -- true"
+
+echo
+echo "=== 3. 실제 커맨드 ==="
+t "su-login" "\$BASE \$MUX" "su - \$USER_ID -c '\$CMD'"
+t "su"       "\$BASE \$MUX" "su \$USER_ID -c '\$CMD'"
+t "runuser"  "\$BASE \$MUX" "runuser -u \$USER_ID -- \$CMD"
 
 ssh \$BASE \$MUX -O exit "root@\$HOST" >/dev/null 2>&1
 EOF
@@ -93,10 +99,11 @@ cat <<'EOF'
     이번 코드에 그 옵션들이 들어갔으니 그대로 좋아진다.
   · 1번 두 줄이 둘 다 크면 → 게이트 서버 sshd 쪽 지연(역방향 DNS `UseDNS` 등)이다.
     우리 쪽에서 못 줄이니, 마스터를 항상 세워 두는 것(예열)으로 감춘다.
-  · 2번 "su - 로그인 셸"과 "su 비로그인 셸" 차이가 크면 → 원격 계정 프로필이 무겁다.
-    비로그인으로 바꿔도 커맨드가 정상 동작하면(PATH가 잡히면) .env에 SSH_SU_LOGIN=false를
-    넣어 커맨드마다 그 시간을 없앨 수 있다. 먼저 실제 커맨드로 확인할 것:
-      docker compose -f docker-compose.dev.yml exec -T execution-mcp \
-        ssh -o BatchMode=yes -i /root/.ssh/id_ed25519 root@<IP> "su <계정> -c '<커맨드>'"
-  · "실제 커맨드"만 크면 → 커맨드 자체가 느린 것이다. 정상이다.
+  · 2번에서 su-login 이 나머지 둘보다 크면 → 원격 계정 프로필이 무겁다. 그 차이가
+    **커맨드 하나마다, 도구 호출 횟수만큼** 곱해진다.
+  · **3번이 결정한다.** 셋 다 정상 출력이 나오면 가장 빠른 것을 쓰면 된다:
+      .env 에  SSH_PRIVDROP=runuser   (또는 su / su-login)  → up -d 로 재생성
+    su/runuser 에서만 `command not found` 가 나면 그 커맨드가 프로필의 PATH에 의존하는 것이니
+    su-login 을 유지해야 한다. runuser 자체가 없으면 127로 실패한다(그때도 su-login/su를 쓴다).
+  · 3번 셋 다 비슷하게 크면 → 커맨드 자체가 느린 것이다. 정상이다.
 EOF

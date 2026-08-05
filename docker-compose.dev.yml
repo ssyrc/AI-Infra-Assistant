@@ -139,9 +139,13 @@ services:
       SSH_CONTROL_PERSIST: ${SSH_CONTROL_PERSIST:-3600}
       # 유휴 TCP를 끊는 방화벽이 있으면 소켓만 남고 연결은 죽는다. keepalive로 스스로 확인.
       SSH_ALIVE_INTERVAL: ${SSH_ALIVE_INTERVAL:-30}
-      # `su - <user>`(로그인 셸)는 커맨드마다 원격 프로필을 읽어 약 2초를 쓴다.
-      # 사내 커맨드가 프로필 PATH에 의존하지 않는다고 확인한 뒤에만 false로 끈다.
-      SSH_SU_LOGIN: ${SSH_SU_LOGIN:-true}
+      # 권한 강등 방식: su-login(기본) | su | runuser
+      #   su-login  `su - <user> -c` 로그인 셸. 프로필을 매번 읽어 실측 약 2초.
+      #   su        프로필 안 읽음. PATH가 기본값이 된다.
+      #   runuser   PAM 인증·프로필 모두 건너뜀. 보통 제일 빠르고 인용도 한 겹이다.
+      # **먼저 scripts/bench-exec.sh 로 셋 다 재 보고**, 실제 커맨드가 정상 동작하는 것 중
+      # 가장 빠른 것으로 바꾼다(사내 커맨드가 프로필 PATH에 의존하면 su-login만 동작한다).
+      SSH_PRIVDROP: ${SSH_PRIVDROP:-su-login}
     volumes:
       - ./mcp_servers:/app/mcp_servers:ro
       - ./shared:/app/shared:ro
