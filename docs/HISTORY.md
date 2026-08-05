@@ -3034,6 +3034,80 @@ JSON 파싱 실패다. 그런데 **스트리밍 오류 로그가 메시지만 �
 정한 것: 상주 셸은 상태가 새고, 실행 경로가 하나 더 생겨 우회로가 되며, 유휴/좀비 셸 관리가
 새 문제가 된다). 그 대가가 로그인 셸 약 2초이고, 그건 `SSH_SU_LOGIN=false`로 끌 수 있다.
 
+## 133. `Expecting value: line 1 column 11` — **google-adk 결함이 맞다**(코드로 확인) (완료)
+
+질문: *"google-adk 라이브러리 버그인가?"* — 맞다. 추측하지 않고 휠을 받아 코드를 읽었다.
+
+### 확인한 것 (`google-adk==1.22.1`, `google/adk/models/lite_llm.py`)
+
+스트리밍 분기가 툴 호출 조각을 이렇게 모은다(1663행 부근).
+
+```python
+index = chunk.index or fallback_index       # ← 파이썬에서 0은 거짓이다
+...
+function_calls[index]["args"] += chunk.args
+try:
+    json.loads(function_calls[index]["args"])
+    fallback_index += 1                     # "improper chunk indexing" 우회책
+except json.JSONDecodeError:
+    pass
+```
+
+두 가지가 겹친다.
+1. **`chunk.index or fallback_index`가 index 0을 '없음'으로 취급한다.** 툴 호출의 첫 인덱스는
+   0이므로 정상 값이 매번 버려진다.
+2. 그 상태에서 vLLM(hermes 파서)이 같은 호출의 조각에 index를 0 → 1로 바꿔 보내면
+   **인자가 두 통에 쪼개져** 각각 잘린 JSON이 된다.
+
+그리고 1216행이 그 잘린 문자열을 **try/except 없이** 파싱한다.
+
+```python
+args=json.loads(tool_call.function.arguments or "{}")
+```
+
+재현해서 오류 메시지까지 맞춰 봤다.
+
+```
+bucket 0: args='{"lines": '  -> Expecting value: line 1 column 11 (char 10)   ← 실서버와 동일
+bucket 1: args='200}'        -> Extra data: line 1 column 4 (char 3)
+```
+
+즉 **인자가 `{"lines": ` 에서 잘린 채로 파싱된 것**이다. 우리 코드에는 손댈 곳이 없다.
+
+### 우리가 할 수 있는 것
+
+라이브러리를 고칠 수는 없지만, **논스트리밍 분기는 이 경로를 아예 안 탄다**
+(litellm이 완성된 인자 문자열을 한 번에 준다). 그래서 두 겹으로 막았다.
+
+- `_run_with_toolcall_recovery()` — 스트리밍으로 돌리다 이 오류에 걸리면 **논스트리밍으로
+  한 번 더** 돌린다. 재시도는 **새 세션**에서 한다(실패한 실행이 중간 이벤트를 남겨 두면
+  같은 자리에서 또 걸린다). 다른 오류는 그대로 올려보낸다 — 원인을 숨기면 안 된다.
+- 설정 `llm_streaming`(기본 true) — 계속 발생하면 아예 끈다. 답변이 한 덩어리로 오지만
+  툴 호출은 안정적이다.
+- 가짜 러너로 재시도 경로를, 누적 로직 복사본으로 결함 자체를 회귀 테스트에 고정했다.
+  나중에 google-adk를 올릴 때 그 테스트로 "고쳐졌는지"를 판정한다.
+
+### "MCP 세션을 매 요청 새로 만들어서 느리다"는 지적에 대해
+
+받은 비교표의 1번 추정(세션 재생성 오버헤드)은 **그럴듯하지만 잰 값이 아니다.**
+지금 가진 실측은 다른 곳을 가리킨다 — 첫 ssh 접속 17~25초, `su -` 2초, 커맨드 4초.
+MCP 세션 생성은 같은 도커 네트워크 안의 HTTP 왕복 몇 번이라 자릿수가 다르다.
+
+그래서 **또 추측으로 고치지 않고 재도록** 했다. `_Pace`에 `준비` 항목을 넣었다 —
+세션 생성 + 장기기억 조회 + MCP toolset 4개 연결까지, **LLM을 부르기 전** 시간이다.
+
+```
+[agent] chatcmpl-… 완료 12.3초 (준비 0.3초 · 첫 글자 4.1초 · 도구 2회 · 커맨드 실행 3.5초 · yr9.choi)
+```
+
+`준비`가 작으면 그 지적은 이 환경에서 사실이 아니고, 크면 그때 toolset 재사용을 넣으면 된다
+(요청마다 헤더가 달라 캐시 키가 까다로우므로, 값을 보고 나서 판단한다).
+
+**참고 — 비교 대상(spagent)이 빠른 이유는 따로 있어 보인다.** 그쪽은 `paramiko`로
+`exec_command`를 쓰는데, 그건 **로그인 셸을 거치지 않는다**. 우리 `su - <user>`가 매번
+프로필을 읽어 쓰는 2초가 거기엔 없다. 그 2초는 `SSH_SU_LOGIN=false`로 없앨 수 있다
+(사내 커맨드가 프로필 PATH에 의존하지 않는지 먼저 확인해야 한다 - NEXT-STEPS).
+
 ---
 
 ## 다음 항목은 이어서 여기 아래에 추가

@@ -958,6 +958,96 @@ def test_agent_self_name_is_rejected_as_a_path_or_account():
         == "/home/gpu1/yr9.choi"
 
 
+def test_adk_streaming_toolcall_index_bug_is_reproducible():
+    """google-adk 1.22.1의 스트리밍 툴 호출 인자 누적이 index 0을 '없음'으로 취급한다.
+
+    `index = chunk.index or fallback_index` — 파이썬에서 0은 거짓이다. vLLM(hermes)이 같은
+    호출의 조각에 index를 0 → 1로 바꿔 보내면 인자가 두 통으로 쪼개져 각각 잘린 JSON이 되고,
+    `_message_to_generate_content_response`가 try/except 없이 json.loads 해서 요청이 죽는다.
+    실서버 오류(`Expecting value: line 1 column 11 (char 10)`)가 정확히 이 모양이다.
+    라이브러리를 올릴 때 이 테스트로 고쳐졌는지 확인한다.
+    """
+    import json as _json
+
+    def adk_accumulate(chunks):          # lite_llm.py의 누적 로직을 그대로 옮긴 것
+        function_calls, fallback_index = {}, 0
+        for c in chunks:
+            index = c["index"] or fallback_index
+            function_calls.setdefault(index, {"args": ""})
+            if c["args"]:
+                function_calls[index]["args"] += c["args"]
+                try:
+                    _json.loads(function_calls[index]["args"])
+                    fallback_index += 1
+                except _json.JSONDecodeError:
+                    pass
+        return function_calls
+
+    buckets = adk_accumulate([
+        {"index": 0, "args": ""},
+        {"index": 0, "args": '{"lines": '},
+        {"index": 1, "args": "200}"},        # 같은 호출인데 index가 바뀐 경우
+    ])
+    assert buckets[0]["args"] == '{"lines": ', "인자가 쪼개지지 않았다면 전제가 바뀐 것"
+    with pytest.raises(_json.JSONDecodeError) as e:
+        _json.loads(buckets[0]["args"])
+    assert "line 1 column 11 (char 10)" in str(e.value), "실서버 오류 메시지와 같아야 한다"
+
+
+def test_streaming_toolcall_failure_falls_back_to_non_streaming():
+    """위 결함에 걸리면 논스트리밍으로 한 번 더 돌려 답을 낸다(요청이 죽지 않게).
+    다른 오류는 그대로 올려보내야 한다 - 원인을 숨기면 안 된다."""
+    import re as _re
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    i = src.index("_CONTEXT_ERROR_MARKERS")
+    j = src.index("\ndef _trace_ctx(")
+
+    created = []
+
+    async def _create_session(user_id, history):
+        created.append(history)
+        return f"retry-{len(created)}"
+
+    async def _cleanup_session(u, s):
+        pass
+
+    async def get_config(_k, default=None):
+        return default
+
+    ns = {"re": _re, "get_config": get_config,
+          "_create_session": _create_session, "_cleanup_session": _cleanup_session}
+    exec(src[i:j], ns)
+    recover = ns["_run_with_toolcall_recovery"]
+
+    class FakeRunner:
+        def run_async(self, *, user_id, session_id, new_message, run_config=None):
+            async def gen():
+                if run_config is not None:          # 스트리밍 -> ADK 결함 재현
+                    yield "tool-event"
+                    raise ValueError("Expecting value: line 1 column 11 (char 10)")
+                yield "final-answer"                # 논스트리밍 -> 성공
+            return gen()
+
+    async def scenario():
+        got = [e async for e in recover(FakeRunner(), "yr9.choi", "s1", "msg",
+                                        object(), history=[("user", "안녕")])]
+        assert "final-answer" in got, f"논스트리밍 재시도가 동작하지 않았다: {got}"
+        assert len(created) == 1, "재시도는 새 세션에서 돌려야 한다(중간 이벤트가 남아 있다)"
+
+        class Boom:
+            def run_async(self, **kw):
+                async def gen():
+                    raise RuntimeError("connection refused")
+                    yield
+                return gen()
+
+        with pytest.raises(RuntimeError):
+            async for _ in recover(Boom(), "u", "s", "m", object(), history=[]):
+                pass
+
+    asyncio.run(scenario())
+
+
 def test_tool_call_json_error_is_translated():
     """vLLM tool-call 파서가 깨진 JSON을 내보내면 `Expecting value: line 1 column 11`이
     그대로 사용자에게 갔다. 사용자가 할 수 있는 조치로 바꿔 말한다."""

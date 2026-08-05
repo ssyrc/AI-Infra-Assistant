@@ -605,6 +605,14 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
         # 도구 호출/결과를 답변에 접히는 블록으로 표시(사용자가 "생각 과정 보이게" 요청).
         # 낮을수록 학습 지식으로 지어내는 경향이 줄고 조회 결과에 충실해진다.
         ("llm_temperature", "0.2", "LLM 샘플링 temperature(0~1). 낮을수록 근거에 충실", True, False, False),
+        # google-adk 1.22.1의 스트리밍 분기는 툴 호출 인자 조각을 `chunk.index or fallback_index`로
+        # 모으는데, 파이썬에서 0이 거짓이라 index 0을 '없음'으로 취급한다. vLLM(hermes)이 같은
+        # 호출의 조각에 index를 바꿔 보내면 인자가 잘려 `json.loads`에서 요청이 통째로 죽는다.
+        # 평소에는 자동으로 논스트리밍 재시도가 붙지만, 계속 발생하면 여기서 아예 끌 수 있다
+        # (답변이 한 덩어리로 오지만 툴 호출은 안정적이다).
+        ("llm_streaming", "true",
+         "LLM 응답을 토큰 단위로 받을지(true/false). false면 답변이 한 번에 오지만 "
+         "툴 호출 인자 파싱 오류를 원천적으로 피한다", True, False, False),
         # 운영자 확인이 필요한 건을 안내할 때 붙일 접수 경로(사내 서비스 포탈의 VOC 창구).
         ("voc_intake_guide",
          "서비스 포탈 > VOC 등록 메뉴에서 AI Infra 운영팀으로 접수",

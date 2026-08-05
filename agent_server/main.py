@@ -372,6 +372,14 @@ class _Pace:
         self.tool_calls = 0
         self.tool_ms = 0
         self.first_text_at = None
+        # 세션 생성 + 장기기억 조회 + MCP toolset 4개 연결까지, **LLM을 부르기 전** 시간.
+        # "요청마다 MCP 세션을 새로 만들어서 느리다"는 지적이 있었는데, 재지 않고는 알 수 없다.
+        # 이 값이 작으면 그 지적은 이 환경에서 사실이 아니다.
+        self.prep_at = None
+
+    def mark_ready(self):
+        if self.prep_at is None:
+            self.prep_at = time.monotonic() - self.t0
 
     def observe(self, event):
         self.tool_calls += len(event.get_function_calls() or [])
@@ -390,7 +398,8 @@ class _Pace:
     def done(self):
         total = time.monotonic() - self.t0
         first = f"{self.first_text_at:.1f}초" if self.first_text_at is not None else "-"
-        print(f"[agent] {self.request_id} 완료 {total:.1f}초 (첫 글자 {first} · "
+        prep = f"{self.prep_at:.1f}초" if self.prep_at is not None else "-"
+        print(f"[agent] {self.request_id} 완료 {total:.1f}초 (준비 {prep} · 첫 글자 {first} · "
               f"도구 {self.tool_calls}회 · 커맨드 실행 {self.tool_ms / 1000:.1f}초 · {self.user_id})")
 
 
@@ -504,6 +513,61 @@ async def _friendly_error(e: Exception) -> str:
     return f"오류가 발생했습니다: {text}"
 
 
+def _is_toolcall_json_error(e: Exception) -> bool:
+    """ADK가 스트리밍 툴 호출 인자를 JSON으로 못 읽은 경우인지.
+
+    **google-adk 1.22.1의 결함이다.** `lite_llm.py`의 스트리밍 분기가 툴 호출 조각을
+    `index = chunk.index or fallback_index`로 모으는데, 파이썬에서 `0`은 거짓이라
+    **index 0을 '없음'으로 취급**한다. vLLM(hermes 파서)이 같은 호출의 조각에 index를
+    0 → 1로 바꿔 보내면 인자가 두 통에 쪼개져 담기고, 각각은 잘린 JSON이 된다.
+    그걸 `_message_to_generate_content_response`가 `json.loads(...)`로 그냥 파싱해서
+    (try/except 없음) 요청 전체가 죽는다. 실제 오류가
+    `Expecting value: line 1 column 11 (char 10)` = 인자가 `{"lines": `에서 잘린 모양이다.
+
+    우리가 라이브러리를 고칠 수는 없지만, **스트리밍을 끄면 이 경로 자체를 안 탄다**
+    (논스트리밍 분기는 litellm이 완성된 인자 문자열을 한 번에 준다).
+    """
+    return isinstance(e, ValueError) and any(m in str(e) for m in _JSON_ERROR_MARKERS)
+
+
+async def _run_with_toolcall_recovery(runner, user_id, session_id, new_message,
+                                      run_config, *, history):
+    """스트리밍으로 돌리되, 위 ADK 결함에 걸리면 **논스트리밍으로 한 번 더** 돌린다.
+
+    재시도 시에는 세션을 새로 만든다 - 실패한 실행이 세션에 중간 이벤트를 남겼을 수 있고,
+    그대로 다시 돌리면 모델이 같은 자리에서 또 걸린다.
+    사용자에게는 답이 조금 늦게(한 덩어리로) 도착할 뿐, 요청이 죽지 않는다.
+    """
+    if run_config is None:
+        async for event in runner.run_async(user_id=user_id, session_id=session_id,
+                                            new_message=new_message):
+            yield event
+        return
+
+    started_output = False
+    try:
+        async for event in runner.run_async(user_id=user_id, session_id=session_id,
+                                            new_message=new_message, run_config=run_config):
+            started_output = True
+            yield event
+        return
+    except Exception as e:  # noqa: BLE001
+        if not _is_toolcall_json_error(e):
+            raise
+        print(f"[agent] 스트리밍 툴 호출 파싱 실패(google-adk 결함) → 논스트리밍으로 재시도: {e}")
+        if started_output:
+            # 이미 사용자에게 흘려보낸 게 있으면 앞부분이 중복된다. 그래도 답이 없는 것보다 낫다.
+            print("[agent] (일부 출력이 이미 나간 뒤라 답변 앞부분이 겹칠 수 있습니다)")
+
+    retry_session = await _create_session(user_id, history)
+    try:
+        async for event in runner.run_async(user_id=user_id, session_id=retry_session,
+                                            new_message=new_message):
+            yield event
+    finally:
+        await _cleanup_session(user_id, retry_session)
+
+
 def _trace_ctx(user_id: str, session_id: str | None, source: str | None):
     """Langfuse 트레이스에 user_id/session_id(대화)를 붙여 사용자별로 묶이게 한다.
     openinference가 없거나 트레이싱이 꺼져 있으면 무해한 no-op이다."""
@@ -550,6 +614,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     convo = _validate(req, model_name)
     user_id, user_role, chat_id = _caller_from_request(request, req)
     request_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+    pace = _Pace(request_id, user_id)
 
     history, (_, last_text) = convo[:-1], convo[-1]
     session_id = await _create_session(user_id, history)
@@ -573,7 +638,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     }
     agent, _model, toolsets = await build_agent(caller_headers, extra_instruction)
     runner = Runner(agent=agent, app_name=APP_NAME, session_service=state["session_service"])
-    pace = _Pace(request_id, user_id)
+    pace.mark_ready()          # 여기까지가 LLM을 부르기 전 준비 시간
 
     if not req.stream:
         final_text = ""
@@ -599,15 +664,18 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                          "finish_reason": "stop"}],
         })
 
+    stream_mode = _mem_on(await get_config("llm_streaming", "true"))
+
     async def event_stream():
         dedup = _StreamDedup()
         charts = _chart_inliner()
         in_think = False
         try:
+            run_config = STREAMING_RUN_CONFIG if stream_mode else None
             with _trace_ctx(user_id, conv, "openwebui"):
-                async for event in runner.run_async(user_id=user_id, session_id=session_id,
-                                                    new_message=new_message,
-                                                    run_config=STREAMING_RUN_CONFIG):
+                async for event in _run_with_toolcall_recovery(
+                        runner, user_id, session_id, new_message, run_config,
+                        history=history):
                     if await request.is_disconnected():
                         print("[agent] 클라이언트 연결 종료, 스트리밍 중단")
                         break

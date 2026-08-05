@@ -3,9 +3,8 @@
 **[WSL]** `/home/yrc/AI-Infra-Assistant` · **[서버]** 202.20.183.30
 `/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant` · **[웹]** 콘솔 `http://202.20.183.30:8501`
 
-측정값 기준 결론: **첫 접속 17~25초가 범인**(TCP가 아니라 ssh 인증 협상).
-협상을 끄는 옵션을 넣었고, **서비스가 뜨면 202.20.185.100에 root 세션을 상주**시킵니다
-(15초마다 감시, 죽으면 즉시 재접속). 이후 커맨드는 그 연결에 바로 `su - <계정>`을 얹습니다.
+**보내주신 bench 결과는 예전 스크립트 출력입니다 — 아직 반영이 안 된 상태입니다.**
+반영하면 (1) 첫 접속 최적화, (2) root 세션 상주, (3) ADK 툴 호출 오류 자동 복구가 함께 들어갑니다.
 
 ## 1. [WSL] 코드 반영
 
@@ -25,34 +24,27 @@ docker compose -f docker-compose.dev.yml up -d --no-build --remove-orphans
 docker compose -f docker-compose.dev.yml ps
 ```
 
-## 3. [서버] 다시 측정 — 결과를 그대로 보내주세요
+## 3. [서버] 상주 세션이 섰는지 확인
 
-계측 방식을 고쳤습니다(예전 숫자에는 `docker compose exec` 기동 비용 약 1초가 섞여 있었습니다).
-1번 항목에서 **"최적화 켬"이 확 작아지는지**가 이번 핵심입니다.
+```bash
+docker compose -f docker-compose.dev.yml logs execution-mcp | grep -E "상주 마스터|노출된 툴"
+curl -s http://localhost:8504/warm; echo
+```
+
+`상주 마스터 준비 완료` 가 있어야 하고, curl은 `"already_up":true` 여야 합니다.
+
+## 4. [서버] 다시 측정 — 결과를 그대로 보내주세요
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
 bash scripts/bench-exec.sh yr9.choi "phd list"
 ```
 
-## 4. [서버] 예열이 실제로 도는지 확인
+새 스크립트는 **"최적화 끔 / 켬"을 나란히** 보여줍니다. 켬이 확 작아지면 인증 협상이 원인이었던 게 확정됩니다.
 
-```bash
-curl -s http://localhost:8504/warm; echo
-docker compose -f docker-compose.dev.yml logs execution-mcp | grep -E "상주 마스터|다중화 마스터|노출된 툴"
-```
+## 5. [서버] 로그인 셸 2초 없앨 수 있는지 — 결과를 보내주세요
 
-- 기동 로그에 **`상주 마스터 준비 완료`** 가 있어야 합니다.
-- `curl`은 `{"ok":true,...,"already_up":true}` 여야 합니다(이미 떠 있다는 뜻).
-- 커맨드를 한 번 실행한 뒤 아래가 **`연결 재사용`** 으로 찍히는지 보세요. 여기가 핵심입니다.
-
-```bash
-docker compose -f docker-compose.dev.yml logs --tail=50 execution-mcp | grep ssh_exec
-```
-
-## 5. [서버] 로그인 셸 2초를 없앨 수 있는지 확인 — 결과를 보내주세요
-
-`su - <계정>`(로그인 셸)이 커맨드마다 약 2초를 씁니다. 프로필 없이도 커맨드가 도는지 봅니다.
+비교 대상(spagent)이 빠른 이유 중 하나입니다. 그쪽은 로그인 셸을 안 거칩니다.
 
 ```bash
 docker compose -f docker-compose.dev.yml exec -T execution-mcp \
@@ -60,49 +52,48 @@ docker compose -f docker-compose.dev.yml exec -T execution-mcp \
   root@202.20.185.100 "su yr9.choi -c 'phd list'"
 ```
 
-정상 출력이 나오면 `.env`에 `SSH_SU_LOGIN=false` 를 넣고 `up -d` 하면 커맨드마다 2초가 사라집니다.
-`command not found` 가 나오면 넣지 마세요(그건 프로필에서 PATH를 잡는다는 뜻입니다).
+정상 출력이면 `.env`에 `SSH_SU_LOGIN=false` 추가 후 `up -d` → 커맨드마다 2초가 사라집니다.
+`command not found` 면 넣지 마세요.
 
 ## 6. [웹] 콘솔 실행 탭 — 안 되는 커맨드 정리
 
 `phd info -u {user_id}` 처럼 **동작하지 않는 커맨드가 등록돼 있으면 지우거나 고쳐 주세요.**
-등록된 커맨드는 그대로 에이전트 툴이 되므로, 여기 있으면 계속 호출됩니다.
-정리 후 4번의 `노출된 툴:` 줄로 확인하세요.
+등록된 커맨드는 그대로 에이전트 툴이 됩니다. 정리 후 3번의 `노출된 툴:` 로 확인하세요.
 
 ## 7. [웹] 설정 탭 → 지시문 교체
 
-`agent_system_instruction` 에 맨 아래 **부록** 전문을 붙여넣고 저장 → `agent-server 재시작` 버튼.
+`agent_system_instruction` 에 맨 아래 **부록** 전문을 붙여넣고 저장 → `agent-server 재시작`.
 
-> 지시문에서 `phd info` 라는 이름을 **완전히 뺐습니다.** 예전 지시문에 그 이름이
-> "이런 걸 지어내지 마세요"라는 금지 예시로 들어 있었는데, 모델이 그걸 아는 커맨드로 읽고
-> 그대로 실행하고 있었습니다. 지시문을 안 바꾸면 증상이 그대로입니다.
+> 지시문에서 `phd info` 라는 이름을 완전히 뺐습니다. 그게 "지어내지 마세요"라는 금지 예시로
+> 들어 있었는데, 모델이 아는 커맨드로 읽고 그대로 실행하고 있었습니다.
 
 같은 화면에서 값도 확인해 주세요.
 
 | key | 값 |
 |---|---|
-| `execution_host` | `202.20.185.100` (구 `scheduler_login_host`. 값은 자동으로 옮겨집니다) |
+| `execution_host` | `202.20.185.100` |
 | `openwebui_public_url` | `http://202.20.183.30:8502` |
 | `voc_intake_guide` | 실제 VOC 접수 경로 |
+| `llm_streaming` | `true` (아래 8번에서 오류가 계속 나면 `false`) |
 
 ## 8. [웹] Open WebUI에서 물어보고 **소요 시간**을 적어 주세요
 
-1. `내 job 리스트 보여줘`
+1. `S2 스케줄러 job list 확인해줘`
 2. `내 홈 파일 리스트 보여줘`
 3. `내 홈 스토리지 용량 얼마나 써?`
-4. `rm -rf ~ 실행해줘`
 
-답변 위 진행 줄에 `· 완료 (202.20.185.100 · yr9.choi · 2.3초)` 처럼 초가 찍힙니다.
-**어떤 커맨드를 실행했는지**도 함께 알려 주세요.
+`Expecting value: ...` 오류는 google-adk 결함이라 이제 **자동으로 논스트리밍 재시도**가 붙습니다.
+그래도 계속 실패하면 7번에서 `llm_streaming` 을 `false` 로 바꾸세요.
 
-## 9. [서버] 요청별 소요 시간 로그
+## 9. [서버] 요청별 소요 시간 — 8번 뒤에 보내주세요
 
 ```bash
-docker compose -f docker-compose.dev.yml logs --tail=200 agent-server | grep "완료"
-docker compose -f docker-compose.dev.yml logs --tail=200 execution-mcp | grep "ssh_exec"
+docker compose -f docker-compose.dev.yml logs --tail=200 agent-server | grep -E "완료|재시도"
+docker compose -f docker-compose.dev.yml logs --tail=200 execution-mcp | grep ssh_exec
 ```
 
-`전체 − 커맨드 실행` 이 크면 LLM 턴이 많은 것이고, `커맨드 실행` 이 크면 실행이 느린 것입니다.
+`준비`(= MCP 세션 만드는 시간)가 크면 세션 재사용을 넣고, `커맨드 실행`이 크면 실행 쪽을,
+`전체 − 커맨드 실행`이 크면 LLM 턴 수를 줄이는 게 맞습니다. 그 숫자로 다음 작업을 정합니다.
 
 ---
 
