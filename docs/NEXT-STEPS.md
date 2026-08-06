@@ -43,9 +43,13 @@ printf '\nSSH_KEY_PATH=/root/.ssh/id_ed25519\nSSH_PRIVDROP=runuser\n' >> .env
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
 docker compose -f docker-compose.dev.yml run --rm db-init
 docker compose -f docker-compose.dev.yml up -d --no-build --remove-orphans
+docker compose -f docker-compose.dev.yml restart admin-console
 docker compose -f docker-compose.dev.yml ps
 docker compose -f docker-compose.dev.yml exec -T execution-mcp ls -l /root/.ssh/id_ed25519
 ```
+
+`restart admin-console`을 빼면 4번의 버튼이 **`405 Method Not Allowed`** 로 실패합니다.
+화면(정적 파일)은 rsync로 바로 새 코드가 되는데 백엔드는 재시작해야 바뀌기 때문입니다.
 
 마지막 줄이 `-rw------- 1 root root 399 ...` 처럼 **파일**이어야 합니다(디렉토리면 키가 없는 것).
 

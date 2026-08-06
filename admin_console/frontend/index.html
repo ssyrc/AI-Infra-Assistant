@@ -98,6 +98,16 @@ async function api(path, options = {}) {
   });
   if (!res.ok) {
     const text = await res.text();
+    // /api/ 경로에 405가 오면 **그 라우트가 지금 떠 있는 서버에 없다**는 뜻이다.
+    // FastAPI는 모르는 경로를 맨 끝 StaticFiles 마운트로 넘기는데, 그건 GET/HEAD만 받는다.
+    // 화면(정적 파일)은 rsync로 곧바로 새 코드가 되는데 백엔드는 재시작해야 바뀌므로,
+    // "새 버튼을 눌렀더니 405"가 반복됐다(#27, #30, #138). 원인을 그대로 알려준다.
+    if (res.status === 405 && path.startsWith("/api/")) {
+      throw new Error(
+        "관리자 콘솔 백엔드가 예전 코드로 떠 있어 이 기능이 아직 없습니다.\n" +
+        "화면은 새 코드인데 서버가 안 바뀐 상태입니다. 서버에서 재시작하세요:\n\n" +
+        "  docker compose -f docker-compose.dev.yml restart admin-console");
+    }
     throw new Error(`${res.status}: ${text}`);
   }
   const ct = res.headers.get("content-type") || "";

@@ -1212,6 +1212,27 @@ def test_privilege_drop_defaults_to_login_shell_and_keeps_legacy_flag():
     assert {"su", "runuser", "setpriv", "sudo"} <= DENY_BASE_COMMANDS
 
 
+def test_console_explains_405_instead_of_showing_it():
+    """새 API를 추가하면 콘솔 화면은 바로 새 코드인데 백엔드는 재시작해야 바뀐다.
+
+    그 사이에 새 버튼을 누르면 FastAPI가 모르는 경로를 StaticFiles 마운트로 넘겨
+    `405 Method Not Allowed`가 뜬다 - 원인과 아무 상관 없어 보이는 메시지다.
+    세 번 겪었으므로(#27, #30, #138) 메시지가 **다음에 할 일**을 말하게 한다.
+    """
+    html = open(os.path.join(ROOT, "admin_console", "frontend", "index.html"),
+                encoding="utf-8").read()
+    assert "res.status === 405" in html, "405를 특별히 처리하지 않는다"
+    assert "restart admin-console" in html, "재시작 커맨드를 알려주지 않는다"
+
+    # 405가 나는 구조 자체(맨 끝 StaticFiles 마운트)는 그대로여야 이 처리가 의미가 있다.
+    main = open(os.path.join(ROOT, "admin_console", "backend", "main.py"), encoding="utf-8").read()
+    assert 'app.mount("/", StaticFiles(' in main
+
+    # 배포 절차에도 admin-console 재시작이 들어 있어야 한다.
+    steps = open(os.path.join(ROOT, "docs", "NEXT-STEPS.md"), encoding="utf-8").read()
+    assert "restart admin-console" in steps
+
+
 def test_rsync_never_deletes_server_only_files():
     """배포 rsync가 `--delete`로 **서버에만 있어야 하는 파일**을 지우면 안 된다(#137).
 
