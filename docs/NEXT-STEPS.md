@@ -1,116 +1,122 @@
-# 지금 할 일 — DB 복구 (데이터는 살아 있습니다)
+# 지금 할 일 — DB 복구 (원본 볼륨 확정)
 
 **[서버]** 202.20.183.30 · `/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant`
-**[WSL]** `/home/yrc/AI-Infra-Assistant`
+**[웹]** 관리자 콘솔 `http://202.20.183.30:8501`
 
-> ## ⛔ 확정 전까지 실행 금지
-> `docker compose up` · `down` · `db-init` · `docker volume prune` · `docker system prune`
->
-> 익명 볼륨은 컨테이너를 다시 만들 때마다 하나씩 더 떨어져 나갑니다. 지금 후보가 3개인데
-> 더 늘면 어느 게 진짜인지 구분하기 어려워집니다. prune 계열은 후보를 **영구 삭제**합니다.
+> ## ⛔ `docker volume prune` · `docker system prune` · `down -v` 금지
+> 복구가 끝나고 **며칠 지나 정상 동작을 확인할 때까지** 세 후보 볼륨을 그대로 둡니다.
+> 지금 지우면 되돌아올 자리가 없어집니다.
 
-**지금까지 확인된 것** (진단 결과)
+## 되살릴 볼륨 (확정)
 
-| | |
-|---|---|
-| PG16 볼륨 3개 | `4f7c8f2e…` **2.4G** · `1dc7527f…` 137M · `553dd706…` 132M |
-| postgres | `ai-infra-assistant-postgres-1` **Up (healthy)** — 떠 있습니다 |
-| 무사한 것 | Open WebUI 계정·대화, 차트, 업로드 원본(`05_halo/datasets`) |
+```
+4f7c8f2ee8fef3ed6647aadfa6bd177b0e9008f35a3ea85622df664045693f8b
+```
 
-3개 중 하나는 **지금 돌고 있는 빈 DB**입니다. 나머지 둘이 떨어져 나간 것이고, 그중 하나가
-원본입니다. 크기로 단정하지 않습니다 — 빈 클러스터도 130MB입니다.
+| | 원본 `4f7c8f2e…` | 지금 붙어 있는 `553dd706…` | 옛 세대 `1dc7527f…` |
+|---|---|---|---|
+| 매뉴얼 파일 / 청크 | **5 / 542** | 0 / 0 | 1 / 175 |
+| VOC | **48,314** | 0 | 0 |
+| 등록 커맨드 | **3** | 0 | (표 없음) |
+| 마지막 활동 | **08-06 02:59** | 08-06 06:31(재시드) | 07-28 |
+
+등록 커맨드 3개(`myquota`·`s2_phd_info_job_id`·`s2_phd_list`)가 실제 등록 목록과 일치하고,
+job_logs가 사고 당일 02:59까지 찍혀 있습니다.
 
 ---
 
-## 1. [서버] 지금 postgres가 쓰는 볼륨 + 살아있는 DB 확인
+## 1. [서버] 보험용 덤프 먼저
+
+볼륨을 건드리기 전에 파일로 뽑아 둡니다. 이후가 잘못돼도 여기로 돌아옵니다.
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
+VOL=4f7c8f2ee8fef3ed6647aadfa6bd177b0e9008f35a3ea85622df664045693f8b
+PGIMG=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep pgvector | head -1)
+echo "이미지: $PGIMG"
 
-echo "--- 지금 postgres가 쓰는 볼륨 ---"
+docker run -d --name pg-rescue -v "$VOL":/var/lib/postgresql/data \
+  -e POSTGRES_PASSWORD=devpass "$PGIMG"
+sleep 15
+docker exec pg-rescue pg_dumpall -U agent \
+  > /home/gpu1/yr9.choi/05_halo/pg-rescue-$(date +%F).sql
+docker rm -f pg-rescue
+ls -lh /home/gpu1/yr9.choi/05_halo/pg-rescue-*.sql
+grep -c "CREATE DATABASE" /home/gpu1/yr9.choi/05_halo/pg-rescue-*.sql
+```
+
+파일 크기가 수백 MB 이상이고 `CREATE DATABASE` 개수가 8 안팎이면 정상입니다.
+**0바이트거나 grep이 0이면 여기서 멈추고 알려주세요.**
+
+## 2. [서버] 이름 있는 볼륨으로 옮기기
+
+`down`에 **`-v`를 붙이지 마세요.**
+
+```bash
+cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
+VOL=4f7c8f2ee8fef3ed6647aadfa6bd177b0e9008f35a3ea85622df664045693f8b
+PGIMG=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep pgvector | head -1)
+
+grep -q pg_data_dev docker-compose.dev.yml && echo "compose 최신 OK" || echo "!! rsync 먼저"
+
+docker compose -f docker-compose.dev.yml down          # -v 금지
+docker volume create ai-infra-assistant_pg_data_dev
+docker run --rm -v "$VOL":/from -v ai-infra-assistant_pg_data_dev:/to \
+  --entrypoint sh "$PGIMG" -c 'cp -a /from/. /to/ && cat /to/PG_VERSION'
+```
+
+- `compose 최신 OK`가 안 나오면 rsync가 안 된 것입니다. 먼저 [WSL]에서
+  `bash scripts/deploy-rsync.sh` 를 돌리세요.
+- 마지막 줄에 `16` 이 찍히면 복사 성공입니다.
+- 새 볼륨은 방금 만든 빈 볼륨이라 지우는 동작이 없습니다(원본 `$VOL`은 그대로 남습니다).
+
+## 3. [서버] 기동 + 확인
+
+```bash
+cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
+docker compose -f docker-compose.dev.yml up -d --no-build
+sleep 15
+
 docker inspect -f '{{range .Mounts}}{{.Name}} -> {{.Destination}}
 {{end}}' ai-infra-assistant-postgres-1
 
-echo "--- 지금 DB 행 수 ---"
-for p in platform_config:platform_settings manual_db:manual_files \
-         manual_db:manual_chunks voc_db:voc_records command_db:execution_commands; do
+for p in platform_config:platform_settings manual_db:manual_files manual_db:manual_chunks \
+         voc_db:voc_records command_db:execution_commands; do
   db=${p%%:*}; t=${p##*:}; echo -n "  $db.$t = "
   docker exec ai-infra-assistant-postgres-1 psql -U agent -d "$db" -tAc \
     "select count(*) from $t" 2>&1 | head -1
 done
 ```
 
-여기 나온 볼륨 이름이 **후보에서 빠집니다.** 행 수가 전부 0(또는 시드값)이면 초기화가 맞습니다.
+**이렇게 나와야 성공입니다.**
 
-## 2. [WSL] 검사 스크립트 받기
-
-```bash
-git -C /home/yrc/AI-Infra-Assistant fetch origin main
-git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
-bash /home/yrc/AI-Infra-Assistant/scripts/deploy-rsync.sh
+```
+ai-infra-assistant_pg_data_dev -> /var/lib/postgresql/data
+  platform_config.platform_settings = 58
+  manual_db.manual_files = 5
+  manual_db.manual_chunks = 542
+  voc_db.voc_records = 48314
+  command_db.execution_commands = 3
 ```
 
-rsync는 **저장소 디렉토리만** 건드립니다. 도커 볼륨과는 무관하니 지금 하셔도 안전합니다.
-삭제될 파일을 먼저 보여주고 확인을 받습니다(`.env`·`secrets/`는 제외되어 있습니다).
+`platform_settings`가 58인 것이 맞습니다(빈 것은 60이었습니다 — 새 설정 키 2개는 4번에서 들어갑니다).
 
-## 3. [서버] 후보 볼륨 3개 내용 확인
+## 4. [서버] 마이그레이션 — 3번이 위 숫자대로 나온 뒤에만
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-bash scripts/inspect-pg-volume.sh 4f7c8f2ee8fef3ed6647aadfa6bd177b0e9008f35a3ea85622df664045693f8b
-bash scripts/inspect-pg-volume.sh 1dc7527fd826d5a2afc08bd1b44e945219c2fd10da65c2747f49c2d367ab9198
-bash scripts/inspect-pg-volume.sh 553dd7066a559e45d37bb0d7d7d4b47fadeff60309477e7b9a8ebe0d6a769448
-```
-
-각각 **표별 행 수 · 마지막 갱신 시각 · 등록된 커맨드 이름 · 매뉴얼 파일 이름**을 찍습니다.
-임시 컨테이너는 포트를 열지 않고 끝나면 자동으로 지웁니다(원본 볼륨은 그대로 둡니다).
-원본을 아예 건드리기 싫으면 앞에 `COPY_FIRST=yes` 를 붙이세요.
-
-**1번과 3번 결과를 보내주세요.** 어느 볼륨을 되살릴지 확정하고 4번을 진행합니다.
-
----
-
-## 4. [서버] 볼륨 교체 — **3번 결과 확인 후에만**
-
-아직 실행하지 마세요. 어느 볼륨인지 확정되면 `<VOL>`을 채워서 안내하겠습니다.
-
-```bash
-cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-
-# (1) 먼저 원본을 파일로 뽑아 둔다 — 이후가 잘못돼도 되돌아올 자리
-bash scripts/inspect-pg-volume.sh <VOL>          # 마지막으로 한 번 더 확인
-docker run -d --name pg-rescue -v <VOL>:/var/lib/postgresql/data \
-  -e POSTGRES_PASSWORD=devpass $(docker images --format '{{.Repository}}:{{.Tag}}' | grep pgvector | head -1)
-sleep 15
-docker exec pg-rescue pg_dumpall -U agent > /home/gpu1/yr9.choi/05_halo/pg-rescue-$(date +%F).sql
-ls -lh /home/gpu1/yr9.choi/05_halo/pg-rescue-*.sql
-docker rm -f pg-rescue
-
-# (2) 이름 있는 볼륨을 만들고 옛 데이터를 옮긴다
-docker compose -f docker-compose.dev.yml up -d postgres    # pg_data_dev 생성
-sleep 10
-docker compose -f docker-compose.dev.yml down              # -v 절대 금지
-NEW=$(docker volume ls -q | grep pg_data_dev); echo "새 볼륨: $NEW"
-PGIMG=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep pgvector | head -1)
-docker run --rm -v <VOL>:/from -v "$NEW":/to --entrypoint sh "$PGIMG" \
-  -c 'rm -rf /to/* /to/..?* 2>/dev/null; cp -a /from/. /to/ && cat /to/PG_VERSION'
-
-# (3) 기동 + 확인
-docker compose -f docker-compose.dev.yml up -d --no-build
-docker compose -f docker-compose.dev.yml exec -T postgres \
-  psql -U agent -d manual_db -c "select count(*) from manual_files;"
-```
-
-매뉴얼 수가 예전대로면 복구 완료입니다. 그 뒤에 마이그레이션을 올립니다.
-
-```bash
+bash scripts/backup-db.sh                                    # 이제부터는 항상 먼저
 docker compose -f docker-compose.dev.yml run --rm db-init
 docker compose -f docker-compose.dev.yml restart admin-console
+docker exec ai-infra-assistant-postgres-1 psql -U agent -d platform_config \
+  -tAc "select count(*) from platform_settings;"             # 60 안팎으로 늘어납니다
 ```
 
-## 5. [웹] 복구 후 설정 확인
+`db-init`은 기존 행을 덮어쓰지 않고 없는 키만 넣습니다.
 
-콘솔(`http://202.20.183.30:8501`) 설정 탭에서 값이 mock으로 돌아가 있으면 다시 넣습니다.
+## 5. [웹] 콘솔 설정 확인
+
+값이 mock으로 돌아가 있으면 다시 넣습니다.
 
 | key | 값 |
 |---|---|
@@ -122,32 +128,49 @@ docker compose -f docker-compose.dev.yml restart admin-console
 | `agent_api_key` | Open WebUI 연결(Connections)의 API 키와 같은 값 |
 
 그리고 **`지시문을 최신 기본값으로 되돌리기`** → `agent-server 재시작`.
+(이번에 지시문이 바뀌었습니다. 안 누르면 남의 계정 질문에 계속 가이드 문서를 안내합니다.)
 
-## 6. 앞으로 — 반영 전에 항상 백업
+## 6. [웹] Open WebUI 동작 확인
+
+1. `S2 스케줄러 job list 확인해줘`
+2. `내 홈 파일 리스트 보여줘`
+3. `cocoa.song 계정이 어떤 gpu job 을 수행중이야?` → **한 줄 거절**이어야 합니다
+
+> 본인(yr9.choi) 자원만 조회할 수 있어 cocoa.song의 job은 확인할 수 없습니다.
+
+`ops_assistant`라는 말이나 "가이드 위치: 슈퍼컴 Portal > …"이 붙으면 5번 지시문 되돌리기를
+안 한 것입니다.
+
+## 7. 앞으로 — 반영 전에 항상 백업
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
 bash scripts/backup-db.sh
 ```
 
-`05_halo/` 밑에 `pg-backup-<날짜>.sql`로 떨어집니다(저장소 밖이라 rsync가 못 건드립니다).
+`05_halo/` 밑에 떨어집니다(저장소 밖이라 rsync가 못 건드립니다). 14개까지 보관합니다.
 되돌릴 때: `DROP_EXISTING=yes bash scripts/restore-db.sh ../pg-backup-<날짜>.sql`
 
 ---
 
-## 복구가 끝난 뒤에 할 일 (지금 하지 마세요)
+## 복구 확인 후에 (며칠 뒤)
 
-- 엑셀로 커맨드 재등록: 콘솔 커맨드 실행 탭 → `엑셀 양식 받기` → 채워서 업로드 →
-  `execution-mcp 재시작`. `{option}`은 **선택형**으로, 선택지는 `-j: JSON 형식으로 반환`처럼
-  `값: 설명`으로 적습니다(콜론 뒤 공백 필수, 한 줄에 하나씩).
-- 남의 계정 차단 확인: `cocoa.song 계정이 어떤 gpu job 을 수행중이야?` → 한 줄 거절이어야 합니다.
-- 1~3번 질문 소요 시간 측정.
+정상 동작이 확실해지면 남은 익명 볼륨을 정리합니다. **그 전에는 두세요.**
+
+```bash
+docker volume rm 553dd7066a559e45d37bb0d7d7d4b47fadeff60309477e7b9a8ebe0d6a769448
+docker volume rm 1dc7527fd826d5a2afc08bd1b44e945219c2fd10da65c2747f49c2d367ab9198
+```
+
+그다음 밀린 작업: 엑셀로 커맨드 인자 다듬기(`{option}`을 **선택형**으로, 선택지는
+`-j: JSON 형식으로 반환`처럼 `값: 설명`, 콜론 뒤 공백 필수) → `execution-mcp 재시작`.
 
 ## 문제가 계속될 때만
 
 | 증상 | 조치 |
 |---|---|
-| 3번에서 postgres가 안 뜸 | 그 볼륨은 후보에서 제외. 스크립트가 로그 20줄을 찍어 줍니다 |
-| 3번 결과가 전부 0행 | 세 개 다 빈 것입니다. 멈추고 알려주세요 |
-| `inspect-pg-volume.sh: No such file` | 2번 rsync가 안 된 것입니다 |
-| `docker compose exec`가 무응답 | 컨테이너가 죽은 것입니다. `docker ps -a`로 확인(`ps`엔 안 보입니다) |
+| 2번에서 `16`이 안 찍힘 | 복사 실패. `docker volume rm ai-infra-assistant_pg_data_dev` 후 다시 |
+| 3번 볼륨이 `pg_data_dev`가 아님 | rsync가 안 된 것. compose에 `pg_data_dev`가 있는지 확인 |
+| 3번 행 수가 전부 0 | 빈 볼륨이 붙은 것. 멈추고 알려주세요(원본 `$VOL`은 그대로 있습니다) |
+| postgres가 안 뜸 | `docker compose -f docker-compose.dev.yml logs --tail=40 postgres` 를 보내주세요 |
+| 최악의 경우 | 1번 덤프로 복구: `DROP_EXISTING=yes bash scripts/restore-db.sh ../pg-rescue-<날짜>.sql` |
