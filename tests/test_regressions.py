@@ -1107,6 +1107,7 @@ def test_warm_endpoint_exists_and_is_not_a_tool():
     assert main.count("warm_execution_host()") >= 3, "예열 호출 지점이 부족하다"
 
 
+# 비로그인 모드에는 홈 이동(`cd ~user`)이 앞에 붙는다(#144) - 강등 부분만 떼어 검사한다.
 @pytest.mark.parametrize("mode,expect_prefix", [
     ("su-login", "su - yr9.choi -c "),
     ("su", "su yr9.choi -c "),
@@ -1127,7 +1128,8 @@ def test_privilege_drop_modes_build_safe_remote_commands(mode, expect_prefix, mo
     try:
         assert ssh_exec.SSH_PRIVDROP == mode
         cmd = ssh_exec._remote_command("yr9.choi", ["ls", "-lh", "; rm -rf /", "`whoami`"])
-        assert cmd.startswith(expect_prefix), cmd
+        drop = cmd.split("2>/dev/null; ", 1)[-1]      # 홈 이동 접두사를 떼어낸다
+        assert drop.startswith(expect_prefix), cmd
         for danger in ("; rm -rf /", "`whoami`"):
             assert f" {danger} " not in cmd, f"인용되지 않은 채 노출됨: {danger}"
     finally:
@@ -1137,8 +1139,10 @@ def test_privilege_drop_modes_build_safe_remote_commands(mode, expect_prefix, mo
 
 _FAKE_SSH_PROFILE_ONLY = '''#!/usr/bin/env python3
 """가짜 ssh: `phd`는 로그인 셸에서만 찾아지고, runuser는 아예 없는 서버를 흉내낸다."""
-import sys
+import re, sys
 remote = sys.argv[-1]
+# 비로그인 모드에는 홈 이동이 앞에 붙는다(#144). 진짜 셸이 하듯 그 부분을 소화한다.
+remote = re.sub(r"^cd ~\S+ 2>/dev/null; ", "", remote)
 if remote.startswith("runuser"):
     sys.stderr.write("bash: runuser: command not found\\n"); sys.exit(127)
 if remote.startswith("su - "):
@@ -1927,3 +1931,46 @@ def test_agent_api_key_is_hot_reload():
     seed = src[i:src.index("),", i)]
     # (key, value, desc, hot_reload, is_secret, force) — hot_reload가 True여야 한다.
     assert seed.rstrip().endswith("True, True, False"), f"시드 플래그가 바뀌었다: {seed[-40:]}"
+
+
+# --- #144: 비로그인 강등 모드에서 작업 디렉토리가 root 홈이었다 ------------------------
+@pytest.mark.parametrize("mode", ["su", "runuser"])
+def test_non_login_privdrop_moves_to_user_home(mode):
+    """`ssh root@host <cmd>`는 root 홈(`/root`)에서 시작하는데, `runuser -u`와 비로그인 `su`는
+    **작업 디렉토리를 바꾸지 않는다**. 그래서 `SSH_PRIVDROP=runuser`로 바꾼 뒤 `ls -lh`가
+    `/root`에서 돌아 `Permission denied`가 났다.
+
+    지시문이 "실행은 항상 본인 홈에서 시작합니다"라고 약속하므로 코드가 그것을 지켜야 한다."""
+    sys.path.insert(0, os.path.join(ROOT, "shared"))
+    from ssh_exec import _remote_command
+    cmd = _remote_command("yr9.choi", ["ls", "-lh"], mode)
+    assert cmd.startswith("cd ~yr9.choi"), f"홈으로 이동하지 않는다: {cmd}"
+    # `&&`면 root가 홈에 못 들어가는 환경(GPFS root_squash)에서 커맨드가 아예 안 돈다.
+    assert "; " in cmd and "&&" not in cmd, f"실패 시 커맨드를 막으면 안 된다: {cmd}"
+
+
+def test_login_privdrop_does_not_double_cd():
+    """`su - user`는 로그인 셸이라 이미 홈으로 간다. 덧붙이면 군더더기다."""
+    sys.path.insert(0, os.path.join(ROOT, "shared"))
+    from ssh_exec import _remote_command
+    cmd = _remote_command("yr9.choi", ["ls", "-lh"], "su-login")
+    assert cmd == "su - yr9.choi -c 'ls -lh'"
+
+
+def test_home_cwd_does_not_break_argument_quoting():
+    """홈 이동을 붙이면서 인자 인용이 깨지면 셸 주입이 생긴다."""
+    sys.path.insert(0, os.path.join(ROOT, "shared"))
+    from ssh_exec import _remote_command
+    cmd = _remote_command("yr9.choi", ["ls", "; rm -rf /", "$HOME", "`id`"], "runuser")
+    assert "'; rm -rf /'" in cmd and "'$HOME'" in cmd and "'`id`'" in cmd
+    # 우리가 의도한 `;`는 하나뿐이어야 한다(cd 뒤).
+    assert cmd.count(";") == 2, cmd      # cd 뒤 1개 + 인자 안의 리터럴 1개(따옴표 안)
+
+
+def test_instruction_answers_home_path_by_running_pwd():
+    """"내 홈 디렉토리가 어디야?"에 "일반적으로 /home/... 입니다"라고 추측한 사고가 있었다.
+    그리고 `echo $HOME`은 셸이 없어 글자 그대로 출력된다 - 쓰면 안 된다."""
+    instr = _instruction_text()
+    assert "셸 변수는 확장되지 않습니다" in instr
+    assert "경로 자체를 물으면" in instr
+    assert "`pwd`를" in instr

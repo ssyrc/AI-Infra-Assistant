@@ -208,10 +208,35 @@ def _remote_command(user: str, argv: list, mode: str | None = None) -> str:
     mode = mode or SSH_PRIVDROP
     if mode == "runuser":
         parts = ["runuser", "-u", user, "--", *(str(a) for a in argv)]
-        return " ".join(shlex.quote(p) for p in parts)       # root 셸 파싱용 한 겹뿐
-    inner = " ".join(shlex.quote(str(a)) for a in argv)      # 사용자 셸 파싱용
-    dash = "- " if mode == "su-login" else ""
-    return f"su {dash}{user} -c {shlex.quote(inner)}"        # root 셸 파싱용 (user는 정규식 검증됨)
+        body = " ".join(shlex.quote(p) for p in parts)       # root 셸 파싱용 한 겹뿐
+    else:
+        inner = " ".join(shlex.quote(str(a)) for a in argv)  # 사용자 셸 파싱용
+        dash = "- " if mode == "su-login" else ""
+        body = f"su {dash}{user} -c {shlex.quote(inner)}"    # root 셸 (user는 정규식 검증됨)
+    return _with_home_cwd(body, user, mode)
+
+
+def _with_home_cwd(body: str, user: str, mode: str) -> str:
+    """비로그인 강등 모드에서 **작업 디렉토리를 사용자 홈으로** 옮긴다 (#144).
+
+    `ssh root@host <cmd>`는 root의 홈(`/root`)에서 시작한다. 그런데 `runuser -u`와 `su`(비로그인)는
+    **작업 디렉토리를 바꾸지 않는다** - `su - user`(로그인 셸)만 홈으로 이동한다.
+    그래서 `SSH_PRIVDROP=runuser`로 바꾼 뒤 `ls -lh`가 `/root`에서 돌아
+    `ls: cannot open directory '.': Permission denied`가 났다.
+
+    지시문이 "실행은 항상 본인 홈에서 시작합니다"라고 말하고 있었으므로, 그 약속을 코드가
+    지키게 만든다(모델에게 경로를 조립하라고 시키는 것은 #125·#131의 사고로 되돌아가는 길이다).
+
+    `~user`는 **root 셸의 틸드 확장**이다. 계정명은 `_USER_RE`로 검증돼 셸 메타문자가 없으므로
+    따옴표 없이 써도 안전하다(따옴표를 붙이면 확장 자체가 되지 않는다).
+
+    `&&`가 아니라 `;`인 이유: root가 홈에 들어가지 못하는 환경(GPFS root_squash 등)에서
+    `&&`면 커맨드가 아예 실행되지 않는다. `;`면 그런 환경에서도 **예전과 똑같이** 동작하고,
+    들어갈 수 있는 환경에서만 고쳐진다 - 회귀 없이 개선만 남는다.
+    """
+    if mode == "su-login":
+        return body            # 로그인 셸이 이미 홈으로 이동시킨다
+    return f"cd ~{user} 2>/dev/null; {body}"
 
 
 def control_path(ip: str) -> str:

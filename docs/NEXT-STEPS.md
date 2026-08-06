@@ -10,10 +10,11 @@
 
 ---
 
-## 1. [서버] 백업 후 코드 반영 — **인증 구멍 하나를 더 막았습니다**
+## 1. [서버] 백업 후 코드 반영 — **`ls` 권한 오류를 고쳤습니다**
 
-`/v1/memory/{user_id}` 세 개(GET/POST/DELETE)에 인증이 빠져 있었습니다(#143). 특히 POST는
-**남의 에이전트에 영구 지시를 심을 수 있어** 위험합니다. 지금 반영해 주세요.
+`내 홈 파일 리스트`가 `Permission denied`로 실패한 원인을 찾았습니다(#144).
+`SSH_PRIVDROP=runuser`는 **작업 디렉토리를 바꾸지 않아서** `ls`가 root 홈(`/root`)에서
+돌고 있었습니다. 이제 사용자 홈으로 이동한 뒤 실행합니다. 지시문도 함께 고쳤습니다.
 
 ```bash
 # [서버]
@@ -27,8 +28,24 @@ bash /home/yrc/AI-Infra-Assistant/scripts/deploy-rsync.sh
 
 # [서버]
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker compose -f docker-compose.dev.yml restart agent-server
+docker compose -f docker-compose.dev.yml restart agent-server execution-mcp
 ```
+
+**그리고 콘솔 설정 탭 → `지시문을 최신 기본값으로 되돌리기` → agent-server 재시작.**
+지시문이 바뀌었습니다(`$HOME` 금지, 경로를 물으면 `pwd` 실행). 이걸 안 누르면
+"내 홈 디렉토리가 어디야?"에 계속 추측으로 답합니다.
+
+반영 후 확인:
+
+```bash
+docker compose -f docker-compose.dev.yml logs --tail=50 execution-mcp | grep ssh_exec
+```
+
+Open WebUI에서 다시 물어보세요.
+
+- `내 홈 파일 리스트 보여줘` → 목록이 나와야 합니다
+- `내 홈 디렉토리가 어디야?` → `pwd`를 **실행해서** `/home/gpu1/yr9.choi` 를 답해야 합니다
+  ("일반적으로 …입니다" 같은 추측이 나오면 지시문 되돌리기를 안 한 것입니다)
 
 ## 2. 키를 새로 만들어 **양쪽에** 넣기
 
