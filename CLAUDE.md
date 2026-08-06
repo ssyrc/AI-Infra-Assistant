@@ -46,18 +46,23 @@
 `docker-compose.dev.yml`이 `./mcp_servers`·`./shared`를 마운트하므로 재시작만으로 반영된다.
 
 ```bash
+# 폐쇄망 배포 호스트(202.20.183.30) — **반영 전에 항상 백업 먼저**(#141)
+bash scripts/backup-db.sh
+
 # WSL
 git -C /home/yrc/AI-Infra-Assistant fetch origin main
 git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
-rsync -avz --delete --progress \
-  --exclude '.env' --exclude 'secrets/' \
-  /home/yrc/AI-Infra-Assistant/ \
-  yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
+bash scripts/deploy-rsync.sh      # 제외 목록이 스크립트에 박혀 있다. 삭제될 파일을 먼저 보여준다
 
-# 폐쇄망 배포 호스트(202.20.183.30)
+# 폐쇄망 배포 호스트
 docker compose -f docker-compose.dev.yml run --rm db-init   # 마이그레이션/새 설정 키가 있을 때만
 bash scripts/restart-mounted.sh
 ```
+
+**rsync 커맨드를 손으로 치지 않는다** — `--delete`가 저장소에 없는 파일(`.env`, ssh 키)을
+지운 사고가 있었다(#137). 제외 목록은 `scripts/deploy-rsync.sh`에만 둔다. 서버에 새 상태를
+두게 되면 그 스크립트의 `EXCLUDES`에 추가할 것.
+되돌리기는 `bash scripts/restore-db.sh <덤프>`(기존 DB가 있으면 `DROP_EXISTING=yes` 필요).
 
 **(B) requirements/Dockerfile이 바뀐 경우** — 이미지를 다시 만들어 tar로 옮겨야 한다.
 

@@ -68,11 +68,11 @@ docker stop pg-rescue && docker rm pg-rescue
 ```bash
 git -C /home/yrc/AI-Infra-Assistant fetch origin main
 git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
-rsync -avz --delete --progress \
-  --exclude '.env' --exclude 'secrets/' \
-  /home/yrc/AI-Infra-Assistant/ \
-  yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
+bash /home/yrc/AI-Infra-Assistant/scripts/deploy-rsync.sh
 ```
+
+이제 rsync 커맨드를 손으로 치지 않습니다. 스크립트가 제외 목록(`.env`·`secrets/`)을 갖고
+있고, **서버에서 지워질 파일을 먼저 보여준 뒤 확인을 받습니다**(#137이 그렇게 났습니다).
 
 ## 4. [서버] 새 볼륨을 만들고 **옛 데이터를 그대로 옮긴다**
 
@@ -134,22 +134,24 @@ docker compose -f docker-compose.dev.yml restart admin-console
 
 그리고 **`지시문을 최신 기본값으로 되돌리기`** → `agent-server 재시작`.
 
-## 7. 복구 뒤에 — 정기 백업을 겁니다
+## 7. 복구 뒤에 — 백업을 습관으로
 
-같은 일이 다시 나도 5분이면 되돌릴 수 있게, 백업을 습관으로 만드는 게 좋습니다.
-**반영 작업 전에는 항상** 이 한 줄을 먼저 돌리세요.
+**반영 작업 전에는 항상** 이 한 줄을 먼저 돌리세요. 같은 일이 나도 5분이면 되돌아옵니다.
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker compose -f docker-compose.dev.yml exec -T postgres \
-  pg_dumpall -U agent > /home/gpu1/yr9.choi/05_halo/pg-backup-$(date +%F-%H%M).sql
+bash scripts/backup-db.sh
 ```
+
+`05_halo/` 밑에 `pg-backup-<날짜>.sql`로 떨어집니다(저장소 밖이라 rsync가 못 건드립니다).
+14개까지 보관하고 오래된 것은 알아서 지웁니다. 덤프가 비어 있으면 성공으로 처리하지 않습니다.
 
 되돌릴 때:
 
 ```bash
-docker compose -f docker-compose.dev.yml exec -T postgres \
-  psql -U agent -d postgres < /home/gpu1/yr9.choi/05_halo/pg-backup-<날짜>.sql
+ls -1t ../pg-backup-*.sql | head
+DROP_EXISTING=yes bash scripts/restore-db.sh ../pg-backup-<날짜>.sql
+bash scripts/restart-mounted.sh
 ```
 
 ---

@@ -3502,7 +3502,26 @@ dev에는 지킬 볼륨 자체가 없다는 것을 확인하지 않았다.** 컨
   `docker volume ls -qf dangling=true`로 찾아 `PG_VERSION=16`인 것을 새 이름 볼륨으로
   `cp -a` 하면 그대로 살아난다. 그래서 맨 앞에 **`prune`·`down -v` 금지**를 크게 적었다 —
   그 셋만이 복구를 불가능하게 만든다.
-- 반영 작업 **전에** `pg_dumpall` 백업을 돌리는 절차를 상시 항목으로 넣었다.
+- 반영 작업 **전에** 백업을 돌리는 절차를 상시 항목으로 넣었다: `scripts/backup-db.sh`.
+
+### 같은 부류를 전부 훑었다 (세 번째를 막으려고)
+
+두 번 같은 실수를 했으니(#137 rsync, #141 볼륨) 개별 수정으로 끝내지 않았다.
+
+- **회귀 테스트를 일반화**했다. postgres 하나가 아니라 `_STATEFUL_IMAGES`(pgvector·postgres·
+  clickhouse·minio·open-webui)에 해당하는 **모든 서비스**를 dev/prod 양쪽에서 검사한다.
+  이름 있는 볼륨인지, 최상위 `volumes:`에 선언됐는지, 바인드 마운트가 아닌지까지 본다
+  (바인드면 rsync `--delete`가 지운다 — #137과 #141이 여기서 만난다).
+  실제로 이 테스트가 `dev-config` 오탐을 잡아 줬다(postgres 이미지를 psql 클라이언트로 쓰는
+  서비스라 `entrypoint` 덮어쓴 것은 제외하도록 고쳤다).
+  redis만 뺐다 — 임베딩 캐시라 소실이 손실이 아닌 유일한 경우다.
+- **rsync를 손으로 치지 않게 했다**: `scripts/deploy-rsync.sh`. 제외 목록이 문서가 아니라
+  코드에 있고, **지워질 파일을 먼저 보여준 뒤 확인을 받는다.** #137의 본질은 `--delete`가
+  조용히 지운 것이었다. 실제로 `.env`·`secrets/`가 살아남고 확인 거절 시 아무것도 지워지지
+  않는 것까지 돌려서 확인했다.
+- `scripts/restore-db.sh`: 이미 DB가 있으면 그냥 붓지 않는다. pg_dumpall 덤프를 기존 DB 위에
+  부으면 "already exists"가 줄줄이 나면서 **일부만 들어가는데**, 그 상태가 제일 나쁘다.
+  `DROP_EXISTING=yes`를 명시해야 진행한다.
 
 ### 교훈 (다음에 compose를 고칠 때)
 

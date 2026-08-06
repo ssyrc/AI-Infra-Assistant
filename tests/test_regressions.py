@@ -1302,14 +1302,30 @@ def test_rsync_never_deletes_server_only_files():
     `.env`는 .gitignore에 있고 `secrets/`(ssh 개인키)도 저장소에 없다. 보내는 쪽에 없으니
     `--delete`가 매번 지웠다. 바인드 마운트 때문에 이미 떠 있는 컨테이너는 멀쩡해서,
     다음 `up -d`(재생성) 때 비로소 "모든 커맨드 인증 실패"로 터진다 - 원인 찾기가 특히 어렵다.
+
+    #141 이후로 제외 목록은 **문서가 아니라 `scripts/deploy-rsync.sh`에** 산다. 문서에 적어 두고
+    복사해 쓰는 방식 자체가 사고의 원인이었기 때문이다(빠뜨려도 아무도 모른다).
+    그래서 검사도 두 갈래다: 스크립트가 제외를 갖고 있는가 + 문서에 맨손 rsync가 되살아났는가.
     """
     gitignore = open(os.path.join(ROOT, ".gitignore"), encoding="utf-8").read()
     assert "secrets/" in gitignore, "개인키 디렉토리가 gitignore에 없다"
 
+    script_path = os.path.join(ROOT, "scripts", "deploy-rsync.sh")
+    assert os.path.isfile(script_path), "scripts/deploy-rsync.sh가 없다"
+    script = open(script_path, encoding="utf-8").read()
+    # **주석 줄은 빼고** 본다. 그냥 substring으로 찾으면 `#--exclude '.env'`처럼 주석 처리된
+    # 것도 통과해서, 테스트가 있는데도 회귀를 놓친다(이 테스트를 쓰다 실제로 겪었다).
+    active = "\n".join(ln for ln in script.split("\n") if not ln.lstrip().startswith("#"))
+    for pattern in ("--exclude '.env'", "--exclude 'secrets/'"):
+        assert pattern in active, f"deploy-rsync.sh에 {pattern}가 없다 - --delete가 지운다"
+    # 지워질 파일을 **먼저 보여주고 확인을 받는** 것이 이 스크립트의 존재 이유다.
+    assert "del." in script and "계속할까요" in script, \
+        "deploy-rsync.sh가 삭제 목록을 보여주고 확인받지 않는다"
+
+    # 문서에 맨손 rsync가 되살아나면(복사해 쓰다 제외를 빠뜨리는 경로) 잡는다.
     for doc in ("CLAUDE.md", os.path.join("docs", "NEXT-STEPS.md"),
                 os.path.join("docs", "RUN-LOG.md")):
         text = open(os.path.join(ROOT, doc), encoding="utf-8").read()
-        # 산문에 섞인 'rsync' 언급이 아니라 **실제 커맨드 줄**만 본다(줄바꿈 `\` 이어붙임).
         lines, i, commands = text.split("\n"), 0, []
         while i < len(lines):
             if lines[i].strip().startswith("rsync "):
@@ -1319,12 +1335,14 @@ def test_rsync_never_deletes_server_only_files():
                     cmd = cmd[:-1] + " " + lines[i].strip()
                 commands.append(cmd)
             i += 1
-        assert commands, f"{doc}에 rsync 커맨드가 없다(문서가 바뀌었으면 테스트도 고칠 것)"
         for cmd in commands:
             if "--delete" not in cmd:
                 continue        # --delete가 없으면 지울 일이 없다
-            assert "--exclude '.env'" in cmd, f"{doc}: rsync --delete가 .env를 지운다\n{cmd}"
-            assert "--exclude 'secrets/'" in cmd, f"{doc}: rsync --delete가 ssh 키를 지운다\n{cmd}"
+            assert "--exclude '.env'" in cmd, (
+                f"{doc}: 맨손 rsync --delete가 .env를 지운다. "
+                f"scripts/deploy-rsync.sh를 쓰도록 고칠 것\n{cmd}")
+            assert "--exclude 'secrets/'" in cmd, (
+                f"{doc}: 맨손 rsync --delete가 ssh 키를 지운다\n{cmd}")
 
     # 키가 사라진 상태를 조용히 넘기면 안 된다 - 기동 로그에서 바로 보여야 한다.
     server = open(os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"),
@@ -1786,20 +1804,63 @@ def test_excel_choices_split_on_newline_not_comma():
 # `VOLUME /var/lib/postgresql/data`를 선언하므로 **익명 볼륨**이 붙는데, 익명 볼륨은
 # 컨테이너를 다시 만들 때 떨어져 나간다. #139에서 `ports:`를 127.0.0.1로 바꾼 것만으로
 # compose가 postgres를 재생성했고, 매뉴얼·VOC·설정·등록 커맨드가 전부 사라졌다.
-@pytest.mark.parametrize("compose_file", ["docker-compose.yml", "docker-compose.dev.yml"])
-def test_postgres_has_named_data_volume(compose_file):
+# 상태를 담는 **이미지**와 그 데이터 경로. 새 서비스를 붙일 때 여기 추가하면 검사가 따라온다.
+# (redis는 임베딩 캐시라 없어져도 재생성되므로 뺐다 - 소실이 손실이 아닌 유일한 경우다.)
+_STATEFUL_IMAGES = {
+    "pgvector": "/var/lib/postgresql/data",
+    "postgres": "/var/lib/postgresql/data",
+    "clickhouse-server": "/var/lib/clickhouse",
+    "minio": "/data",
+    "open-webui": "/app/backend/data",
+}
+
+
+def _compose(name):
     yaml = pytest.importorskip("yaml")
-    with open(os.path.join(ROOT, compose_file), encoding="utf-8") as f:
-        conf = yaml.safe_load(f)
-    mounts = conf["services"]["postgres"]["volumes"]
-    data = [m for m in mounts if str(m).endswith(":/var/lib/postgresql/data")]
-    assert data, (
-        f"{compose_file}: postgres에 데이터 볼륨이 없습니다. 익명 볼륨이 붙어 "
-        "컨테이너를 다시 만들 때마다 DB가 통째로 사라집니다.")
-    name = str(data[0]).split(":")[0]
-    assert not name.startswith("."), f"{compose_file}: 데이터 볼륨이 바인드 마운트({name})입니다."
-    assert name in (conf.get("volumes") or {}), \
-        f"{compose_file}: '{name}'이 최상위 volumes에 선언돼 있지 않습니다."
+    with open(os.path.join(ROOT, name), encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+@pytest.mark.parametrize("compose_file", ["docker-compose.yml", "docker-compose.dev.yml"])
+def test_stateful_services_have_named_volumes(compose_file):
+    """상태를 담는 서비스는 전부 **이름 있는 볼륨**이어야 한다.
+
+    dev postgres에 데이터 볼륨이 없었다. pgvector 이미지가 `VOLUME`을 선언하므로 익명 볼륨이
+    붙는데, 익명 볼륨은 컨테이너를 다시 만들면 떨어져 나간다. #139에서 `ports:`를 127.0.0.1로
+    바꾼 것만으로 compose가 postgres를 재생성했고, 매뉴얼·VOC·설정·등록 커맨드가 전부 사라졌다.
+    `down -v`만 위험한 게 아니다 - 재생성을 부르는 아무 변경이나 같은 결과를 낸다.
+
+    postgres 하나만 보지 않고 **상태를 담는 이미지 전체**를 훑는다. 같은 실수를 세 번째로
+    하지 않으려면 새 서비스가 붙을 때 자동으로 걸려야 한다.
+    """
+    conf = _compose(compose_file)
+    declared = set((conf.get("volumes") or {}) or [])
+    checked = 0
+
+    for svc_name, svc in (conf.get("services") or {}).items():
+        image = str(svc.get("image", ""))
+        # `entrypoint`를 덮어쓴 서비스는 그 이미지를 **클라이언트로** 쓰는 것이다
+        # (dev-config는 postgres 이미지로 psql만 돌린다). 서버는 이미지 기본 엔트리포인트로 뜬다.
+        if svc.get("entrypoint"):
+            continue
+        for key, data_path in _STATEFUL_IMAGES.items():
+            if key not in image:
+                continue
+            mounts = [str(m) for m in (svc.get("volumes") or [])]
+            data = [m for m in mounts if m.split(":")[1:2] == [data_path]]
+            assert data, (
+                f"{compose_file}: '{svc_name}'({image})에 {data_path} 볼륨이 없습니다. "
+                "익명 볼륨이 붙어 컨테이너를 다시 만들 때마다 데이터가 사라집니다.")
+            src = data[0].split(":")[0]
+            assert not src.startswith((".", "/", "$")), (
+                f"{compose_file}: '{svc_name}'의 데이터 볼륨이 바인드 마운트({src})입니다. "
+                "rsync --delete가 지울 수 있습니다(#137).")
+            assert src in declared, (
+                f"{compose_file}: '{svc_name}'의 '{src}'가 최상위 volumes에 없습니다.")
+            checked += 1
+            break
+
+    assert checked, f"{compose_file}에서 상태 서비스를 하나도 찾지 못했습니다(검사가 헛돌고 있음)."
 
 
 def test_openwebui_has_named_data_volume():

@@ -18,17 +18,30 @@ cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
 코드만 바뀌었으면 재시작만으로 반영된다.
 
 ```bash
+# [서버]  **먼저 백업**. 설정·매뉴얼·VOC·등록 커맨드가 전부 postgres에 있다(#141).
+bash scripts/backup-db.sh
+
 # [WSL]  GitHub -> 게이트 서버로 전송 (폐쇄망은 GitHub에 못 닿는다)
 git -C /home/yrc/AI-Infra-Assistant fetch origin main
 git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
-rsync -avz --delete --progress \
-  --exclude '.env' --exclude 'secrets/' \
-  /home/yrc/AI-Infra-Assistant/ \
-  yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
+bash scripts/deploy-rsync.sh          # --dry-run 을 붙이면 무엇이 지워지는지만 본다
 
 # [서버]
 docker compose -f docker-compose.dev.yml run --rm db-init   # 마이그레이션/새 설정 키가 있을 때만
 bash scripts/restart-mounted.sh                             # 전체 재시작 + health 확인
+```
+
+`deploy-rsync.sh`를 쓰는 이유: `--delete`는 저장소에 없는 파일을 서버에서 지운다. 손으로 치다
+제외 목록을 빠뜨려 `.env`와 ssh 키가 사라진 적이 있다(#137). 스크립트는 제외 목록을 코드에
+갖고 있고, **삭제될 파일을 먼저 보여준 뒤 확인을 받는다.**
+
+되돌리기:
+
+```bash
+# [서버]
+ls -1t ../pg-backup-*.sql | head                       # 백업 목록
+DROP_EXISTING=yes bash scripts/restore-db.sh ../pg-backup-<날짜>.sql
+bash scripts/restart-mounted.sh
 ```
 
 ## 2. 이미지 재빌드 (requirements/Dockerfile이 바뀐 경우만)
