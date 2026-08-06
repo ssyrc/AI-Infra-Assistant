@@ -12,33 +12,14 @@
 
 ---
 
-## 1. [서버] 지시문이 실제로 반영됐는지 **먼저 확인**
+## 1. [서버] 되돌리기 버튼이 고장나 있었습니다 — 코드부터 받으세요
 
-`내 홈 디렉토리는 어디야?` → `/home/yr9.choi`(틀림)는 **옛 지시문이 살아 있을 때 나오는
-증상**입니다. 옛 지시문은 확인용 커맨드를 돌리지 말라고 적극적으로 막고 있었습니다.
-추측하기 전에 이것부터 가릅니다.
+`옛 지시문`이 계속 뜬 이유를 찾았습니다(#147). **되돌리기 버튼이 옛 텍스트를 저장하고
+있었습니다.** 파이썬이 모듈을 `sys.modules`에 캐시하는데, 콘솔이 예전에 한 번이라도 그 버튼을
+눌렀으면 그 뒤로는 **파일이 아무리 최신이어도 캐시된 옛 텍스트**를 씁니다.
+`./shared`가 바인드 마운트라 파일은 이미 최신인데 버튼이 아무 일도 안 한 겁니다.
 
-```bash
-cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker exec ai-infra-assistant-postgres-1 psql -U agent -d platform_config -tAc \
-  "select case when value like '%행을 임의로 줄이지 않습니다%'
-            then '최신 지시문 OK'
-            else '옛 지시문 - 콘솔에서 되돌리기 버튼을 눌러야 합니다' end
-     from platform_settings where key='agent_system_instruction';"
-```
-
-**`옛 지시문`이 나오면 그 상태의 답변 품질은 판단 근거가 되지 않습니다.** 2번을 먼저 하세요.
-
-## 2. [서버] 코드 반영 + 지시문 되돌리기
-
-`ls -la` 16행만 나온 것은 **모델이 임의로 줄인 것**입니다. 16행이면 약 1,200자라
-`execution_result_max_chars`(4000)에 한참 못 미칩니다 — 우리가 자른 게 아닙니다.
-`phd list` 결과를 표로 안 만든 것도 같은 뿌리입니다. 지시문을 이렇게 고쳤습니다.
-
-> **행을 임의로 줄이지 않습니다. 이게 가장 자주 나는 사고입니다.**
-> 도구가 돌려준 행이 30줄이면 30줄을 전부 답에 넣습니다. 도구 결과에
-> `전체 N줄 중 M줄만 보입니다`가 붙어 있을 때만 잘린 것이고, 그때는 몇 줄 중 몇 줄인지
-> 답에 밝힙니다. 그 안내가 없으면 받은 것이 전부이므로 전부 보여줍니다.
+이제 모듈을 거치지 않고 **파일을 직접 읽습니다.**
 
 ```bash
 # [서버]
@@ -50,13 +31,30 @@ git -C /home/yrc/AI-Infra-Assistant fetch origin main
 git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
 bash /home/yrc/AI-Infra-Assistant/scripts/deploy-rsync.sh
 
-# [서버]
+# [서버]  admin-console 을 반드시 함께 재시작합니다(캐시를 비웁니다)
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker compose -f docker-compose.dev.yml restart agent-server
+docker compose -f docker-compose.dev.yml restart admin-console agent-server
 ```
 
-그다음 **콘솔 설정 탭 → `지시문을 최신 기본값으로 되돌리기` → agent-server 재시작.**
-1번 확인 커맨드를 다시 돌려 `최신 지시문 OK`가 나오는지 보세요.
+**`admin-console` 재시작이 이번엔 필수입니다.** 백엔드 코드가 바뀌었고, 캐시도 그때 비워집니다.
+
+## 2. [웹] 되돌리기 → [서버] 확인
+
+콘솔 설정 탭 → **`지시문을 최신 기본값으로 되돌리기`** → agent-server 재시작.
+
+그다음 이걸로 **실제로 바뀌었는지** 확인하세요.
+
+```bash
+cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
+docker exec ai-infra-assistant-postgres-1 psql -U agent -d platform_config -tAc \
+  "select case when value like '%행을 임의로 줄이지 않습니다%'
+            then '최신 지시문 OK (' || length(value) || '자)'
+            else '아직 옛 지시문 (' || length(value) || '자)' end
+     from platform_settings where key='agent_system_instruction';"
+```
+
+`최신 지시문 OK`가 나와야 3번으로 갑니다. 여전히 `옛 지시문`이면 **글자 수를 알려주세요**
+(현재 코드 기준은 약 12,000자입니다).
 
 ## 3. [웹] 세 질문 다시 확인
 
@@ -129,8 +127,9 @@ docker volume rm 1dc7527fd826d5a2afc08bd1b44e945219c2fd10da65c2747f49c2d367ab919
 
 | 증상 | 조치 |
 |---|---|
-| 답변이 행을 조용히 줄임 | 1번으로 지시문 버전 확인. `옛 지시문`이면 되돌리기 |
-| 홈 경로를 지어냄 | 같음. 최신 지시문이면 실행해서 답합니다 |
+| 되돌리기를 눌러도 옛 지시문 | `admin-console` 재시작이 빠진 것입니다(1번) |
+| 답변이 행을 조용히 줄임 | 2번으로 지시문 버전 확인. `옛 지시문`이면 1번 재시작부터 |
+| 홈 경로를 지어냄 | 같음. `최신 지시문 OK`인데도 그러면 알려주세요 |
 | 모델이 없는 옵션을 지어냄 | 4번에서 그 인자를 **선택형**으로 바꾸세요 |
 | 모델 목록이 비고 질문이 401 | 콘솔 `agent_api_key`와 Open WebUI 연결 키가 다릅니다 |
 | Service Hub curl 이 401 | 같은 키를 `Authorization: Bearer` 로 보내야 합니다 |

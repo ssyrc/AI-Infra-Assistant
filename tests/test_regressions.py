@@ -1400,7 +1400,10 @@ def test_instruction_can_be_reset_from_console_without_db_env():
     router = open(os.path.join(ROOT, "admin_console", "backend", "routers", "settings.py"),
                   encoding="utf-8").read()
     assert '@router.post("/agent_system_instruction/reset")' in router
-    assert "from agent_instruction import AGENT_INSTRUCTION" in router
+    # 읽는 방식은 #147에서 바뀌었다: 모듈 import는 sys.modules에 캐시돼 **옛 텍스트**를
+    # 계속 저장했다. 이제 파일을 직접 읽는다(test_instruction_reset_reads_file_not_module_cache).
+    assert "_read_instruction_from_disk" in router
+    assert "agent_instruction.py" in router, "지시문 파일 경로를 참조하지 않는다"
     assert "from migrations import" not in router, "콘솔이 migrations를 import하면 터진다"
 
     html = open(os.path.join(ROOT, "admin_console", "frontend", "index.html"),
@@ -2014,3 +2017,49 @@ def test_instruction_states_no_shell_as_a_property():
     instr = _instruction_text()
     assert "셸을 거치지 않습니다" in instr
     assert "글자 그대로" in instr
+
+
+# --- #147: "되돌리기" 버튼이 옛 지시문을 계속 저장했다 --------------------------------
+def test_instruction_reset_reads_file_not_module_cache():
+    """`agent_system_instruction` 되돌리기가 **파일을 다시 읽어야** 한다.
+
+    예전에는 함수 안에서 `from agent_instruction import AGENT_INSTRUCTION` 했다. 부수효과가
+    없으니 안전하다고 생각했는데, 안전한 것과 **최신인 것**은 다르다. 파이썬은 `sys.modules`에
+    캐시하므로 이 프로세스가 한 번이라도 읽었으면 그 뒤로는 옛 텍스트를 쓴다. `./shared`가
+    바인드 마운트라 파일은 최신인데 **버튼이 아무 일도 하지 않는** 상태가 됐다
+    (사용자: "2번 그대로 했는데도 1번 하면 옛지시문이라고 떠").
+
+    `importlib.reload`도 부족하다 - `.pyc`는 mtime+크기로 유효성을 보므로 같은 초에 같은
+    크기로 바뀌면 낡은 바이트코드를 쓴다(실제로 재현했다). 그래서 소스를 직접 읽어 compile한다.
+    """
+    src = open(os.path.join(ROOT, "admin_console", "backend", "routers", "settings.py"),
+               encoding="utf-8").read()
+    reset = src[src.index("def _read_instruction_from_disk"):]
+    assert "open(path" in reset and "compile(src" in reset, \
+        "지시문을 파일에서 직접 읽지 않는다"
+    # 되돌리기 경로에서 모듈 import로 지시문을 가져오면 안 된다.
+    body = src[src.index("async def reset_agent_instruction"):]
+    assert "from agent_instruction import" not in body, \
+        "되돌리기가 모듈 캐시에서 지시문을 읽는다 - 옛 텍스트가 저장된다"
+    assert "_read_instruction_from_disk()" in body
+    # 못 읽었으면 조용히 옛 값을 쓰지 않고 실패해야 한다.
+    assert "지시문 파일을 읽지 못했습니다" in reset
+
+
+def test_instruction_reset_actually_returns_current_file_text():
+    """헬퍼가 정말 디스크의 현재 내용을 돌려주는지 - 문자열 검사만으로는 부족하다."""
+    for k, v in {"CONFIG_DB_DSN": "postgres://x/y", "POSTGRES_PASSWORD": "x",
+                 "ADMIN_PASSWORD": "x", "SESSION_SECRET": "x"}.items():
+        os.environ.setdefault(k, v)
+    import importlib.util
+    sys.path.insert(0, os.path.join(ROOT, "admin_console", "backend"))
+    sys.path.insert(0, os.path.join(ROOT, "admin_console", "backend", "routers"))
+    path = os.path.join(ROOT, "admin_console", "backend", "routers", "settings.py")
+    spec = importlib.util.spec_from_file_location("settings_under_test", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    on_disk = _instruction_text()
+    got = mod._read_instruction_from_disk()
+    assert got in on_disk, "파일에 없는 내용을 돌려준다"
+    assert len(got) > 5000, f"지시문이 너무 짧다({len(got)}자) - 잘못 읽고 있다"

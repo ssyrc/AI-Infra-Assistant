@@ -66,6 +66,36 @@ async def update_setting(key: str, body: SettingIn, admin: str = Depends(require
     return {"ok": True}
 
 
+def _read_instruction_from_disk() -> str:
+    """`shared/agent_instruction.py`에서 지시문을 **지금 이 순간의 파일 내용으로** 읽는다 (#147).
+
+    왜 import를 쓰지 않나 — 두 겹의 캐시가 있다.
+      1) `sys.modules`: 함수 안에서 `from agent_instruction import ...` 해도 이미 읽은 모듈이면
+         그대로 돌려준다. 그래서 버튼을 두 번째 누르는 순간부터는 **옛 텍스트가 저장됐다.**
+         `./shared`가 바인드 마운트라 파일은 최신인데 버튼이 아무 일도 안 하는 상태였다.
+      2) `.pyc`: `importlib.reload`로 1)을 피해도, 바이트코드 캐시는 **mtime+크기**로 유효성을
+         판단한다. 같은 초에 같은 크기로 바뀌면 낡은 바이트코드를 그대로 쓴다(실제로 재현했다).
+
+    그래서 소스를 직접 읽어 `compile`한다. 우리가 읽은 문자열을 컴파일하는 경로는 pyc 캐시를
+    타지 않으므로 항상 최신이다. `agent_instruction.py`는 docstring과 문자열 상수뿐이라
+    (부수효과 없음) exec해도 안전하다.
+    """
+    path = os.path.join(os.path.dirname(__file__), "../../../shared/agent_instruction.py")
+    path = os.path.normpath(path)
+    try:
+        src = open(path, encoding="utf-8").read()
+        ns: dict = {}
+        exec(compile(src, path, "exec"), ns)          # noqa: S102 - 우리 저장소의 상수 파일
+        text = ns["AGENT_INSTRUCTION"]
+    except Exception as e:                            # noqa: BLE001
+        # 못 읽었으면 **조용히 옛 값을 쓰지 않는다** - 그게 이 버그의 본질이었다.
+        raise HTTPException(
+            500, f"지시문 파일을 읽지 못했습니다({type(e).__name__}: {e}). 경로: {path}")
+    if not isinstance(text, str) or not text.strip():
+        raise HTTPException(500, "지시문 파일에서 읽은 값이 비어 있습니다.")
+    return text
+
+
 @router.post("/agent_system_instruction/reset")
 async def reset_agent_instruction(admin: str = Depends(require_admin)):
     """지시문을 **코드의 현재 기본값**으로 되돌린다.
@@ -77,8 +107,8 @@ async def reset_agent_instruction(admin: str = Depends(require_admin)):
 
     직접 수정한 문구가 있으면 사라지므로, 프런트에서 확인창을 띄운다.
     """
-    from agent_instruction import AGENT_INSTRUCTION      # noqa: PLC0415  (부수효과 없는 모듈)
+    text = _read_instruction_from_disk()
 
-    await set_config("agent_system_instruction", AGENT_INSTRUCTION, updated_by=admin)
+    await set_config("agent_system_instruction", text, updated_by=admin)
     # hot_reload=false 키라 agent-server를 재시작해야 반영된다(프런트가 버튼을 띄운다).
-    return {"ok": True, "chars": len(AGENT_INSTRUCTION), "restart_required": True}
+    return {"ok": True, "chars": len(text), "restart_required": True}
