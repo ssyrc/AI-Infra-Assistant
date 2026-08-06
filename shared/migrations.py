@@ -13,6 +13,8 @@ DB 마이그레이션 + 설정 부트스트랩 러너.
 import os
 import json
 import asyncio
+import secrets
+
 import asyncpg
 
 from execution_exec import DEFAULT_DENY_CSV, tool_name_for
@@ -675,6 +677,21 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
          "관리자 콘솔이 Open WebUI API를 부를 도커 내부 주소. 사용자 접속 주소(8502)가 아니다",
          True, False, False),
         ("openwebui_admin_api_key", "", "Open WebUI 관리자 API 키(기본 모델 동기화용, 비우면 동기화 생략)", True, True, False),
+
+        # --- 내부 신뢰 경계 인증 (#139) -------------------------------------------------
+        # MCP는 X-User-Id를 그대로 믿고 그 계정 권한으로 커맨드를 실행한다. MCP 포트가
+        # 호스트에 열려 있으면 같은 망의 누구나 그 헤더를 붙여 남의 계정으로 실행할 수 있다.
+        # agent-server와 MCP가 **같은 DB에서 읽는** 무작위 비밀값으로 그 경로를 막는다.
+        # 관리자가 손댈 일이 없다(한 번 심기고 그대로 유지된다 - force=False).
+        ("mcp_shared_secret", secrets.token_urlsafe(32),
+         "agent-server ↔ MCP 내부 호출 인증용 비밀값(자동 생성, 건드리지 마세요)",
+         True, True, False),
+        # agent-server의 /v1/*을 호출할 때 요구할 API 키. Open WebUI의 연결(Connections)에
+        # 넣은 API 키와 같은 값을 여기 넣으면 그때부터 인증이 강제된다.
+        # **비우면 인증 없이 누구나 호출할 수 있다**(그 상태면 기동 로그에 경고가 찍힌다).
+        ("agent_api_key", "",
+         "agent-server /v1/* 호출에 요구할 API 키(Open WebUI 연결에 넣은 값과 동일하게). "
+         "비우면 인증하지 않는다", True, True, False),
         # 위 openwebui_base_url은 **콘솔 -> Open WebUI API**용 내부 주소(8080)다. 사용자가
         # 브라우저로 들어가는 주소(8502)는 별개라, 안내 문구에 쓸 값으로 따로 둔다.
         ("openwebui_public_url",

@@ -12,10 +12,27 @@
 """
 import asyncio
 import functools
+import hmac
 import inspect
+import json
 from contextvars import ContextVar
 
 _caller: ContextVar[dict] = ContextVar("caller", default={})
+
+
+async def _deny(send):
+    """공유 비밀값이 맞지 않는 호출을 401로 끊는다. 사유를 분명히 적는다 -
+    agent-server만 예전 코드로 떠 있어도 이 오류가 나므로, 그 가능성을 함께 알려준다."""
+    body = json.dumps({
+        "error": "이 MCP는 agent-server에서만 호출할 수 있습니다(공유 비밀값 불일치). "
+                 "agent-server가 예전 코드로 떠 있으면 이 오류가 납니다 - "
+                 "bash scripts/restart-mounted.sh 로 전부 재시작하세요.",
+    }, ensure_ascii=False).encode()
+    print("[mcp] 공유 비밀값이 없거나 달라 호출을 거부했습니다(X-Agent-Secret).")
+    await send({"type": "http.response.start", "status": 401,
+                "headers": [(b"content-type", b"application/json; charset=utf-8"),
+                            (b"content-length", str(len(body)).encode())]})
+    await send({"type": "http.response.body", "body": body})
 
 
 def get_caller() -> dict:
@@ -23,14 +40,36 @@ def get_caller() -> dict:
 
 
 class CallerContextMiddleware:
-    """Agent Server가 붙인 호출자 헤더를 ContextVar에 넣는 ASGI 미들웨어."""
+    """Agent Server가 붙인 호출자 헤더를 ContextVar에 넣는 ASGI 미들웨어.
 
-    def __init__(self, app):
+    **호출자 인증도 여기서 한다.** MCP는 `X-User-Id`를 그대로 믿고 그 계정 권한으로 커맨드를
+    실행한다. 그런데 MCP 포트가 호스트에 열려 있으면, 같은 망의 누구나 그 헤더를 임의로 붙여
+    **남의 계정으로 실행**할 수 있다. 그래서 agent-server와 공유하는 비밀값을 확인한다
+    (`mcp_shared_secret` — db-init이 무작위로 한 번 심고 양쪽이 같은 DB에서 읽는다).
+
+    비밀값이 설정돼 있지 않으면(구 배포) 통과시키되 기동 시 경고한다 — 인증을 갑자기 강제해
+    돌던 서비스를 세우지 않기 위함이다.
+    """
+
+    def __init__(self, app, secret_getter=None):
         self.app = app
+        self._secret_getter = secret_getter
+
+    async def _expected_secret(self) -> str:
+        if self._secret_getter is None:
+            return ""
+        try:
+            return (await self._secret_getter()) or ""
+        except Exception:  # noqa: BLE001
+            return ""      # 설정을 못 읽었다고 서비스를 세우지는 않는다
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http":
             headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
+            expected = await self._expected_secret()
+            if expected and not hmac.compare_digest(headers.get("x-agent-secret", ""), expected):
+                await _deny(send)
+                return
             roles = [r.strip() for r in headers.get("x-user-roles", "").split(",") if r.strip()]
             token = _caller.set({
                 "user_id": headers.get("x-user-id"),

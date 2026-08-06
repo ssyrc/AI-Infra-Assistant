@@ -17,6 +17,7 @@ import sys
 import time
 import uuid
 import json
+import hmac
 import asyncio
 import traceback
 from datetime import datetime, timezone
@@ -24,7 +25,7 @@ from contextlib import asynccontextmanager
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../shared"))
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 
@@ -86,6 +87,29 @@ async def _close_toolsets(toolsets: list):
             print(f"[agent] toolset 정리 실패(무시): {e}")
 
 
+async def require_api_key(request: Request):
+    """`/v1/*` 호출을 API 키로 인증한다(설정된 경우에만).
+
+    **왜 필요한가**: 이 서버는 `X-OpenWebUI-User-Email` 헤더를 그대로 믿고 그 계정 권한으로
+    커맨드를 실행한다. `/v1/agent/query`는 아예 본문의 `user_id`를 쓴다. 포트가 호스트에
+    열려 있으므로, 인증이 없으면 같은 망의 누구나 헤더만 바꿔 **남의 계정으로 실행**할 수 있다.
+
+    Open WebUI는 연결(Connections)에 넣은 키를 `Authorization: Bearer <key>`로 보낸다.
+    콘솔 설정의 `agent_api_key`에 같은 값을 넣으면 그때부터 인증이 강제된다.
+    비워 두면 검사하지 않는다(기존 배포를 갑자기 세우지 않기 위함) - 대신 기동 로그에 경고.
+    """
+    expected = (await get_config("agent_api_key", "") or "").strip()
+    if not expected:
+        return
+    header = request.headers.get("authorization", "")
+    token = header[7:].strip() if header[:7].lower() == "bearer " else ""
+    if not token:
+        token = request.headers.get("x-api-key", "").strip()
+    if not hmac.compare_digest(token, expected):
+        raise HTTPException(401, "API 키가 없거나 올바르지 않습니다. Open WebUI 연결"
+                                 "(Connections)의 API 키와 콘솔의 agent_api_key를 맞추세요.")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 기동 시 1회: 설정/ MCP 주소 유효성 검증. 실제 실행 에이전트와 모델명은 요청마다 새로 가져온다.
@@ -95,6 +119,14 @@ async def lifespan(app: FastAPI):
     if not session_db_dsn:
         raise RuntimeError("agent_session_db_dsn이 설정되지 않았습니다.")
     state["session_service"] = DatabaseSessionService(db_url=session_db_dsn)
+    # 인증 상태를 기동 로그에 남긴다. 꺼져 있으면 "누구나 남의 계정으로 실행 가능"이므로
+    # 조용히 넘어가면 안 된다.
+    if (await get_config("agent_api_key", "") or "").strip():
+        print("[agent] /v1/* API 키 인증이 켜져 있습니다.")
+    else:
+        print("[agent] !! /v1/* 에 인증이 없습니다. 이 포트에 닿을 수 있는 누구나 "
+              "헤더만 바꿔 다른 사용자 권한으로 커맨드를 실행할 수 있습니다. "
+              "콘솔 설정의 agent_api_key를 Open WebUI 연결의 API 키와 같게 넣으세요.")
     try:
         yield
     finally:
@@ -151,7 +183,7 @@ async def health():
     return {"status": "ok", "model": await _display_model_name()}
 
 
-@app.get("/v1/models")
+@app.get("/v1/models", dependencies=[Depends(require_api_key)])
 async def list_models():
     # Open WebUI가 페이지를 열거나 새로고침할 때 부르는 엔드포인트다. 여기서 예열하면
     # 사용자가 첫 질문을 타이핑하는 동안 ssh 세션이 준비된다.
@@ -301,13 +333,36 @@ def _first_text_arg(args: dict) -> str:
     return ""
 
 
+def _exec_command_text(args: dict) -> str:
+    """실행 툴의 인자에서 **실제로 돌아갈 커맨드 한 줄**을 만든다.
+
+    예전에는 첫 문자열 인자만 보여줘서 `· 'ls' 실행하는 중`이었다. 그러면 `-A`가 빠져
+    숨김 파일이 안 나온 건지, 출력이 잘린 건지 사용자가 구분할 수 없다. 전부 보여준다.
+    """
+    parts = []
+    cmd = args.get("command")
+    if isinstance(cmd, str) and cmd.strip():
+        parts.append(cmd.strip())
+    extra = args.get("args")
+    if isinstance(extra, str):
+        parts.append(extra.strip())
+    elif isinstance(extra, list):
+        parts += [str(a) for a in extra]
+    # 등록 커맨드는 command 대신 타입 붙은 인자로 온다(lines/path 등). 값만 이어 붙인다.
+    if not parts:
+        parts = [str(v) for k, v in (args or {}).items()
+                 if k not in ("host", "user_id") and v not in (None, "", [])]
+    return " ".join(parts)[:80]
+
+
 def _action_phrase(name: str, args: dict) -> str:
     """도구 호출을 사용자에게 보여줄 한 줄 문장으로 바꾼다(도구 이름은 노출하지 않는다)."""
     low = (name or "").lower()
     q = _first_text_arg(args)
     quoted = f"'{q}'" if q else ""
     if "run" in low or "exec" in low:
-        return f"{quoted} 실행하는 중" if q else "커맨드 실행하는 중"
+        full = _exec_command_text(args)
+        return f"`{full}` 실행하는 중" if full else "커맨드 실행하는 중"
     for key, template in _ACTION_RULES:
         if key in low:
             return template.format(q=quoted).replace("  ", " ").strip()
@@ -344,6 +399,10 @@ def _result_phrase(name: str, resp) -> str:
         if isinstance(r.get("duration_ms"), int):
             bits.append(f"{r['duration_ms'] / 1000:.1f}초")
         where = f" ({' · '.join(bits)})" if bits else ""
+        # 출력이 잘렸으면 **사용자에게 직접** 알린다. 이 줄은 LLM을 거치지 않으므로,
+        # 모델이 "일부만 표시" 안내를 빼먹어도 화면에는 남는다.
+        if r.get("truncated"):
+            where += f" ⚠ 출력 {r.get('total_lines')}줄 중 {r.get('shown_lines')}줄만"
         if r.get("error"):
             return f"실패{where} — {str(r['error'])[:60]}"
         if "exit_code" in r:
@@ -607,7 +666,7 @@ def _caller_from_request(request: Request, req: ChatCompletionRequest) -> tuple[
     return user_id, role, chat_id
 
 
-@app.post("/v1/chat/completions")
+@app.post("/v1/chat/completions", dependencies=[Depends(require_api_key)])
 async def chat_completions(req: ChatCompletionRequest, request: Request):
     warm_execution_host()          # 답을 만드는 동안 ssh 세션이 준비되게(응답을 막지 않는다)
     model_name = await _display_model_name()
@@ -830,7 +889,7 @@ def _bg_persist(user_id, conversation_id, source, message, answer, mem_enabled):
         task.add_done_callback(_bg_tasks.discard)
 
 
-@app.post("/v1/agent/query")
+@app.post("/v1/agent/query", dependencies=[Depends(require_api_key)])
 async def agent_query(body: AgentQueryIn, request: Request):
     """상위 agent(예: 통합 VOC)가 AI-Infra 질문을 위임하는 엔드포인트(인증 없음, 내부망 전용).
     단일 user_id로 장기 메모리를 로드/저장하며, 이후 대화에서 참고한다."""
@@ -1048,7 +1107,7 @@ def _voc_format_instruction(output_option: str) -> str:
             "제목/목록/표/코드블록을 적절히 사용한다.")
 
 
-@app.post("/v1/voc/query")
+@app.post("/v1/voc/query", dependencies=[Depends(require_api_key)])
 async def voc_query(body: VocQueryIn, request: Request):
     """통합 VOC agent가 AI-Infra 관련 VOC를 위임하는 엔드포인트(내부망 전용, 인증 없음).
     guide 계약대로 voc_info를 받아 분석 답변을 {success, answer:{content}} 형태로 돌려준다.

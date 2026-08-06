@@ -111,6 +111,12 @@ async def build_agent(caller_headers: dict | None = None,
     chart_url = (await get_config("chart_mcp_url", "") or "").strip()
 
     headers = {k: v for k, v in (caller_headers or {}).items() if v is not None}
+    # MCP는 X-User-Id를 그대로 믿고 그 계정 권한으로 커맨드를 실행한다. MCP 포트가 호스트에
+    # 열려 있으면 같은 망의 누구나 그 헤더를 붙여 **남의 계정으로 실행**할 수 있으므로,
+    # agent-server만 아는 공유 비밀값을 함께 보낸다(db-init이 무작위로 한 번 심는다).
+    mcp_secret = (await get_config("mcp_shared_secret", "") or "").strip()
+    if mcp_secret:
+        headers["X-Agent-Secret"] = mcp_secret
 
     def toolset(url: str) -> McpToolset:
         return McpToolset(

@@ -236,4 +236,7 @@ if __name__ == "__main__":
 
     inner.add_event_handler("startup", _start_master)
     inner.add_event_handler("shutdown", stop_masters)
-    uvicorn.run(CallerContextMiddleware(inner), host="0.0.0.0", port=port)
+    # 공유 비밀값 검사: 같은 망의 누구나 X-User-Id를 붙여 남의 계정으로 실행하는 것을 막는다.
+    guarded = CallerContextMiddleware(
+        inner, secret_getter=lambda: get_config("mcp_shared_secret", ""))
+    uvicorn.run(guarded, host="0.0.0.0", port=port)

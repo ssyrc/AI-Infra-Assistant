@@ -1389,7 +1389,7 @@ async function syncOpenWebUIModel() {
 // (내부 튜닝값까지 다 늘어놓으면 정작 바꿔야 할 값을 찾기 어렵다).
 const SETTING_GROUPS = [
   { title: "에이전트", service: "agent-server",
-    keys: ["agent_system_instruction", "llm_temperature", "llm_streaming",
+    keys: ["agent_system_instruction", "agent_api_key", "llm_temperature", "llm_streaming",
            "history_max_chars", "show_tool_activity", "voc_intake_guide"] },
   { title: "LLM", service: "agent-server",
     keys: ["vllm_llm_base_url", "vllm_llm_model"] },

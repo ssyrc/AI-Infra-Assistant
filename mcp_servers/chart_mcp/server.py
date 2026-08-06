@@ -207,5 +207,7 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("MCP_PORT", 8005))
     os.makedirs(CHART_DIR, exist_ok=True)
-    uvicorn.run(ChartFiles(CallerContextMiddleware(mcp.streamable_http_app())),
+    uvicorn.run(ChartFiles(CallerContextMiddleware(
+                    mcp.streamable_http_app(),
+                    secret_getter=lambda: get_config("mcp_shared_secret", ""))),
                 host="0.0.0.0", port=port)

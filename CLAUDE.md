@@ -116,6 +116,13 @@ docker compose -f docker-compose.dev.yml up -d --no-build
   파이프에 커맨드 문자열을 써 넣어야 해서 "셸 미사용" 원칙이 깨진다(#103, #134).
 - 셸을 쓰지 않는다(argv 리스트로 실행). 파괴적 명령은 등록/실행 단계에서 거부한다.
 - `user_id`는 LLM 스키마에서 숨기고 호출자 헤더(`X-User-Id`)에서 강제 주입한다(남의 자원 접근 불가).
+- **신뢰 경계에는 인증이 있어야 한다**(#139). 그 헤더를 그대로 믿기 때문에, 인증이 없으면
+  같은 망의 누구나 헤더만 바꿔 남의 계정으로 실행할 수 있다.
+  · agent-server ↔ MCP: `mcp_shared_secret`(db-init이 무작위로 심고 양쪽이 같은 DB에서 읽는다).
+    맞지 않으면 MCP가 401. 관리자가 손댈 값이 아니다.
+  · Open WebUI → agent-server: `agent_api_key`(콘솔). Open WebUI 연결(Connections)의 API 키와
+    같게 넣으면 `/v1/*`에 인증이 걸린다. **비우면 인증이 없고**, 기동 로그에 경고가 찍힌다.
+  · 내부 전용 포트(postgres·MCP 4개)는 `127.0.0.1`에만 연다. 서버에서 curl 진단은 그대로 된다.
 
 ## 4. MCP 역할 분담 (사용자 결정 사항)
 

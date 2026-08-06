@@ -1212,6 +1212,66 @@ def test_privilege_drop_defaults_to_login_shell_and_keeps_legacy_flag():
     assert {"su", "runuser", "setpriv", "sudo"} <= DENY_BASE_COMMANDS
 
 
+# --- 20번: 내부 신뢰 경계 인증 -------------------------------------------------------
+# MCP는 X-User-Id를 그대로 믿고 그 계정 권한으로 커맨드를 실행한다. MCP 포트가 호스트에
+# 열려 있으면 같은 망의 누구나 그 헤더를 붙여 **남의 계정으로 실행**할 수 있었다.
+def test_mcp_rejects_calls_without_shared_secret():
+    sys.path.insert(0, os.path.join(ROOT, "shared"))
+    from mcp_caller import CallerContextMiddleware, get_caller
+
+    seen = []
+
+    async def app(scope, receive, send):
+        seen.append(("passed", get_caller().get("user_id")))
+
+    async def send(msg):
+        if msg["type"] == "http.response.start":
+            seen.append(("status", msg["status"]))
+
+    async def call(configured_secret, sent_header):
+        seen.clear()
+        mw = CallerContextMiddleware(
+            app, secret_getter=lambda: asyncio.sleep(0, result=configured_secret))
+        headers = [(b"x-user-id", b"yr9.choi")]
+        if sent_header is not None:
+            headers.append((b"x-agent-secret", sent_header.encode()))
+        await mw({"type": "http", "headers": headers}, None, send)
+        return list(seen)
+
+    async def scenario():
+        assert await call("s3cr3t", "s3cr3t") == [("passed", "yr9.choi")], "정상 호출이 막혔다"
+        assert ("status", 401) in await call("s3cr3t", None), "비밀값 없이 통과했다"
+        assert ("status", 401) in await call("s3cr3t", "wrong"), "틀린 비밀값으로 통과했다"
+        # 비밀값이 아직 없는 구 배포는 막지 않는다(돌던 서비스를 갑자기 세우지 않는다).
+        assert await call("", None) == [("passed", "yr9.choi")]
+
+    asyncio.run(scenario())
+
+    # 양쪽이 같은 DB 값을 쓰는지 - db-init이 무작위로 심고, agent-server가 헤더로 보낸다.
+    cfg = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+    assert '("mcp_shared_secret", secrets.token_urlsafe(32)' in cfg
+    agent = open(os.path.join(ROOT, "agent_server", "agent.py"), encoding="utf-8").read()
+    assert 'headers["X-Agent-Secret"] = mcp_secret' in agent
+    for mcp_dir in ("execution_mcp", "chart_mcp"):
+        srv = open(os.path.join(ROOT, "mcp_servers", mcp_dir, "server.py"), encoding="utf-8").read()
+        assert "secret_getter=" in srv, f"{mcp_dir}가 비밀값을 검사하지 않는다"
+
+
+def test_agent_server_v1_endpoints_can_require_api_key():
+    """`X-OpenWebUI-User-Email`을 그대로 믿는 서버라, 포트가 열려 있으면 헤더만 바꿔
+    남의 계정으로 실행할 수 있다. API 키를 넣으면 /v1/*이 잠겨야 한다."""
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    assert "async def require_api_key" in src
+    assert "hmac.compare_digest" in src, "타이밍 안전 비교를 쓰지 않는다"
+    # 실행까지 이어지는 엔드포인트 전부에 붙어야 한다(하나라도 빠지면 우회로가 된다).
+    for ep in ('@app.get("/v1/models"', '@app.post("/v1/chat/completions"',
+               '@app.post("/v1/agent/query"', '@app.post("/v1/voc/query"'):
+        i = src.index(ep)
+        assert "dependencies=[Depends(require_api_key)]" in src[i:i + 200], f"{ep}에 인증이 없다"
+    # 꺼져 있으면 기동 로그로 알려야 한다(조용히 열어 두지 않는다).
+    assert "/v1/* 에 인증이 없습니다" in src
+
+
 def test_console_explains_405_instead_of_showing_it():
     """새 API를 추가하면 콘솔 화면은 바로 새 코드인데 백엔드는 재시작해야 바뀐다.
 
@@ -1386,14 +1446,27 @@ def test_command_output_has_context_budget_cap():
     assert '("execution_result_max_chars", "4000"' in cfg
 
 
-def test_output_truncation_keeps_whole_lines():
-    """표 형태 출력을 줄 중간에서 끊으면 에이전트가 값을 잘못 읽는다."""
+def test_output_truncation_keeps_whole_lines_and_is_visible():
+    """표 형태 출력을 줄 중간에서 끊으면 에이전트가 값을 잘못 읽는다.
+
+    그리고 **잘렸다는 사실이 사용자에게 보여야 한다.** 예전에는 안내 문구를 stdout 끝에
+    붙이는 게 전부여서, 모델이 그 줄을 빼먹으면 사용자는 목록이 전부인 줄 알았다
+    ("홈 파일 목록이 중간에 잘리는 것 같아"). 구조화된 값으로도 돌려준다.
+    """
     src = open(os.path.join(ROOT, "shared", "ssh_exec.py"), encoding="utf-8").read()
     i = src.index("def _clip(")
-    clip = src[i:i + 1400]
+    clip = src[i:i + 1600]
     assert "lines = s.split" in clip, "줄 단위로 자르지 않는다"
-    assert "줄 더 있음" in clip, "몇 줄이 빠졌는지 알려주지 않는다"
+    assert "줄만 보입니다" in clip, "몇 줄 중 몇 줄인지 알려주지 않는다"
     assert "전부라고 말하지 마세요" in clip, "잘린 것을 전부로 답할 위험을 막지 않는다"
+    # 결과 dict에도 실려야 진행 줄에서 보여줄 수 있다(LLM을 거치지 않는 경로).
+    assert '"truncated": False' in src and "**clip_info," in src
+
+    main = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    assert 'r.get("truncated")' in main, "진행 줄이 잘림을 알리지 않는다"
+    assert "줄만" in main
+    # 실행한 커맨드를 통째로 보여줘야 `-A` 누락과 잘림을 구분할 수 있다.
+    assert "def _exec_command_text" in main
 
 
 def test_chart_public_base_url_hidden_from_console():

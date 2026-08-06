@@ -607,25 +607,33 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
 
     elapsed_ms = int((time.monotonic() - started) * 1000)
 
-    def _clip(b: bytes) -> str:
+    # 잘렸는지를 **구조화된 값으로도** 돌려준다. 예전에는 안내 문구를 stdout 끝에 붙이는 게
+    # 전부여서, 모델이 그 줄을 빼먹으면 사용자는 목록이 전부인 줄 알았다("중간에 잘리는 것 같아").
+    clip_info = {"truncated": False, "total_lines": 0, "shown_lines": 0}
+
+    def _clip(b: bytes, track: bool = False) -> str:
         # -tt로 pty를 쓰면 줄바꿈이 CRLF로 오고 "Connection to ... closed." 안내가 붙는다.
         s = b.decode("utf-8", "replace").replace("\r\n", "\n")
         s = "\n".join(line for line in s.split("\n")
                        if not line.startswith("Connection to ") or not line.endswith("closed."))
+        lines = s.split("\n")
+        if track:
+            clip_info["total_lines"] = clip_info["shown_lines"] = len(lines)
         if max_output <= 0 or len(s) <= max_output:
             return s
         # **줄 단위로** 자른다. 표 형태 출력을 줄 중간에서 끊으면 에이전트가 값을 잘못 읽는다.
-        lines = s.split("\n")
         kept, used = [], 0
         for line in lines:
             if used + len(line) + 1 > max_output and kept:
                 break
             kept.append(line)
             used += len(line) + 1
-        dropped = len(lines) - len(kept)
+        if track:
+            clip_info.update(truncated=True, shown_lines=len(kept))
         return "\n".join(kept) + (
-            f"\n…({dropped}줄 더 있음 - 출력이 길어 잘랐습니다. 전체가 필요하면 조건을 좁혀 "
-            "다시 실행하세요. 여기 보이는 것만으로 답하고, 전부라고 말하지 마세요.)")
+            f"\n…(전체 {len(lines)}줄 중 {len(kept)}줄만 보입니다. 출력이 길어 잘랐습니다. "
+            "**답변에 '일부만 표시됐다'고 반드시 밝히세요.** 전체가 필요하면 조건을 좁혀 "
+            "다시 실행하세요 - 여기 보이는 것만으로 답하고 전부라고 말하지 마세요.)")
 
     result = {
         "host": host,
@@ -633,16 +641,21 @@ async def run_ssh_as_user(host: str, user_id: str, argv: list,
         "as_user": user,
         "command": " ".join(str(a) for a in argv),
         "exit_code": proc.returncode,
-        "stdout": _clip(out),
+        "stdout": _clip(out, track=True),
         "stderr": _clip(err),
         "duration_ms": elapsed_ms,
         "connection_reused": reused,
         "privdrop": mode,
+        **clip_info,
     }
     # 커맨드 하나가 몇 초 걸렸는지, 접속을 새로 맺었는지, 어떤 강등 방식이었는지를 **항상** 남긴다.
     # 이게 없으면 "느리다"는 리포트가 올 때마다 다시 추측하게 된다.
-    print(f"[ssh_exec] {argv[0]} {elapsed_ms:,}ms "
-          f"({'연결 재사용' if reused else '새 접속'} · {mode} · {ip} · {user})")
+    # 실행한 커맨드를 **통째로** 남긴다. `ls`만 찍으면 `-A`가 빠져 숨김 파일이 안 나온 건지
+    # 출력이 잘린 건지 구분할 수 없다. 잘렸으면 몇 줄 중 몇 줄인지도 함께 남긴다.
+    clipped = (f" · 출력 {clip_info['total_lines']}줄 중 {clip_info['shown_lines']}줄만"
+               if clip_info["truncated"] else "")
+    print(f"[ssh_exec] {result['command']} → {elapsed_ms:,}ms "
+          f"({'연결 재사용' if reused else '새 접속'} · {mode} · {ip} · {user}{clipped})")
     # 실패 원인을 에이전트가 엉뚱하게 해석하지 않도록, 흔한 두 가지는 명시적으로 알려준다.
     # **어느 IP로 붙었는지를 반드시 함께 적는다** - 손으로 IP를 직접 넣으면 되는데 에이전트만
     # 실패하는 경우, 원인은 거의 항상 "이름이 /etc/hosts에서 다른 IP로 풀렸다"이기 때문이다.
