@@ -32,7 +32,7 @@ docker compose -f docker-compose.dev.yml restart agent-server execution-mcp
 ```
 
 **그리고 콘솔 설정 탭 → `지시문을 최신 기본값으로 되돌리기` → agent-server 재시작.**
-지시문이 바뀌었습니다(`$HOME` 금지, 경로를 물으면 `pwd` 실행). 이걸 안 누르면
+지시문에서 특정 커맨드를 전부 걷어내고 **원칙만** 남겼습니다(#145). 이걸 안 누르면
 "내 홈 디렉토리가 어디야?"에 계속 추측으로 답합니다.
 
 반영 후 확인:
@@ -44,8 +44,8 @@ docker compose -f docker-compose.dev.yml logs --tail=50 execution-mcp | grep ssh
 Open WebUI에서 다시 물어보세요.
 
 - `내 홈 파일 리스트 보여줘` → 목록이 나와야 합니다
-- `내 홈 디렉토리가 어디야?` → `pwd`를 **실행해서** `/home/gpu1/yr9.choi` 를 답해야 합니다
-  ("일반적으로 …입니다" 같은 추측이 나오면 지시문 되돌리기를 안 한 것입니다)
+- `내 홈 디렉토리가 어디야?` → **실행해서 나온 값**(`/home/gpu1/yr9.choi`)을 답해야 합니다.
+  "일반적으로 …입니다" 같은 추측이 나오면 지시문 되돌리기를 안 한 것입니다
 
 ## 2. 키를 새로 만들어 **양쪽에** 넣기
 

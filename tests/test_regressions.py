@@ -1967,10 +1967,46 @@ def test_home_cwd_does_not_break_argument_quoting():
     assert cmd.count(";") == 2, cmd      # cd 뒤 1개 + 인자 안의 리터럴 1개(따옴표 안)
 
 
-def test_instruction_answers_home_path_by_running_pwd():
+def test_instruction_answers_asked_values_by_running():
     """"내 홈 디렉토리가 어디야?"에 "일반적으로 /home/... 입니다"라고 추측한 사고가 있었다.
-    그리고 `echo $HOME`은 셸이 없어 글자 그대로 출력된다 - 쓰면 안 된다."""
+    **어떤 커맨드로** 확인할지는 지시문이 정하지 않는다(#145) - 물으면 실행해서 답한다는
+    원칙만 둔다."""
     instr = _instruction_text()
-    assert "셸 변수는 확장되지 않습니다" in instr
-    assert "경로 자체를 물으면" in instr
-    assert "`pwd`를" in instr
+    assert "그 값 자체를 물으면" in instr
+    assert "실행해서 나온 값으로" in instr
+    assert "얼버무리지 마세요" in instr
+
+
+# --- #145: 지시문에 **특정 커맨드를 박지 않는다** ------------------------------------
+# 사용자가 네 번째로 지적한 사항이다(#74 `phd info`, #125, #140, 그리고 `pwd`/`echo $HOME`).
+# 커맨드는 (1) 콘솔에 등록돼 툴로 노출되거나 (2) 모델이 아는 표준 리눅스 명령이다.
+# 지시문은 **원칙**만 말해야 한다 - 커맨드를 적기 시작하면 하나하나 다 적어야 하고,
+# 시스템이 바뀔 때마다 지시문이 거짓말을 하게 된다(#144가 정확히 그렇게 났다).
+_FORBIDDEN_IN_INSTRUCTION = [
+    # 사내 전용(존재하지 않는 것을 지어내 쓴 사고가 있었다)
+    "phd ", "myquota", "squeue", "sinfo", "sbatch", "bsub",
+    # 확인용 표준 명령(모델이 알아서 고르게 둔다)
+    "pwd", "whoami", "echo $", "$HOME", "$USER",
+    # 나열하기 시작하면 끝이 없다
+    "nvidia-smi", "`ls ", "`ls`", "`df", "`du", "`head", "`tail", "`find",
+]
+
+
+def test_instruction_names_no_specific_commands():
+    """지시문에 커맨드 이름을 적지 않는다. 원칙만 쓰고 선택은 모델과 툴 목록에 맡긴다."""
+    instr = _instruction_text()
+    # 모듈 docstring은 제외하고 지시문 본문만 본다.
+    body = instr[instr.index("AGENT_INSTRUCTION = "):]
+    hits = [tok for tok in _FORBIDDEN_IN_INSTRUCTION if tok in body]
+    assert not hits, (
+        f"지시문에 특정 커맨드가 박혀 있다: {hits}\\n"
+        "  커맨드는 콘솔 등록(툴)이나 모델의 표준 리눅스 지식으로 해결한다. "
+        "지시문에는 원칙만 쓴다.")
+
+
+def test_instruction_states_no_shell_as_a_property():
+    """커맨드를 적는 대신 **성질**을 말해야 한다: 셸을 거치지 않는다.
+    그래야 모델이 `echo $HOME` 같은 것을 스스로 피한다(그건 글자 그대로 출력된다)."""
+    instr = _instruction_text()
+    assert "셸을 거치지 않습니다" in instr
+    assert "글자 그대로" in instr
