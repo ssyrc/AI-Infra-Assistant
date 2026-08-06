@@ -403,6 +403,11 @@ def _result_phrase(name: str, resp) -> str:
         # 모델이 "일부만 표시" 안내를 빼먹어도 화면에는 남는다.
         if r.get("truncated"):
             where += f" ⚠ 출력 {r.get('total_lines')}줄 중 {r.get('shown_lines')}줄만"
+        elif isinstance(r.get("total_lines"), int) and r["total_lines"] > 1:
+            # **잘리지 않았을 때도 줄 수를 보여준다.** 모델이 답변에서 행을 조용히 줄여도
+            # 사용자가 이 숫자와 눈으로 대조할 수 있다 - 예전에는 잘렸을 때만 표시해서,
+            # 22줄만 보이는 답을 받고도 우리가 자른 건지 모델이 자른 건지 알 수 없었다(#146).
+            where += f" · {r['total_lines']}줄"
         if r.get("error"):
             return f"실패{where} — {str(r['error'])[:60]}"
         if "exit_code" in r:

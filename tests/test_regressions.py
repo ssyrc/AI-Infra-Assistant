@@ -1974,14 +1974,34 @@ def test_home_cwd_does_not_break_argument_quoting():
     assert cmd.count(";") == 2, cmd      # cd 뒤 1개 + 인자 안의 리터럴 1개(따옴표 안)
 
 
-def test_instruction_answers_asked_values_by_running():
-    """"내 홈 디렉토리가 어디야?"에 "일반적으로 /home/... 입니다"라고 추측한 사고가 있었다.
-    **어떤 커맨드로** 확인할지는 지시문이 정하지 않는다(#145) - 물으면 실행해서 답한다는
-    원칙만 둔다."""
+def test_instruction_decides_by_content_not_phrasing():
+    """실행 여부를 **말투로** 판단하면 안 된다(#149).
+
+    "보여 줘"라고 해야만 실행하도록 써 뒀더니 "내 홈 디렉토리는 어디야?"가 일반 지식으로
+    분류돼 도구를 아예 호출하지 않았다. 질문 형태를 나열하는 것은 커맨드를 나열하는 것과
+    같은 실수다(#145) - 사용자가 어떻게 물을지는 알 수 없다.
+    기준은 **답에 무엇이 필요한가** 하나여야 한다.
+    """
     instr = _instruction_text()
-    assert "그 값 자체를 물으면" in instr
-    assert "실행해서 나온 값으로" in instr
-    assert "얼버무리지 마세요" in instr
+    assert "말투로 판단하지 않습니다" in instr
+    assert "답이 이 서버에 물어봐야 나오는 값이면 실행합니다" in instr
+    # 판별법이 있어야 실행 가능한 규칙이 된다.
+    assert "회사·서버·" in instr and "따라 달라지는가" in instr
+
+
+def test_instruction_forbids_fabricating_environment_values():
+    """마지막 안전장치: 분류를 잘못해 (B)로 답하더라도 이 환경의 값은 지어내지 않는다.
+
+    사용자 지적: "일반지식이더라도 모델이 만들어내진 말아야지. 모르는 건 모른다고 해야지."
+    실제로 `/home/yr9.choi`를 지어내 답했다(정답은 `/home/gpu1/yr9.choi`).
+    """
+    instr = _instruction_text()
+    assert "이 환경의 값을 지어내지 않습니다" in instr
+    # 지어내는 중임을 스스로 알아채는 신호 - 헤지 문구를 명시적으로 금지한다.
+    for hedge in ("일반적으로 …입니다", "보통 …입니다", "정확한 것은 직접 확인해 보세요"):
+        assert hedge in instr, f"헤지 문구를 금지 목록에 넣지 않았다: {hedge}"
+    assert "확인해 봐야 알 수 있습니다" in instr, "모른다고 답할 문구를 주지 않았다"
+    assert "지어낸 값을 주는 것이 실패입니다" in instr
 
 
 # --- #145: 지시문에 **특정 커맨드를 박지 않는다** ------------------------------------
@@ -2116,3 +2136,33 @@ def test_empty_default_drops_the_argument_entirely():
     spec[0]["default"] = "-l"
     assert build_registered_argv("phd list {option}", spec, {}, None,
                                  "yr9.choi", deny, True) == ["phd", "list", "-l"]
+
+
+def test_progress_line_always_shows_line_count():
+    """잘리지 않았을 때도 줄 수를 보여줘야 한다(#149).
+
+    예전에는 잘렸을 때만 `⚠ N줄 중 M줄만`을 찍었다. 그래서 22줄짜리 답을 받고도
+    **우리가 자른 건지 모델이 자른 건지** 구분할 수 없었다. 항상 줄 수를 찍으면
+    사용자가 답변의 행 수와 눈으로 대조할 수 있다.
+    """
+    import json as _json
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    i = src.index("def _result_phrase")
+    end = src.index("\nclass _StreamDedup")
+    ns = {"json": _json}
+    exec(src[i:end], ns)
+    phrase = ns["_result_phrase"]
+
+    base = {"ip": "10.0.0.1", "as_user": "yr9.choi", "duration_ms": 400, "exit_code": 0}
+    full = phrase("run_command", {**base, "truncated": False,
+                                  "total_lines": 132, "shown_lines": 132})
+    assert "132줄" in full and "⚠" not in full, full
+
+    cut = phrase("run_command", {**base, "truncated": True,
+                                 "total_lines": 132, "shown_lines": 58})
+    assert "⚠ 출력 132줄 중 58줄만" in cut, cut
+
+    # 한 줄짜리 출력에까지 붙이면 잡음이다.
+    one = phrase("run_command", {**base, "truncated": False,
+                                 "total_lines": 1, "shown_lines": 1})
+    assert "줄" not in one, one
