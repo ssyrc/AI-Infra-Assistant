@@ -1262,15 +1262,36 @@ def test_mcp_rejects_calls_without_shared_secret():
 
 def test_agent_server_v1_endpoints_can_require_api_key():
     """`X-OpenWebUI-User-Email`을 그대로 믿는 서버라, 포트가 열려 있으면 헤더만 바꿔
-    남의 계정으로 실행할 수 있다. API 키를 넣으면 /v1/*이 잠겨야 한다."""
+    남의 계정으로 실행할 수 있다. API 키를 넣으면 `/v1/*`이 전부 잠겨야 한다.
+
+    **엔드포인트를 소스에서 열거한다.** 예전에는 4개를 손으로 적어 뒀는데, 그 목록에 없던
+    `/v1/memory/{user_id}` 셋(GET/POST/DELETE)이 인증 없이 열려 있었다(#143). 목록을 박아 두면
+    나중에 추가되는 엔드포인트를 영원히 못 잡는다.
+    """
     src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
     assert "async def require_api_key" in src
     assert "hmac.compare_digest" in src, "타이밍 안전 비교를 쓰지 않는다"
-    # 실행까지 이어지는 엔드포인트 전부에 붙어야 한다(하나라도 빠지면 우회로가 된다).
-    for ep in ('@app.get("/v1/models"', '@app.post("/v1/chat/completions"',
-               '@app.post("/v1/agent/query"', '@app.post("/v1/voc/query"'):
-        i = src.index(ep)
-        assert "dependencies=[Depends(require_api_key)]" in src[i:i + 200], f"{ep}에 인증이 없다"
+
+    # 의도적으로 열어 두는 경로만 여기 적는다. 추가할 때는 왜 안전한지 이유를 함께 남길 것.
+    #   /health - 신원도 실행도 없고, restart-mounted.sh가 기동 확인에 쓴다.
+    exempt = {"/health"}
+
+    decorated = re.findall(r'@app\.(get|post|put|delete|patch)\("([^"]+)"([^)]*)\)', src)
+    assert decorated, "엔드포인트를 하나도 찾지 못했다(정규식을 갱신할 것)"
+
+    unprotected = [
+        f"{verb.upper()} {path}"
+        for verb, path, rest in decorated
+        if path not in exempt and "require_api_key" not in rest
+    ]
+    assert not unprotected, (
+        "인증 없이 열려 있는 엔드포인트: " + ", ".join(unprotected) +
+        "\n  /v1/*는 호출자가 준 user_id를 그대로 믿고 그 계정으로 실행/조회한다.")
+
+    # 메모리 POST는 특히 위험하다 - 넣은 내용이 그 사용자의 다음 대화에서 지시문에 붙는다.
+    i = src.index('@app.post("/v1/memory/{user_id}"')
+    assert "require_api_key" in src[i:i + 200]
+
     # 꺼져 있으면 기동 로그로 알려야 한다(조용히 열어 두지 않는다).
     assert "/v1/* 에 인증이 없습니다" in src
 

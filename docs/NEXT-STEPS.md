@@ -6,82 +6,94 @@
 
 > ✅ **DB 복구 완료** (매뉴얼 5 · VOC 48,314 · 커맨드 3)
 > ⛔ 며칠 정상 동작을 확인할 때까지 `docker volume prune` · `system prune` · `down -v` 금지.
-> 남은 익명 볼륨 2개가 마지막 보험입니다(6번에서 정리).
+> 남은 익명 볼륨 2개가 마지막 보험입니다(맨 아래에서 정리).
 
 ---
 
-## 1. [서버] 백업 — 이제부터 반영 전에 항상 먼저
+## 1. [서버] 백업 후 코드 반영 — **인증 구멍 하나를 더 막았습니다**
+
+`/v1/memory/{user_id}` 세 개(GET/POST/DELETE)에 인증이 빠져 있었습니다(#143). 특히 POST는
+**남의 에이전트에 영구 지시를 심을 수 있어** 위험합니다. 지금 반영해 주세요.
 
 ```bash
+# [서버]
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
 bash scripts/backup-db.sh
-```
 
-## 2. [WSL] 코드 반영
-
-```bash
+# [WSL]
 git -C /home/yrc/AI-Infra-Assistant fetch origin main
 git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
 bash /home/yrc/AI-Infra-Assistant/scripts/deploy-rsync.sh
+
+# [서버]
+cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
+docker compose -f docker-compose.dev.yml restart agent-server
 ```
 
-## 3. [서버] 재시작
+## 2. [서버] Open WebUI에 모델이 안 보이는 원인 찾기
+
+`agent_api_key`를 켰으니 **Open WebUI 연결(Connections)에도 같은 키가 들어가 있어야** 합니다.
+없으면 Open WebUI가 401을 받고 모델 목록이 빕니다. 이걸 먼저 가릅니다.
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker compose -f docker-compose.dev.yml restart admin-console agent-server
+
+KEY=$(docker compose -f docker-compose.dev.yml exec -T postgres \
+  psql -U agent -d platform_config -tAc \
+  "select value from platform_settings where key='agent_api_key'" | tr -d '\r ')
+echo "콘솔에 저장된 키: $KEY"
+
+echo -n "키 없이 호출  : "
+docker compose -f docker-compose.dev.yml exec -T open-webui \
+  curl -s -o /dev/null -w '%{http_code}\n' http://agent-server:8000/v1/models
+
+echo -n "키 넣고 호출  : "
+docker compose -f docker-compose.dev.yml exec -T open-webui \
+  curl -s -H "Authorization: Bearer $KEY" http://agent-server:8000/v1/models
 ```
 
-`admin-console`을 빼면 "기본 모델 지정 실패 401"이 그대로입니다(백엔드 코드가 안 바뀝니다).
+- **`키 없이` = 401 이고 `키 넣고` = 모델 JSON** → 정상입니다. 3번으로 가세요(Open WebUI 쪽에
+  키를 넣으면 해결됩니다).
+- **둘 다 실패** → 연결 자체가 안 되는 것입니다. 결과를 보내주세요.
 
-## 4. [웹] `agent_api_key` 바로잡기
+## 3. [웹] Open WebUI 연결 설정
 
-지금 `agent_api_key`에 **Open WebUI 관리자 키**가 들어가 있습니다. 두 키는 목적지가 반대라
-그대로 두면 **사용자 질문이 전부 401**입니다. 아래 둘 중 하나로 맞추세요.
+관리자 패널 → 설정 → **연결(Connections)**
 
-**(A) 인증을 켜서 쓴다 — 권장.** 아무 값이나 하나 정해 **양쪽에 같게** 넣습니다.
+| 항목 | 값 |
+|---|---|
+| URL | `http://agent-server:8000/v1` |
+| API 키 | **콘솔 `agent_api_key`와 같은 값** (2번에서 출력된 `$KEY`) |
+
+저장 후 **연결 테스트**가 통과해야 합니다. 그다음:
+
+- 관리자 패널 → 모델 → 해당 모델 → **공개범위(Visibility)를 `Public`** 으로.
+  이걸 안 하면 admin에게만 보이거나 아무에게도 안 보입니다.
+- 그래도 안 보이면 브라우저 **하드 새로고침**(Ctrl+Shift+R).
+
+## 4. [서버] Service Hub 연동 — 규격서를 만들어 뒀습니다
+
+`docs/SERVICE-HUB.md` 를 Service Hub 팀에 전달하세요. 요약하면:
+
+**Service Hub → 우리** (`agent_api_key` 필요)
 
 ```bash
-openssl rand -hex 24        # 나온 값을 아래 두 곳에 똑같이
+KEY=<agent_api_key>
+curl -s -X POST http://202.20.183.30:8500/v1/voc/query \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -d '{"voc_info":{"voc_id":"TEST-1","voc_title":"테스트",
+       "requester":{"user_id":"yr9.choi"},
+       "voc_content":{"text":"내 GPU job 목록 알려줘"}},
+       "output_option":"markdown"}' | python3 -m json.tool
 ```
 
-| 넣을 곳 | 경로 |
-|---|---|
-| 콘솔 | 설정 탭 → 에이전트 → `agent_api_key` |
-| Open WebUI | 관리자 패널 → 설정 → 연결(Connections) → `http://agent-server:8000/v1` 의 API 키 |
+이 curl이 서버에서 되는지 먼저 확인하고 결과를 보내주세요.
 
-**(B) 임시로 끈다.** 콘솔에서 `agent_api_key`를 **비웁니다.** 인증이 사라지므로,
-같은 망의 누구나 헤더만 바꿔 남의 계정으로 커맨드를 실행할 수 있습니다. 오래 두지 마세요.
+**우리 → Service Hub** (유사 VOC 조회, 선택)
+Service Hub MCP 주소를 받아 콘솔 설정 탭 `service_hub_mcp_url`에 넣으면 답변에
+`similar_voc`가 붙습니다. 비워 두면 그 부분만 생략되고 나머지는 정상 동작합니다.
 
-확인:
-
-```bash
-docker compose -f docker-compose.dev.yml logs agent-server | grep "/v1/\*" | tail -2
-```
-
-- `[agent] /v1/* API 키 인증이 켜져 있습니다.` → (A)
-- `[agent] !! /v1/* 에 인증이 없습니다. …` → (B)
-
-## 5. [웹] 콘솔 설정 확인 + 지시문 되돌리기
-
-`openwebui_admin_api_key`를 다시 저장해 보세요. **이번엔 401 없이 "기본 모델 지정" 까지
-성공해야 합니다.** (이 값은 Open WebUI에서 발급받은 관리자 API 키입니다 —
-Open WebUI 로그인 → 설정 → 계정 → API 키.)
-
-값이 mock으로 돌아가 있으면 다시 넣습니다.
-
-| key | 값 |
-|---|---|
-| `vllm_llm_base_url` / `vllm_llm_model` | `http://75.23.32.41:8000/v1` / `qwen3-235b-a22b` |
-| `vllm_embed_base_url` / `vllm_embed_model` | `http://75.23.32.41:8010/v1` / `bge-m3` |
-| `rerank_provider` / `rerank_base_url` / `rerank_model` | `vllm` / `http://75.23.32.41:8020/v1` / `bge-reranker-v2-m3` |
-| `execution_host` | `202.20.185.100` |
-| `openwebui_public_url` | `http://202.20.183.30:8502` |
-
-그리고 **`지시문을 최신 기본값으로 되돌리기`** → `agent-server 재시작`.
-이걸 안 누르면 6번의 3번 질문이 계속 가이드 문서를 안내합니다.
-
-## 6. [웹] Open WebUI 동작 확인 — **소요 시간을 적어 주세요**
+## 5. [웹] Open WebUI 동작 확인 — **소요 시간을 적어 주세요**
 
 1. `S2 스케줄러 job list 확인해줘`
 2. `내 홈 파일 리스트 보여줘`
@@ -91,8 +103,8 @@ Open WebUI 로그인 → 설정 → 계정 → API 키.)
 
 > 본인(yr9.choi) 자원만 조회할 수 있어 cocoa.song의 job은 확인할 수 없습니다.
 
-`ops_assistant`라는 말이 나오거나 "가이드 위치: 슈퍼컴 Portal > …"이 붙으면 5번 지시문
-되돌리기를 안 한 것입니다.
+`ops_assistant`라는 말이 나오거나 "가이드 위치: 슈퍼컴 Portal > …"이 붙으면 콘솔 설정 탭의
+**지시문을 최신 기본값으로 되돌리기**를 안 누른 것입니다.
 
 1·2번은 진행 줄을 **통째로** 보내주세요.
 
@@ -105,7 +117,7 @@ Open WebUI 로그인 → 설정 → 계정 → API 키.)
 - `(202.20.185.100 · yr9.choi)` = 로그인 서버에서 본인 계정으로 돌았다는 증거입니다.
 - `⚠ 출력 N줄 중 M줄만` = 잘린 것. 자주 보이면 `execution_result_max_chars`를 올리세요.
 
-## 7. [웹] 커맨드 인자 다듬기 (엑셀)
+## 6. [웹] 커맨드 인자 다듬기 (엑셀)
 
 콘솔 → 커맨드 실행 탭 → **`현재 등록분 내보내기`** → 엑셀에서 수정 → 업로드 →
 **`execution-mcp 재시작`**.
@@ -139,8 +151,8 @@ docker volume rm 1dc7527fd826d5a2afc08bd1b44e945219c2fd10da65c2747f49c2d367ab919
 
 | 증상 | 조치 |
 |---|---|
-| 모델 목록이 비고 질문이 401 | 4번의 두 값이 다릅니다. 같은 문자열인지 확인 |
-| "기본 모델 지정 실패 401" 계속 | 3번 `admin-console` 재시작을 빼먹은 것 |
+| 모델 목록이 비고 질문이 401 | 3번의 Open WebUI 연결 키와 콘솔 `agent_api_key`가 다릅니다 |
+| "기본 모델 지정 실패 401" 계속 | `admin-console` 재시작을 빼먹은 것(`restart admin-console`) |
 | 401인데 방금 키를 바꿨다 | 설정 캐시 5초입니다. 잠시 뒤 다시 저장 |
 | 멀쩡한 커맨드가 `다른 사용자의 자원…`으로 거부 | 설정 탭 `execution_user_scope_flags`에서 그 옵션을 빼세요(`sort -u` 등) |
 | 엑셀 업로드 후 일부 `건너뜀` | 사유가 화면에 나옵니다. 대개 인자 이름 불일치 — **이름 칸을 비우면** 자동으로 맞춰집니다 |

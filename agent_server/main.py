@@ -983,19 +983,26 @@ async def agent_query(body: AgentQueryIn, request: Request):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-# --- 장기 메모리 관리 (인증 없음, 내부망 전용) ---
+# --- 장기 메모리 관리 ---
+# **여기도 인증이 있어야 한다**(#143). 예전 주석은 "인증 없음, 내부망 전용"이었는데, 8500 포트는
+# 0.0.0.0에 열려 있다(외부 VOC agent가 붙어야 해서 닫을 수 없다). 그래서 '내부망 전용'이라는
+# 전제가 성립하지 않는다 - #139에서 `/v1/*` 네 개에 인증을 걸면서 이 셋을 빠뜨렸다.
+#
+# 셋 중 POST가 특히 위험하다. 여기 넣은 내용은 그 사용자의 **다음 대화부터 시스템 지시문에
+# 붙는다**(`_memory_context` -> `extra_instruction`). 즉 남의 에이전트에 영구적인 지시를
+# 심을 수 있다. GET은 남의 대화에서 증류된 내용을 읽고, DELETE는 통째로 지운다.
 class MemoryAddIn(BaseModel):
     content: str
     kind: str = "fact"
 
 
-@app.get("/v1/memory/{user_id}")
+@app.get("/v1/memory/{user_id}", dependencies=[Depends(require_api_key)])
 async def memory_list(user_id: str):
     uid = _to_os_identity(user_id)[:128] or "anonymous"
     return {"user_id": uid, "items": await list_user_memory(uid)}
 
 
-@app.post("/v1/memory/{user_id}")
+@app.post("/v1/memory/{user_id}", dependencies=[Depends(require_api_key)])
 async def memory_add(user_id: str, body: MemoryAddIn):
     if not (body.content or "").strip():
         raise HTTPException(400, "content는 필수입니다.")
@@ -1004,7 +1011,7 @@ async def memory_add(user_id: str, body: MemoryAddIn):
     return {"id": mid}
 
 
-@app.delete("/v1/memory/{user_id}")
+@app.delete("/v1/memory/{user_id}", dependencies=[Depends(require_api_key)])
 async def memory_delete(user_id: str, memory_id: int | None = None):
     """memory_id 쿼리로 개별 삭제, 없으면 사용자 기억 전체 삭제(잊힐 권리)."""
     uid = _to_os_identity(user_id)[:128] or "anonymous"
