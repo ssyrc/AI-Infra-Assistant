@@ -2063,3 +2063,56 @@ def test_instruction_reset_actually_returns_current_file_text():
     got = mod._read_instruction_from_disk()
     assert got in on_disk, "파일에 없는 내용을 돌려준다"
     assert len(got) > 5000, f"지시문이 너무 짧다({len(got)}자) - 잘못 읽고 있다"
+
+
+# --- #148: 엑셀 양식의 고정 선택지는 **드롭다운**이어야 한다 --------------------------
+def test_excel_template_has_dropdowns_for_fixed_choice_columns():
+    """타입/필수/활성/실행 위치는 값이 정해져 있다. 자유 입력이면 오타가 조용히 다른 뜻이 된다
+    ("선택"이라고 적으면 선택형이 아니라 문자열로 들어간다)."""
+    import io
+    import openpyxl
+    from openpyxl.utils import column_index_from_string
+
+    m = _exec_router()
+    ws = openpyxl.load_workbook(io.BytesIO(m._build_workbook([])))["커맨드"]
+    cols = [c.value for c in ws[1]]
+
+    got = {}
+    for dv in ws.data_validations.dataValidation:
+        first = str(dv.sqref).split()[0].split(":")[0]
+        letter = "".join(ch for ch in first if ch.isalpha())
+        got[cols[column_index_from_string(letter) - 1]] = dv.formula1
+
+    for col, expected in [("실행 위치", "로그인 서버"), ("활성", "Y,N"),
+                          ("인자1 타입", "문자열,정수,선택형"), ("인자1 필수", "Y,N")]:
+        assert col in got, f"'{col}' 열에 드롭다운이 없다"
+        assert expected in got[col], f"'{col}' 선택지가 다르다: {got[col]}"
+
+    # 인자 슬롯 전부에 걸려야 한다(1번만 걸고 나머지를 빠뜨리기 쉽다).
+    for i in range(1, m.TEMPLATE_ARG_SLOTS + 1):
+        assert f"인자{i} 타입" in got and f"인자{i} 필수" in got, f"인자{i} 슬롯에 드롭다운이 없다"
+
+
+def test_excel_dropdown_values_match_the_parser():
+    """드롭다운에 있는 값은 **파서가 실제로 알아듣는 값**이어야 한다.
+    화면에서 고를 수 있는데 업로드하면 무시되는 값이 있으면 안 된다."""
+    m = _exec_router()
+    for label in m._DROPDOWNS["타입"]:
+        assert label.lower() in m._TYPE_WORDS, f"파서가 모르는 타입: {label}"
+    for label in m._DROPDOWNS["실행 위치"]:
+        assert label.lower() in m._HOST_WORDS, f"파서가 모르는 실행 위치: {label}"
+    for label in m._DROPDOWNS["필수"]:
+        assert m._truthy(label, False) == (label == "Y"), f"필수 값 해석이 다르다: {label}"
+
+
+def test_empty_default_drops_the_argument_entirely():
+    """"기본값이 없으면 아무것도 안 보이는 건가?" - 자리표시자가 통째로 빠진다."""
+    from execution_exec import build_registered_argv, deny_set, DEFAULT_DENY_CSV
+    deny = deny_set(DEFAULT_DENY_CSV)
+    spec = [{"name": "option", "type": "enum", "required": False,
+             "default": "", "choices": ["-l", "-lf"]}]
+    assert build_registered_argv("phd list {option}", spec, {}, None,
+                                 "yr9.choi", deny, True) == ["phd", "list"]
+    spec[0]["default"] = "-l"
+    assert build_registered_argv("phd list {option}", spec, {}, None,
+                                 "yr9.choi", deny, True) == ["phd", "list", "-l"]

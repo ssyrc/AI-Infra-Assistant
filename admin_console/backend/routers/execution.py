@@ -220,11 +220,19 @@ _TEMPLATE_GUIDE = [
     "■ 한 행이 커맨드 하나입니다. '이름'이 같으면 덮어씁니다(수정하려면 이름을 그대로 두세요).",
     "■ 실행 커맨드의 {이름} 자리가 인자가 됩니다. 예: phd info {option} {job_id}",
     "   → {option}이 인자1, {job_id}가 인자2 입니다. '인자N 이름'을 비워 두면 이 순서로 자동 연결됩니다.",
+    "■ 타입 / 필수 / 활성 / 실행 위치 칸은 **드롭다운**입니다. 셀을 클릭하면 목록이 나옵니다.",
+    "   직접 타이핑하면 거부됩니다(오타로 다른 뜻이 되는 것을 막기 위함).",
     "■ 인자 타입: 문자열 / 정수 / 선택형. 비우면 문자열입니다.",
     "■ '선택형'일 때만 '선택지'를 채웁니다. 한 줄에 하나씩(또는 | 로 구분), '값: 설명' 형태로 씁니다.",
     "   예)  -j: JSON 형식으로 반환      ← '-j'가 실제로 붙는 값, 뒤는 에이전트가 읽는 설명",
+    "   콜론 뒤에 **공백**이 있어야 값과 설명이 갈립니다. 콤마로 나누지 마세요.",
     "■ 설명은 에이전트가 이 커맨드를 고르는 유일한 근거입니다. 무엇을 돌려주는지 한두 줄로 쓰세요.",
-    "■ 필수: Y/N. 활성: Y/N(비우면 Y). 실행 위치: '로그인 서버' 또는 '대상 서버'(비우면 로그인 서버).",
+    "■ 필수: Y = 에이전트가 반드시 채워야 함. N = 비워도 됨(비우면 Y로 취급하지 않습니다).",
+    "■ 활성: 비우면 Y. 실행 위치: 비우면 '로그인 서버'.",
+    "■ 필요 역할: 비우면 **누구나** 실행할 수 있습니다. 값을 넣으면 그 역할만 실행 가능.",
+    "■ 기본값: **비워 두면 그 인자는 커맨드에서 통째로 빠집니다.**",
+    "   예) 'phd list {option}' 에서 option 이 비면 실제 실행은 'phd list' 입니다.",
+    "   자주 쓰는 값이 있으면 여기 넣으세요(에이전트가 값을 안 주면 이 값이 쓰입니다).",
     "■ {user_id}는 쓰지 않아도 됩니다. 실행 계정은 시스템이 질문한 사용자로 강제 주입합니다.",
     "■ 업로드 후 execution-mcp 재시작이 필요합니다.",
 ]
@@ -237,9 +245,46 @@ def _template_columns() -> list[str]:
     return cols
 
 
+# 드롭다운으로 고를 값. 자유 입력을 막아야 오타로 조용히 다른 뜻이 되는 것을 방지한다
+# ("선택"이라고 적으면 선택형이 아니라 문자열로 들어가는 식).
+_DROPDOWNS = {
+    "타입": ["문자열", "정수", "선택형"],
+    "필수": ["Y", "N"],
+    "활성": ["Y", "N"],
+    "실행 위치": ["로그인 서버", "대상 서버"],
+}
+# 역할은 값이 환경마다 달라 고정 목록을 만들 수 없다. 흔한 것만 제안하고 직접 입력도 허용한다.
+_ROLE_SUGGESTIONS = ["", "admin", "user"]
+
+# 엑셀 목록 검증은 최대 255자다. 넘으면 시트에 숨김 열을 두고 참조해야 하는데,
+# 우리 목록은 전부 짧아서 인라인으로 충분하다.
+_MAX_INLINE_VALIDATION = 255
+
+
+def _validation(values: list[str], allow_free: bool = False):
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    formula = '"' + ",".join(values) + '"'
+    assert len(formula) <= _MAX_INLINE_VALIDATION, formula
+    dv = DataValidation(type="list", formula1=formula, allow_blank=True,
+                        showDropDown=False)      # False = 드롭다운 화살표를 **보여준다**
+    if not allow_free:
+        dv.errorStyle = "stop"
+        dv.error = "목록에 있는 값 중에서 고르세요."
+        dv.errorTitle = "허용되지 않는 값"
+    else:
+        dv.errorStyle = "warning"
+    dv.prompt = "목록에서 고르세요: " + ", ".join(v or "(비움)" for v in values)
+    dv.promptTitle = "선택"
+    dv.showInputMessage = True
+    dv.showErrorMessage = True
+    return dv
+
+
 def _build_workbook(rows: list[list]) -> bytes:
     import openpyxl
     from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -260,6 +305,22 @@ def _build_workbook(rows: list[list]) -> bytes:
         for cell in row:
             cell.alignment = Alignment(vertical="top", wrap_text=True)
     ws.freeze_panes = "A2"
+
+    # 드롭다운(데이터 유효성). 머리글 이름으로 열을 찾아 붙인다 - `인자3 타입`처럼
+    # 번호가 붙은 열도 같은 규칙으로 잡힌다.
+    last_row = max(len(rows) + 1, 400)          # 빈 양식에도 넉넉히 걸어 둔다
+    for idx, name in enumerate(columns, start=1):
+        field = name.split(" ", 1)[-1] if name.startswith("인자") else name
+        values = _DROPDOWNS.get(field)
+        allow_free = False
+        if values is None and field == "필요 역할":
+            values, allow_free = _ROLE_SUGGESTIONS, True
+        if values is None:
+            continue
+        dv = _validation(values, allow_free)
+        ws.add_data_validation(dv)
+        col = get_column_letter(idx)
+        dv.add(f"{col}2:{col}{last_row}")
 
     guide = wb.create_sheet("작성 방법")
     guide.column_dimensions["A"].width = 110
