@@ -2147,7 +2147,7 @@ def test_progress_line_always_shows_line_count():
     """
     import json as _json
     src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
-    i = src.index("def _result_phrase")
+    i = src.index("def _unwrap_result")      # _result_phrase가 이걸 쓴다
     end = src.index("\nclass _StreamDedup")
     ns = {"json": _json}
     exec(src[i:end], ns)
@@ -2166,3 +2166,93 @@ def test_progress_line_always_shows_line_count():
     one = phrase("run_command", {**base, "truncated": False,
                                  "total_lines": 1, "shown_lines": 1})
     assert "줄" not in one, one
+
+
+# --- #150: 실행 결과 원문을 **LLM을 거치지 않고** 답변 뒤에 붙인다 ---------------------
+def _raw_outputs_cls():
+    import json as _json
+    import re as _re
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    i = src.index("def _unwrap_result")
+    ns = {"json": _json, "re": _re}
+    exec(src[i:src.index("\nasync def _make_raw_outputs")], ns)
+    return ns["_RawOutputs"]
+
+
+class _FakeEvent:
+    def __init__(self, responses):
+        self._r = [type("FR", (), {"response": x})() for x in responses]
+
+    def get_function_responses(self):
+        return self._r
+
+
+def test_raw_output_block_shows_every_line():
+    """모델이 132줄 중 22줄만 보여준 사고가 반복됐다(#146). 지시문은 확률이라,
+    사용자가 반드시 봐야 하는 것은 LLM을 거치지 않고 붙인다."""
+    RO = _raw_outputs_cls()
+    lines = "\n".join(f"-rw-r--r-- 1 yr9.choi users 100 file{i}.txt" for i in range(132))
+    ro = RO(2, 100000)
+    ro.observe(_FakeEvent([{"result": {
+        "exit_code": 0, "command": "ls -la", "ip": "202.20.185.100", "as_user": "yr9.choi",
+        "total_lines": 132, "truncated": False, "stdout": lines}}]))
+    block = ro.block()
+    assert block.count("file") == 132, "원문에서 행이 빠졌다"
+    assert "`ls -la`" in block and "202.20.185.100 · yr9.choi · 132줄" in block
+
+
+def test_raw_output_skips_short_and_non_execution_results():
+    """한두 줄짜리는 답변에 이미 들어 있어 중복이고, 검색 결과는 실행 결과가 아니다."""
+    RO = _raw_outputs_cls()
+    short = RO(2, 100000)
+    short.observe(_FakeEvent([{"exit_code": 0, "command": "x", "stdout": "/home/gpu1/yr9.choi"}]))
+    assert short.block() == ""
+
+    search = RO(2, 100000)
+    search.observe(_FakeEvent([{"results": [{"title": "a"}, {"title": "b"}]}]))
+    assert search.block() == ""
+
+
+def test_raw_output_survives_backticks_in_output():
+    """출력에 ``` 가 들어 있으면 코드블록이 중간에 닫혀 나머지가 마크다운으로 샌다."""
+    RO = _raw_outputs_cls()
+    ro = RO(2, 100000)
+    ro.observe(_FakeEvent([{"exit_code": 0, "command": "cat x.md",
+                            "stdout": "```python\nprint(1)\n```"}]))
+    block = ro.block()
+    assert "````text" in block, "울타리를 늘리지 않았다"
+    assert block.rstrip().endswith("````")
+
+
+def test_raw_output_block_has_its_own_cap():
+    """원문 블록에도 상한이 있어야 한다. 없으면 한 답변이 수십만 자가 된다."""
+    RO = _raw_outputs_cls()
+    ro = RO(2, 200)
+    ro.observe(_FakeEvent([{"exit_code": 0, "command": "big",
+                            "stdout": "\n".join("x" * 50 for _ in range(100))}]))
+    block = ro.block()
+    assert "원문 표시 상한" in block
+    assert len(block) < 1000, len(block)
+
+
+def test_raw_output_wired_into_every_answer_path():
+    """네 엔드포인트(스트리밍/비스트리밍)에 전부 붙어야 한다. 하나만 빠져도 그 경로에서
+    사용자는 여전히 줄어든 답을 받는다."""
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    assert src.count("raw.observe(event)") == 6, \
+        f"수집 지점이 6곳이어야 한다(현재 {src.count('raw.observe(event)')})"
+    assert src.count("raw.block()") == 6, \
+        f"붙이는 지점이 6곳이어야 한다(현재 {src.count('raw.block()')})"
+    # 설정으로 끌 수 있어야 한다.
+    assert 'get_config("execution_raw_output"' in src
+
+
+def test_raw_output_summary_is_off_by_default():
+    """원문 뒤 요약은 **LLM을 한 번 더** 부른다. 지연이 늘어나므로 기본은 꺼 둔다."""
+    mig = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+    i = mig.index('("execution_raw_output_summary"')
+    seed = mig[i:mig.index("),", i)]
+    assert '"false"' in seed, f"기본값이 꺼져 있지 않다: {seed}"
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    fn = src[src.index("async def _raw_output_summary"):]
+    assert "return \"\"" in fn, "실패 시 조용히 넘어가지 않는다"

@@ -571,6 +571,22 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
         # 몇 번에 59,360토큰이 되어 컨텍스트를 넘긴 사고가 있었다(#123).
         ("execution_result_max_chars", "4000",
          "커맨드 실행 출력을 에이전트에 넘길 최대 글자 수(0이면 자르지 않음)", True, False, False),
+        # **모델이 목록을 조용히 줄이는 것**을 지시문으로 세 번 막아 봤지만 지시문은 확률이다
+        # (132줄 중 22줄만 보여준 사고, #146·#150). 사용자가 반드시 봐야 하는 것은 LLM을
+        # 거치지 않고 붙인다 - 진행 줄이 통했던 것과 같은 방식이다.
+        ("execution_raw_output", "true",
+         "실행 결과 원문을 모델 답변 뒤에 그대로 붙인다(모델이 행을 줄여도 전체가 보인다)",
+         True, False, False),
+        ("execution_raw_output_min_lines", "2",
+         "원문을 붙일 최소 줄 수. 한두 줄짜리는 답변에 이미 들어 있어 중복이다",
+         True, False, False),
+        ("execution_raw_output_max_chars", "20000",
+         "원문 블록 자체의 상한(0이면 무제한). 에이전트에 넘기는 상한과 별개로, "
+         "화면에는 더 많이 보여줄 수 있다", True, False, False),
+        # 원문 뒤에 한 번 더 요약을 붙인다. LLM을 **한 번 더** 부르므로 답변이 몇 초 늦어진다.
+        ("execution_raw_output_summary", "false",
+         "원문 블록 뒤에 짧은 요약을 덧붙인다(LLM 추가 호출 - 응답이 몇 초 늦어진다)",
+         True, False, False),
         ("manual_result_max_chars", "1500",
          "매뉴얼 검색 결과 하나당 넘길 최대 글자 수(이웃 청크 포함, 0이면 자르지 않음)",
          True, False, False),

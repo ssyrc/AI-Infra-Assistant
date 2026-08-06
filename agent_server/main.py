@@ -371,11 +371,14 @@ def _action_phrase(name: str, args: dict) -> str:
     return "확인하는 중"
 
 
-def _result_phrase(name: str, resp) -> str:
-    """도구 결과를 짧은 상태 문장으로 요약한다."""
+def _unwrap_result(resp):
+    """MCP 응답에서 안쪽 결과를 꺼낸다.
+
+    한두 겹 감싸여 오거나(`{"result": {...}}`) JSON 문자열로 올 수 있다. 안쪽을 못 찾으면
+    실행 툴인데도 "확인 완료"로 보여서 성공/실패를 알 수 없다. 상태 문장과 원문 블록이
+    **같은 규칙**으로 풀어야 해서 함수로 뺐다(어긋나면 한쪽만 결과를 못 찾는다).
+    """
     r = resp
-    # MCP 응답은 한두 겹 감싸여 올 수 있다(`{"result": {...}}`, 때로는 JSON 문자열).
-    # 안쪽을 못 찾으면 실행 툴인데도 "확인 완료"로 보여서, 실패했는지 성공했는지 알 수 없다.
     for _ in range(3):
         if isinstance(r, str):
             try:
@@ -389,6 +392,12 @@ def _result_phrase(name: str, resp) -> str:
                 r = inner
                 continue
         break
+    return r
+
+
+def _result_phrase(name: str, resp) -> str:
+    """도구 결과를 짧은 상태 문장으로 요약한다."""
+    r = _unwrap_result(resp)
     if isinstance(r, list):
         return f"{len(r)}건 찾음" if r else "찾은 내용 없음"
     if isinstance(r, dict):
@@ -418,6 +427,123 @@ def _result_phrase(name: str, resp) -> str:
         return "찾은 내용 없음"
     text = str(r).strip()
     return (text[:50] + "…") if len(text) > 50 else (text or "완료")
+
+
+class _RawOutputs:
+    """실행 결과 **원문**을 모아 답변 뒤에 그대로 붙인다 (#150).
+
+    왜 필요한가: 모델이 목록형 출력을 **조용히 줄이는** 일이 반복됐다(132줄 중 22줄만 표시).
+    지시문으로 세 번 막아 봤지만 지시문은 확률이다 — 게다가 지시문이 길어질수록 개별 규칙의
+    준수율은 떨어진다. 진행 줄이 그랬듯, 사용자가 **반드시 봐야 하는 것은 LLM을 거치지 않고**
+    붙인다. 모델이 무엇을 쓰든 원문은 화면에 남는다.
+
+    여러 줄일 때만 붙인다. 한두 줄짜리 출력은 모델 답변에 이미 다 들어가 있어서 중복이다.
+    """
+
+    def __init__(self, min_lines: int, max_chars: int):
+        self.min_lines = max(2, min_lines)
+        self.max_chars = max_chars
+        self.items: list[dict] = []
+
+    def observe(self, event):
+        for fr in (event.get_function_responses() or []):
+            r = _unwrap_result(fr.response)
+            if not isinstance(r, dict) or "exit_code" not in r:
+                continue                       # 실행 툴이 아니다(검색 결과 등)
+            out = (r.get("stdout") or "").rstrip()
+            if not out or len(out.splitlines()) < self.min_lines:
+                continue
+            self.items.append({
+                "command": r.get("command") or "",
+                "ip": r.get("ip") or "",
+                "as_user": r.get("as_user") or "",
+                "total_lines": r.get("total_lines"),
+                "truncated": bool(r.get("truncated")),
+                "stdout": out,
+            })
+
+    @staticmethod
+    def _fence(text: str) -> str:
+        """본문에 백틱 울타리가 들어 있어도 깨지지 않게 더 긴 울타리를 쓴다.
+        (실행 결과에 ``` 가 들어 있으면 코드블록이 중간에 닫혀 나머지가 마크다운으로 샌다.)"""
+        longest = max((len(m) for m in re.findall(r"`+", text)), default=0)
+        return "`" * max(3, longest + 1)
+
+    def block(self) -> str:
+        if not self.items:
+            return ""
+        parts = ["\n\n---\n\n**실행 결과 원문**"]
+        for it in self.items:
+            meta = " · ".join(x for x in (it["ip"], it["as_user"]) if x)
+            if isinstance(it["total_lines"], int):
+                meta += f" · {it['total_lines']}줄"
+            if it["truncated"]:
+                meta += " (뒷부분 잘림)"
+            head = f"`{it['command']}`" if it["command"] else "실행 결과"
+            body = it["stdout"]
+            if self.max_chars > 0 and len(body) > self.max_chars:
+                # 원문 블록에도 상한은 둔다. 없으면 한 답변이 수십만 자가 될 수 있다.
+                kept, used = [], 0
+                for line in body.splitlines():
+                    if used + len(line) + 1 > self.max_chars and kept:
+                        break
+                    kept.append(line)
+                    used += len(line) + 1
+                body = "\n".join(kept) + f"\n…(원문 표시 상한 {self.max_chars:,}자에서 자름)"
+            fence = self._fence(body)
+            parts.append(f"\n\n{head}{' — ' + meta if meta else ''}\n\n"
+                         f"{fence}text\n{body}\n{fence}")
+        return "".join(parts)
+
+
+async def _int_config(key: str, default: int) -> int:
+    try:
+        return int(await get_config(key, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+async def _make_raw_outputs():
+    """설정을 읽어 수집기를 만든다. 꺼져 있으면 None(호출 지점이 조용히 건너뛴다)."""
+    if not _mem_on(await get_config("execution_raw_output", "true")):
+        return None
+    return _RawOutputs(await _int_config("execution_raw_output_min_lines", 2),
+                       await _int_config("execution_raw_output_max_chars", 20000))
+
+
+async def _raw_output_summary(raw, question: str) -> str:
+    """원문 블록 뒤에 붙일 짧은 요약. **LLM을 한 번 더 부른다**(기본 꺼짐).
+
+    모델의 첫 답변은 원문보다 **앞**에 오므로, 긴 원문을 스크롤한 뒤 결론을 다시 보고 싶을 때
+    쓴다. 실패하면 조용히 빈 문자열 - 요약 때문에 답변이 막히면 안 된다.
+    """
+    if not raw or not raw.items:
+        return ""
+    if not _mem_on(await get_config("execution_raw_output_summary", "false")):
+        return ""
+    base = await get_config("vllm_llm_base_url", "")
+    model = await get_config("vllm_llm_model", "")
+    if not base or not model:
+        return ""
+    joined = "\n\n".join(f"[{it['command']}]\n{it['stdout']}" for it in raw.items)[:8000]
+    prompt = ("아래는 사용자 질문과 실제 실행 결과다. 결과를 **2~3줄로** 요약하라. "
+              "결과에 없는 내용을 덧붙이지 말고, 숫자는 결과 그대로 쓴다. 서론 없이 본문만.\n\n"
+              f"질문: {question}\n\n실행 결과:\n{joined}")
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{base.rstrip('/')}/chat/completions",
+                json={"model": model, "messages": [{"role": "user", "content": prompt}],
+                      "temperature": 0.2, "max_tokens": 300})
+            resp.raise_for_status()
+            text = ((resp.json().get("choices") or [{}])[0]
+                    .get("message", {}) or {}).get("content") or ""
+    except Exception as e:  # noqa: BLE001
+        print(f"[agent] 원문 요약 실패(무시): {type(e).__name__}: {e}")
+        return ""
+    # 추론형 모델이 `<think>…</think>`를 앞에 붙일 수 있다. 요약에는 필요 없다.
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
+    return f"\n\n**요약**\n\n{text}" if text else ""
 
 
 class _Pace:
@@ -704,6 +830,8 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     runner = Runner(agent=agent, app_name=APP_NAME, session_service=state["session_service"])
     pace.mark_ready()          # 여기까지가 LLM을 부르기 전 준비 시간
 
+    raw = await _make_raw_outputs()
+
     if not req.stream:
         final_text = ""
         try:
@@ -711,6 +839,8 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                 async for event in runner.run_async(user_id=user_id, session_id=session_id,
                                                     new_message=new_message):
                     pace.observe(event)
+                    if raw:
+                        raw.observe(event)
                     if event.is_final_response():
                         final_text = _event_text(event) or final_text
         finally:
@@ -719,12 +849,15 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             pace.done()
         # 이력에는 **표시자 그대로** 저장한다(data URI가 들어가면 다음 프롬프트가 부푼다).
         _bg_persist(user_id, conv, "openwebui", last_text, final_text, mem_enabled)
+        # 원문 블록은 **이력에 저장한 뒤** 붙인다(다음 프롬프트가 부풀지 않게).
+        body = await _chart_inliner().whole(final_text)
+        if raw:
+            body += raw.block() + await _raw_output_summary(raw, last_text)
         return JSONResponse({
             "id": request_id, "object": "chat.completion",
             "created": int(time.time()), "model": model_name,
             "choices": [{"index": 0,
-                         "message": {"role": "assistant",
-                                     "content": await _chart_inliner().whole(final_text)},
+                         "message": {"role": "assistant", "content": body},
                          "finish_reason": "stop"}],
         })
 
@@ -744,6 +877,8 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                         print("[agent] 클라이언트 연결 종료, 스트리밍 중단")
                         break
                     pace.observe(event)
+                    if raw:
+                        raw.observe(event)
                     if show_tools:
                         status = _tool_status_lines(event)
                         if status:
@@ -768,6 +903,14 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                 yield _sse(request_id, model_name, tail)
             if in_think:
                 yield _sse(request_id, model_name, "\n")
+            # **모델 답변이 끝난 뒤** 원문을 붙인다. 모델이 행을 줄여도 전체가 화면에 남는다.
+            if raw:
+                block = raw.block()
+                if block:
+                    yield _sse(request_id, model_name, block)
+                    summary = await _raw_output_summary(raw, last_text)
+                    if summary:
+                        yield _sse(request_id, model_name, summary)
             yield _sse(request_id, model_name, "", finish=True)
             yield "data: [DONE]\n\n"
         except asyncio.CancelledError:
@@ -924,19 +1067,26 @@ async def agent_query(body: AgentQueryIn, request: Request):
     agent, _model, toolsets = await build_agent(caller_headers, extra_instruction)
     runner = Runner(agent=agent, app_name=APP_NAME, session_service=state["session_service"])
 
+    raw = await _make_raw_outputs()
+
     if not body.stream:
         final_text = ""
         try:
             with _trace_ctx(user_id, conv, body.source or "agent-api"):
                 async for event in runner.run_async(user_id=user_id, session_id=session_id,
                                                     new_message=new_message):
+                    if raw:
+                        raw.observe(event)
                     if event.is_final_response():
                         final_text = _event_text(event) or final_text
         finally:
             await _cleanup_session(user_id, session_id)
             await _close_toolsets(toolsets)
         _bg_persist(user_id, conv, body.source, body.message, final_text, mem_enabled)
-        return JSONResponse({"answer": final_text, "conversation_id": conv,
+        answer = final_text
+        if raw:
+            answer += raw.block() + await _raw_output_summary(raw, body.message)
+        return JSONResponse({"answer": answer, "conversation_id": conv,
                              "request_id": request_id})
 
     async def event_stream():
@@ -950,6 +1100,8 @@ async def agent_query(body: AgentQueryIn, request: Request):
                                                     run_config=STREAMING_RUN_CONFIG):
                     if await request.is_disconnected():
                         break
+                    if raw:
+                        raw.observe(event)
                     if show_tools:
                         status = _tool_status_lines(event)
                         if status:
@@ -972,6 +1124,13 @@ async def agent_query(body: AgentQueryIn, request: Request):
                 yield _sse(request_id, model_name, tail)
             if in_think:
                 yield _sse(request_id, model_name, "\n")
+            if raw:
+                block = raw.block()
+                if block:
+                    yield _sse(request_id, model_name, block)
+                    summary = await _raw_output_summary(raw, body.message)
+                    if summary:
+                        yield _sse(request_id, model_name, summary)
             yield _sse(request_id, model_name, "", finish=True)
             yield "data: [DONE]\n\n"
         except asyncio.CancelledError:
@@ -1162,12 +1321,16 @@ async def voc_query(body: VocQueryIn, request: Request):
         except Exception:  # noqa: BLE001
             return []
 
+    raw = await _make_raw_outputs()
+
     if not body.stream:
         final_text, ok = "", True
         try:
             with _trace_ctx(user_id, conv, "voc-agent"):
                 async for event in runner.run_async(user_id=user_id, session_id=session_id,
                                                     new_message=new_message):
+                    if raw:
+                        raw.observe(event)
                     if event.is_final_response():
                         final_text = _event_text(event) or final_text
         except Exception as e:  # noqa: BLE001
@@ -1181,7 +1344,10 @@ async def voc_query(body: VocQueryIn, request: Request):
         if not ok or not final_text:
             return JSONResponse({"success": False, "answer": None})
         # 외부로 나가는 본문에서는 차트 표시자를 실제 이미지로 바꿔 준다(이력은 표시자 유지).
-        answer = {"content": await _chart_inliner().whole(final_text)}
+        content = await _chart_inliner().whole(final_text)
+        if raw:
+            content += raw.block() + await _raw_output_summary(raw, body_text)
+        answer = {"content": content}
         if similar:
             answer["similar_voc"] = similar
         return JSONResponse({"success": True, "answer": answer})
@@ -1196,13 +1362,18 @@ async def voc_query(body: VocQueryIn, request: Request):
                                                     run_config=STREAMING_RUN_CONFIG):
                     if await request.is_disconnected():
                         break
+                    if raw:
+                        raw.observe(event)
                     delta = dedup.feed(event)
                     if delta:
                         yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
             # 마지막에 가이드 계약 형태의 완성 envelope을 한 번 더 보낸다.
             if dedup.full:
                 similar = await _collect_similar()
-                answer = {"content": await _chart_inliner().whole(dedup.full)}
+                content = await _chart_inliner().whole(dedup.full)
+                if raw:
+                    content += raw.block() + await _raw_output_summary(raw, body_text)
+                answer = {"content": content}
                 if similar:
                     answer["similar_voc"] = similar
                 envelope = {"success": True, "answer": answer}

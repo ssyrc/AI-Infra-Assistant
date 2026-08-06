@@ -7,8 +7,22 @@
 > ⛔ 며칠 정상 동작을 확인할 때까지 `docker volume prune` · `system prune` · `down -v` 금지.
 > 남은 익명 볼륨 2개가 마지막 보험입니다(맨 아래에서 정리).
 
-이번에 고친 것: 실행 여부를 **말투가 아니라 내용**으로 판단 · 분류가 틀려도 **값을 지어내지
-않도록** 안전장치 추가 · 진행 줄에 **줄 수를 항상 표시**(모델이 자른 건지 눈으로 확인 가능).
+**이번 핵심**: 실행 결과 **원문을 모델 답변 뒤에 그대로** 붙입니다(#150). 모델이 행을 줄여도
+사용자는 전체를 봅니다 — LLM을 거치지 않으니 지시문 준수율과 무관합니다.
+
+```
+[모델 답변 · 표/요약]
+
+---
+
+**실행 결과 원문**
+
+`ls -la` — 202.20.185.100 · yr9.choi · 132줄
+
+```text
+(132줄 전부)
+```
+```
 
 ---
 
@@ -24,12 +38,14 @@ git -C /home/yrc/AI-Infra-Assistant fetch origin main
 git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
 bash /home/yrc/AI-Infra-Assistant/scripts/deploy-rsync.sh
 
-# [서버]
+# [서버]  db-init 을 먼저 — 새 설정 키(execution_raw_output 등)가 생깁니다
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
+docker compose -f docker-compose.dev.yml run --rm db-init
 docker compose -f docker-compose.dev.yml restart admin-console agent-server
 ```
 
-`admin-console` 재시작이 **필수**입니다. 지난번 되돌리기 버튼이 옛 텍스트를 저장한 것은
+`db-init`을 빼면 원문 블록 설정이 없어 **기본값(켜짐)으로만** 동작하고 콘솔에서 조절할 수
+없습니다. `admin-console` 재시작도 **필수**입니다. 지난번 되돌리기 버튼이 옛 텍스트를 저장한 것은
 모듈 캐시 때문이었고(#147), 재시작해야 그 캐시가 비워집니다.
 
 ## 2. [웹] 되돌리기 → [서버] **반드시 확인**
@@ -47,30 +63,27 @@ docker exec ai-infra-assistant-postgres-1 psql -U agent -d platform_config -tAc 
 **`최신 OK`가 나오기 전에는 3번을 하지 마세요.** 답변 품질을 판단할 수 없습니다.
 `아직 옛것`이면 **글자 수를 알려주세요**(현재 코드 기준 약 12,700자).
 
-## 3. [웹] 세 질문 다시 확인 — **2번이 `최신 OK`인 뒤에**
+## 3. [웹] 세 질문 다시 확인
 
 | 질문 | 기대 |
 |---|---|
-| `내 홈 파일 리스트 보여줘` | 도구가 돌려준 **모든 행** |
+| `내 홈 파일 리스트 보여줘` | 답변 뒤에 **원문 블록**이 붙고 거기 전체 행이 보임 |
 | `내 홈 디렉토리는 어디야?` | **실행해서 나온 값** — `/home/gpu1/yr9.choi` |
-| `내 s2 gpu job 리스트 보여줘` | 표로 정리 |
+| `내 s2 gpu job 리스트 보여줘` | 모델 정리 + 원문 블록 |
 
-**진행 줄을 통째로** 보내주세요. 원인이 거기서 갈립니다.
+원문 블록이 안 보이면 설정 탭 `execution_raw_output`이 `true`인지 확인하세요.
 
-```
-· `ls -la` 실행하는 중
-· 완료 (202.20.185.100 · yr9.choi · 0.4초) · 132줄        ← 안 잘림. 답변도 132행이어야
-· 완료 (202.20.185.100 · yr9.choi · 0.4초) ⚠ 출력 132줄 중 58줄만   ← 우리가 자름
-```
+### 원문 관련 설정 (설정 탭 → Execution MCP)
 
-**이제 잘리지 않아도 줄 수가 찍힙니다.** 답변의 행 수와 대조하면 원인이 바로 갈립니다.
+| key | 기본 | 뜻 |
+|---|---|---|
+| `execution_raw_output` | `true` | 원문 블록 on/off |
+| `execution_raw_output_min_lines` | `2` | 이 줄 수 이상일 때만 붙임 |
+| `execution_raw_output_max_chars` | `20000` | 원문 블록 자체 상한(에이전트에 넘기는 4000과 별개) |
+| `execution_raw_output_summary` | `false` | 원문 뒤 요약. **켜면 LLM을 한 번 더 불러 몇 초 늦어집니다** |
 
-| 진행 줄 | 뜻 |
-|---|---|
-| 실행 줄이 **아예 없음** | 도구를 호출조차 안 한 것 — 지시문 분류 문제 |
-| `· 132줄`인데 답변은 22행 | **모델이 자른 것** (우리는 안 잘랐습니다) |
-| `⚠` 있는데 답변에 안 밝힘 | 지시문 반영 안 됨 |
-| `⚠`가 자주 보임 | 설정 탭 `execution_result_max_chars`(기본 4000)를 올리세요 |
+요약까지 원하시면 `execution_raw_output_summary`를 `true`로 바꾸세요. 지연이 늘어서
+기본은 꺼 뒀습니다 — 켜 보시고 체감 속도를 알려주세요.
 
 ## 4. [웹] 커맨드 인자를 **선택형**으로 — 엑셀에 드롭다운을 넣었습니다
 
@@ -148,7 +161,8 @@ docker volume rm 1dc7527fd826d5a2afc08bd1b44e945219c2fd10da65c2747f49c2d367ab919
 | 증상 | 조치 |
 |---|---|
 | 되돌리기를 눌러도 옛 지시문 | `admin-console` 재시작이 빠진 것입니다(1번) |
-| 답변이 행을 조용히 줄임 | 2번으로 지시문 버전 확인. `옛 지시문`이면 1번 재시작부터 |
+| 답변이 행을 줄여도 | 이제 **원문 블록**에 전체가 있습니다. 블록이 아예 없으면 `execution_raw_output` 확인 |
+| 원문 블록이 너무 길다 | `execution_raw_output_min_lines`를 올리세요(예: 10) |
 | 홈 경로를 지어냄 | 같음. `최신 지시문 OK`인데도 그러면 알려주세요 |
 | 모델이 없는 옵션을 지어냄 | 4번에서 그 인자를 **선택형**으로 바꾸세요 |
 | 모델 목록이 비고 질문이 401 | 콘솔 `agent_api_key`와 Open WebUI 연결 키가 다릅니다 |
