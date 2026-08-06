@@ -1137,7 +1137,7 @@ def test_privilege_drop_modes_build_safe_remote_commands(mode, expect_prefix, mo
         importlib.reload(ssh_exec)
 
 
-_FAKE_SSH_PROFILE_ONLY = '''#!/usr/bin/env python3
+_FAKE_SSH_PROFILE_ONLY = r'''#!/usr/bin/env python3
 """가짜 ssh: `phd`는 로그인 셸에서만 찾아지고, runuser는 아예 없는 서버를 흉내낸다."""
 import re, sys
 remote = sys.argv[-1]
@@ -1317,8 +1317,12 @@ def test_console_explains_405_instead_of_showing_it():
     assert 'app.mount("/", StaticFiles(' in main
 
     # 배포 절차에도 admin-console 재시작이 들어 있어야 한다.
-    steps = open(os.path.join(ROOT, "docs", "NEXT-STEPS.md"), encoding="utf-8").read()
-    assert "restart admin-console" in steps
+    # **NEXT-STEPS가 아니라 스크립트에 걸어야 한다** - NEXT-STEPS는 매 턴 "지금 할 일"만
+    # 남기고 새로 쓰는 문서라(CLAUDE.md 1절), 이번에 콘솔을 안 건드리면 그 줄이 사라진다.
+    # 영구 보장은 사용자가 매번 돌리는 `restart-mounted.sh`가 해야 한다.
+    restart = open(os.path.join(ROOT, "scripts", "restart-mounted.sh"), encoding="utf-8").read()
+    assert "admin-console" in restart, \
+        "restart-mounted.sh가 admin-console을 재시작하지 않는다 - 405가 재발한다"
 
 
 def test_rsync_never_deletes_server_only_files():
