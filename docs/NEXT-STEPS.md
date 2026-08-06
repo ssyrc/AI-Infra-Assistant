@@ -5,7 +5,9 @@
 **[웹]** 관리자 콘솔 `http://202.20.183.30:8501`
 
 > 아직 아무것도 반영되지 않았습니다. 지난 수정(첫 접속 17초, root 세션 상주, ADK 툴 호출
-> 오류 우회, 로그인 셸 생략)이 전부 `main`에만 있습니다. 1~2번이 먼저입니다.
+> 오류 우회, 로그인 셸 생략)이 전부 `main`에만 있습니다.
+>
+> **2번을 건너뛰지 마세요.** ssh 키가 지워진 상태라, 그냥 재생성하면 실행이 전부 막힙니다.
 
 ---
 
@@ -14,23 +16,52 @@
 ```bash
 git -C /home/yrc/AI-Infra-Assistant fetch origin main
 git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
-rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
+rsync -avz --delete --progress \
+  --exclude '.env' --exclude 'secrets/' \
+  /home/yrc/AI-Infra-Assistant/ \
   yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
 ```
 
-## 2. [서버] 로그인 셸 생략 켜고 재생성
+## 2. [서버] ⚠ ssh 키부터 되살립니다 — **컨테이너를 재생성하기 전에**
+
+`.env`가 없다는 건 **rsync `--delete`가 지웠다**는 뜻입니다(`.env`도 `secrets/`도 저장소에
+없는 파일이라). 지금 컨테이너는 예전에 마운트한 키를 아직 쥐고 있어서 동작하지만,
+**이 상태로 `up -d` 하면 키 자리에 빈 디렉토리가 생겨 모든 커맨드가 인증 실패합니다.**
+1번의 rsync는 이제 두 경로를 제외하므로, 한 번만 복구하면 다시 지워지지 않습니다.
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-grep -q '^SSH_PRIVDROP=' .env || echo 'SSH_PRIVDROP=runuser' >> .env
+
+# (1) 지금 떠 있는 컨테이너에서 키를 꺼내 되살린다
+mkdir -p secrets && chmod 700 secrets
+docker compose -f docker-compose.dev.yml exec -T execution-mcp \
+  cat /root/.ssh/id_ed25519 > secrets/id_ed25519
+chmod 600 secrets/id_ed25519
+head -1 secrets/id_ed25519      # "-----BEGIN OPENSSH PRIVATE KEY-----" 가 나와야 합니다
+
+# (2) .env 를 만든다
+cp -n .env.example .env
+printf 'SSH_KEY_PATH=./secrets/id_ed25519\nSSH_PRIVDROP=runuser\n' >> .env
+```
+
+`head -1` 이 비었거나 이상하면 **여기서 멈추고 알려주세요.** 그대로 진행하면 실행이 다 막힙니다.
+
+## 3. [서버] 재생성
+
+```bash
+cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
 docker compose -f docker-compose.dev.yml run --rm db-init
 docker compose -f docker-compose.dev.yml up -d --no-build --remove-orphans
 docker compose -f docker-compose.dev.yml ps
+docker compose -f docker-compose.dev.yml exec -T execution-mcp ls -l /root/.ssh/id_ed25519
 ```
 
-안 되는 커맨드는 시스템이 알아서 로그인 셸로 되돌려 실행합니다. 확인 없이 켜도 됩니다.
+마지막 줄이 `-rw------- 1 root root 399 ...` 처럼 **파일**이어야 합니다(디렉토리면 키가 없는 것).
 
-## 3. [웹] 콘솔 → 설정 탭 → 에이전트
+로그인 셸 생략(`SSH_PRIVDROP=runuser`)은 확인 없이 켜도 됩니다 — 안 되는 커맨드는 시스템이
+알아서 로그인 셸로 되돌려 실행합니다.
+
+## 4. [웹] 콘솔 → 설정 탭 → 에이전트
 
 **`지시문을 최신 기본값으로 되돌리기`** 버튼 클릭 → 이어서 나오는 `agent-server 재시작` 승인.
 
@@ -45,12 +76,12 @@ docker compose -f docker-compose.dev.yml ps
 | `openwebui_public_url` | `http://202.20.183.30:8502` |
 | `voc_intake_guide` | 실제 VOC 접수 경로 |
 
-## 4. [웹] 콘솔 → 커맨드 실행 탭
+## 5. [웹] 콘솔 → 커맨드 실행 탭
 
 `phd info -u {user_id}` 처럼 **동작하지 않는 커맨드가 등록돼 있으면 지우거나 고칩니다.**
 등록된 커맨드는 그대로 에이전트 툴이 되므로, 여기 있으면 계속 호출됩니다.
 
-## 5. [웹] Open WebUI에서 확인 — 각 항목 **소요 시간**을 적어 주세요
+## 6. [웹] Open WebUI에서 확인 — 각 항목 **소요 시간**을 적어 주세요
 
 1. `S2 스케줄러 job list 확인해줘`
 2. `내 홈 파일 리스트 보여줘`
@@ -59,7 +90,7 @@ docker compose -f docker-compose.dev.yml ps
 답변 위 진행 줄에 `· 완료 (202.20.185.100 · yr9.choi · 2.3초)` 처럼 초가 찍힙니다.
 **어떤 커맨드를 실행했는지**도 함께 알려 주세요.
 
-## 6. [서버] 로그 3종 — 5번 뒤에 보내주세요
+## 7. [서버] 로그 3종 — 6번 뒤에 보내주세요
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant

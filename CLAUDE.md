@@ -49,7 +49,9 @@
 # WSL
 git -C /home/yrc/AI-Infra-Assistant fetch origin main
 git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
-rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
+rsync -avz --delete --progress \
+  --exclude '.env' --exclude 'secrets/' \
+  /home/yrc/AI-Infra-Assistant/ \
   yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
 
 # 폐쇄망 배포 호스트(202.20.183.30)

@@ -1212,6 +1212,43 @@ def test_privilege_drop_defaults_to_login_shell_and_keeps_legacy_flag():
     assert {"su", "runuser", "setpriv", "sudo"} <= DENY_BASE_COMMANDS
 
 
+def test_rsync_never_deletes_server_only_files():
+    """배포 rsync가 `--delete`로 **서버에만 있어야 하는 파일**을 지우면 안 된다(#137).
+
+    `.env`는 .gitignore에 있고 `secrets/`(ssh 개인키)도 저장소에 없다. 보내는 쪽에 없으니
+    `--delete`가 매번 지웠다. 바인드 마운트 때문에 이미 떠 있는 컨테이너는 멀쩡해서,
+    다음 `up -d`(재생성) 때 비로소 "모든 커맨드 인증 실패"로 터진다 - 원인 찾기가 특히 어렵다.
+    """
+    gitignore = open(os.path.join(ROOT, ".gitignore"), encoding="utf-8").read()
+    assert "secrets/" in gitignore, "개인키 디렉토리가 gitignore에 없다"
+
+    for doc in ("CLAUDE.md", os.path.join("docs", "NEXT-STEPS.md"),
+                os.path.join("docs", "RUN-LOG.md")):
+        text = open(os.path.join(ROOT, doc), encoding="utf-8").read()
+        # 산문에 섞인 'rsync' 언급이 아니라 **실제 커맨드 줄**만 본다(줄바꿈 `\` 이어붙임).
+        lines, i, commands = text.split("\n"), 0, []
+        while i < len(lines):
+            if lines[i].strip().startswith("rsync "):
+                cmd = lines[i].rstrip()
+                while cmd.endswith("\\") and i + 1 < len(lines):
+                    i += 1
+                    cmd = cmd[:-1] + " " + lines[i].strip()
+                commands.append(cmd)
+            i += 1
+        assert commands, f"{doc}에 rsync 커맨드가 없다(문서가 바뀌었으면 테스트도 고칠 것)"
+        for cmd in commands:
+            if "--delete" not in cmd:
+                continue        # --delete가 없으면 지울 일이 없다
+            assert "--exclude '.env'" in cmd, f"{doc}: rsync --delete가 .env를 지운다\n{cmd}"
+            assert "--exclude 'secrets/'" in cmd, f"{doc}: rsync --delete가 ssh 키를 지운다\n{cmd}"
+
+    # 키가 사라진 상태를 조용히 넘기면 안 된다 - 기동 로그에서 바로 보여야 한다.
+    server = open(os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"),
+                  encoding="utf-8").read()
+    assert "os.path.isfile(SSH_KEY)" in server
+    assert "모든 커맨드 실행이 인증 실패합니다" in server
+
+
 def test_instruction_can_be_reset_from_console_without_db_env():
     """지시문을 **버튼 하나로** 최신 기본값으로 되돌릴 수 있어야 한다(#136).
 

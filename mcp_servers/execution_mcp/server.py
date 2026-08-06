@@ -36,7 +36,7 @@ from mcp_caller import (  # noqa: E402
     get_caller, CallerContextMiddleware, tool_description, build_wrapped,
 )
 from ssh_exec import (  # noqa: E402
-    ensure_master, run_ssh_as_user, set_output_limit_getter,
+    SSH_KEY, ensure_master, run_ssh_as_user, set_output_limit_getter,
     start_master_supervisor, stop_masters,
 )
 from execution_exec import DEFAULT_DENY_CSV, build_free_argv, deny_set  # noqa: E402
@@ -207,6 +207,15 @@ if __name__ == "__main__":
     # 그 연결에 채널만 얹어 곧바로 `su - <user_id>`를 실행한다(접속 비용 0).
     # 감시 루프가 15초마다 살아 있는지 보고, 죽어 있으면 즉시 다시 띄운다.
     async def _start_master():
+        # ssh 키가 '파일'인지 먼저 크게 알린다. compose가 없는 경로를 bind mount하면 도커가
+        # 그 자리에 **빈 디렉토리**를 만들고, `ssh -i <디렉토리>`는 무조건 인증 실패한다.
+        # 실제로 rsync --delete가 서버의 secrets/를 지워서 이 상태가 됐다(#137).
+        # 조용히 두면 "커맨드가 전부 권한 오류"로만 보여서 엉뚱한 곳을 파게 된다.
+        if SSH_KEY and not os.path.isfile(SSH_KEY):
+            print(f"[execution-mcp] !! ssh 키가 파일이 아닙니다: {SSH_KEY} "
+                  "→ **모든 커맨드 실행이 인증 실패합니다.** 호스트의 키 파일(.env의 "
+                  "SSH_KEY_PATH, 기본 ./secrets/id_ed25519)이 있는지 확인하고 컨테이너를 "
+                  "재생성하세요.")
         try:
             host = await _login_host()
         except Exception as e:  # noqa: BLE001

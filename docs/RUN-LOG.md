@@ -21,7 +21,9 @@ cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
 # [WSL]  GitHub -> 게이트 서버로 전송 (폐쇄망은 GitHub에 못 닿는다)
 git -C /home/yrc/AI-Infra-Assistant fetch origin main
 git -C /home/yrc/AI-Infra-Assistant reset --hard origin/main
-rsync -avz --delete --progress /home/yrc/AI-Infra-Assistant/ \
+rsync -avz --delete --progress \
+  --exclude '.env' --exclude 'secrets/' \
+  /home/yrc/AI-Infra-Assistant/ \
   yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
 
 # [서버]
