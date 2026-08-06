@@ -116,6 +116,13 @@ docker compose -f docker-compose.dev.yml up -d --no-build
   파이프에 커맨드 문자열을 써 넣어야 해서 "셸 미사용" 원칙이 깨진다(#103, #134).
 - 셸을 쓰지 않는다(argv 리스트로 실행). 파괴적 명령은 등록/실행 단계에서 거부한다.
 - `user_id`는 LLM 스키마에서 숨기고 호출자 헤더(`X-User-Id`)에서 강제 주입한다(남의 자원 접근 불가).
+- **남의 계정을 지목하는 인자도 막는다**(#140). 위 규칙은 *실행 신원*만 고정한다 —
+  `phd list -u cocoa.song`은 본인 계정으로 돌려도 남의 job을 보여준다(판정 주체가 OS가 아니라
+  그 프로그램이다). `execution_exec.reject_other_user()`가 `-u 남`·`--user=남`·`-u남`·등록
+  커맨드 자리표시자 네 경로를 실행 직전에 끊는다. 옵션 목록은 `execution_user_scope_flags`.
+  **"모델이 거절하니까 괜찮다"로 두지 않는다** — 그건 강제가 아니다.
+- 답변에서 사용자를 부를 때 쓸 계정은 `build_agent`가 '이 환경의 값'에 넣어 준다.
+  이게 없으면 모델이 자기 이름(`ops_assistant`)을 사용자 계정으로 말한다(#125·#131·#140).
 - **신뢰 경계에는 인증이 있어야 한다**(#139). 그 헤더를 그대로 믿기 때문에, 인증이 없으면
   같은 망의 누구나 헤더만 바꿔 남의 계정으로 실행할 수 있다.
   · agent-server ↔ MCP: `mcp_shared_secret`(db-init이 무작위로 심고 양쪽이 같은 DB에서 읽는다).
@@ -129,8 +136,12 @@ docker compose -f docker-compose.dev.yml up -d --no-build
 - **Execution MCP**(구 Command MCP + System MCP를 #111에서 통합): 커맨드 실행 전담. **두 갈래**다
   (#128에서 코드 내장 커맨드 7개를 삭제 — 전부 LLM이 아는 표준 리눅스 명령이었다).
   · **등록 커맨드**(`execution_commands`) — 콘솔에서 `head -n {lines} {path}`처럼 등록.
-    자리표시자가 **타입 붙은 파라미터**로 LLM에 노출된다. 전부 편집·삭제·on/off 가능.
+    자리표시자가 **타입·설명 붙은 파라미터**로 LLM에 노출된다. 전부 편집·삭제·on/off 가능.
     자유 인자는 항상 허용(에이전트가 판단).
+    인자 설명·선택지는 `Annotated[…, Field(description=…)]`/`Literal`로 스키마에 실린다(#140).
+    선택지는 **`값: 설명`**(`-j: JSON 형식으로 반환`)으로 적는다 — 값만 뽑는 규칙은
+    `execution_exec.choice_value` 한 곳뿐이고 `cast_arg`가 같은 것을 쓴다(어긋나면 전부 거부).
+    콘솔에서 **엑셀 양식 받기 / 현재 등록분 내보내기**로 일괄 등록·수정한다(인자 포함, #140).
   · **`run_command`** — 미등록 커맨드(표준 리눅스 명령, 매뉴얼/VOC에서 찾은 것).
     차단 목록을 **모든 토큰에** 엄격 적용(`mpirun ... rm -rf /` 우회 차단).
   RAG 검색은 쓰지 않는다 — 툴 목록을 보고 에이전트가 고른다(#105).
@@ -147,7 +158,7 @@ docker compose -f docker-compose.dev.yml up -d --no-build
 | 바꾼 것 | 반영 방법 |
 |---|---|
 | 새 설정 키 / 마이그레이션 | `db-init` 재실행 필수 |
-| **등록 커맨드 추가·수정·인자·`host_mode`·설명** | `execution-mcp` 재시작(툴 목록 재구성) |
+| **등록 커맨드 추가·수정·인자·`host_mode`·설명** | `execution-mcp` 재시작(툴 목록 재구성). 엑셀 일괄 등록도 같다 |
 | `enabled` / `required_roles` | 실시간 반영(재시작 불필요) |
 | `agent_system_instruction` | non-force 시드라 **기존 DB에 자동 반영 안 됨** → 콘솔 설정 탭 "지시문을 최신 기본값으로 되돌리기" 버튼 → agent-server 재시작. 원문은 `shared/agent_instruction.py` 한 곳뿐(NEXT-STEPS에 전문을 붙이지 말 것) |
 | `hot_reload=false` 설정값 | 해당 서비스 재시작(콘솔에 "지금 재시작" 버튼 있음) |

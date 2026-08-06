@@ -439,8 +439,11 @@ def test_execution_blacklist_blocks_wrapper_injection():
             build_free_argv(command, args, "yr9.choi", deny)
 
     # 정상적인 HPC 사용은 막지 않는다(오탐으로 쓸 수 없게 만들면 안 된다).
+    # `-u`에는 **본인 계정만** 올 수 있다(#140). 예전 픽스처의 `-u me`는 이제 거부되는데,
+    # 그게 맞는 동작이다 - 남의 계정을 지목하는 옵션은 실행 전에 끊는다.
     for command, args in [("mpirun", ["-n", "4", "./my_sim"]), ("sinfo", []),
-                          ("squeue", ["-u", "me"]), ("awk", ["{print $1}", "/var/log/x"]),
+                          ("squeue", ["-u", "yr9.choi"]),
+                          ("awk", ["{print $1}", "/var/log/x"]),
                           ("cat", ["/etc/hosts"])]:
         assert build_free_argv(command, args, "yr9.choi", deny)[0] == command
 
@@ -1570,3 +1573,209 @@ def test_execution_mcp_logs_exposed_tool_names():
     src = open(os.path.join(ROOT, "mcp_servers", "execution_mcp", "server.py"),
                encoding="utf-8").read()
     assert "노출된 툴:" in src
+
+
+# --- #140: 다른 사용자 계정으로 실행하려는 시도를 **강제로** 막는다 -----------------
+# 실행 신원(runuser)은 이미 본인으로 고정돼 있었지만, `phd list -u 남의계정`처럼 프로그램
+# 자신이 대상을 고르는 옵션은 OS가 막아 주지 않는다. 지금까지는 모델이 지시문을 따라 거절해
+# 준 것뿐이라 강제가 아니었다.
+@pytest.mark.parametrize("args", [
+    ["list", "-u", "cocoa.song"],          # 옵션과 값이 따로
+    ["list", "--user=cocoa.song"],         # `=`로 붙인 꼴
+    ["list", "-ucocoa.song"],              # 짧은 옵션에 값이 붙은 꼴(가장 놓치기 쉽다)
+    ["list", "--owner", "cocoa.song"],
+])
+def test_run_command_blocks_other_user(args):
+    from execution_exec import build_free_argv, deny_set, DEFAULT_DENY_CSV
+    with pytest.raises(PermissionError) as e:
+        build_free_argv("phd", args, "yr9.choi", deny_set(DEFAULT_DENY_CSV))
+    assert "다른 사용자" in str(e.value)
+
+
+@pytest.mark.parametrize("args", [
+    ["list", "-u", "yr9.choi"],            # 본인 계정은 정상 사용법
+    ["list", "-l"],
+    ["list"],
+])
+def test_run_command_allows_self_and_plain_options(args):
+    from execution_exec import build_free_argv, deny_set, DEFAULT_DENY_CSV
+    build_free_argv("phd", args, "yr9.choi", deny_set(DEFAULT_DENY_CSV))
+
+
+def test_registered_command_blocks_other_user_in_placeholder():
+    """`phd list {option}`의 `{option}`에 `-u 남의계정`을 통째로 넣는 경로.
+    자유 인자만 검사하면 이게 그대로 빠져나간다(토큰 하나로 들어오기 때문)."""
+    from execution_exec import build_registered_argv, deny_set, DEFAULT_DENY_CSV
+    specs = [{"name": "option", "type": "str", "required": False, "default": ""}]
+    deny = deny_set(DEFAULT_DENY_CSV)
+    with pytest.raises(PermissionError):
+        build_registered_argv("phd list {option}", specs, {"option": "-u cocoa.song"},
+                              None, "yr9.choi", deny, True)
+    # 같은 자리에 평범한 옵션은 통과해야 한다.
+    assert build_registered_argv("phd list {option}", specs, {"option": "-l"},
+                                 None, "yr9.choi", deny, True) == ["phd", "list", "-l"]
+
+
+def test_other_user_error_forbids_guide_document_tour():
+    """거절한 뒤 "가이드 위치: 슈퍼컴 Portal > ..."를 덧붙인 사고가 있었다.
+    물어본 것은 남의 job이지 문서가 아니다 - 오류 문구가 그다음 행동까지 지시한다."""
+    from execution_exec import build_free_argv, deny_set, DEFAULT_DENY_CSV
+    with pytest.raises(PermissionError) as e:
+        build_free_argv("phd", ["list", "-u", "cocoa.song"], "yr9.choi",
+                        deny_set(DEFAULT_DENY_CSV))
+    msg = str(e.value)
+    assert "가이드 문서 위치를 안내하지" in msg and "매뉴얼" in msg
+
+
+def test_user_scope_check_is_configurable():
+    """`sort -u`처럼 계정과 무관한 `-u`가 걸릴 수 있으므로 설정으로 끌 수 있어야 한다."""
+    from execution_exec import build_free_argv, deny_set, DEFAULT_DENY_CSV, user_flag_set
+    build_free_argv("sort", ["-u", "data.txt"], "yr9.choi",
+                    deny_set(DEFAULT_DENY_CSV), user_flag_set(""))
+
+
+# --- #140: 등록한 인자 설명이 LLM 스키마에 실제로 실린다 ---------------------------
+def _arg_schema(row):
+    """등록 커맨드 한 행 -> LLM에 보이는 파라미터 JSON 스키마."""
+    import inspect
+    from pydantic import create_model
+    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "execution_mcp"))
+    from registry import build_entry
+    row = {"tool_name": "t", "title": "t", "host_mode": "login_server",
+           "enabled": True, "required_roles": [], **row}
+    h = build_entry(row, None)["handler"]
+    fields = {}
+    for n, p in h.__signature__.parameters.items():
+        if n in ("user_id", "host"):
+            continue
+        fields[n] = (h.__annotations__[n],
+                     ... if p.default is inspect.Parameter.empty else p.default)
+    return create_model("T", **fields).model_json_schema()["properties"]
+
+
+def test_registered_arg_description_reaches_llm_schema():
+    """예전에는 `option: str = ''`만 넘어가서, 콘솔에 적어 둔 옵션 설명이 모델에
+    **한 글자도** 전달되지 않았다. 등록은 했는데 에이전트가 옵션을 못 채운 원인이다."""
+    props = _arg_schema({
+        "description": "job 목록", "exec_command": "phd list {option}",
+        "args": [{"name": "option", "type": "str", "required": False, "default": "",
+                  "description": "-l: 상세 출력 -lf: 필드 목록", "choices": []}]})
+    assert props["option"]["description"] == "-l: 상세 출력 -lf: 필드 목록"
+
+
+def test_enum_choices_become_schema_enum_with_labels():
+    """선택지를 `값: 설명`으로 적으면 값만 enum이 되고 설명은 파라미터 설명으로 간다."""
+    props = _arg_schema({
+        "description": "job 상세", "exec_command": "phd info {option} {job_id}",
+        "args": [{"name": "option", "type": "enum", "required": False, "default": "",
+                  "description": "",
+                  "choices": ["-j: JSON 형식으로 반환", "-tl: 부가 정보 출력"]},
+                 {"name": "job_id", "type": "str", "required": True,
+                  "description": "job id", "choices": []}]})
+    # 필수가 아닌 선택형에는 빈 값도 있어야 한다(기본값 ""이 enum에 없으면 스키마가 깨진다).
+    assert set(props["option"]["enum"]) == {"-j", "-tl", ""}
+    assert "JSON 형식으로 반환" in props["option"]["description"]
+    assert props["job_id"]["description"] == "job id"
+
+
+def test_enum_value_parsing_ignores_description_part():
+    """`cast_arg`도 같은 규칙으로 값을 비교해야 한다(스키마와 검증이 어긋나면 전부 거부된다)."""
+    from execution_exec import cast_arg, choice_value
+    spec = {"name": "option", "type": "enum",
+            "choices": ["-j: JSON 형식으로 반환", "-tl: 부가 정보 출력"]}
+    assert cast_arg(spec, "-j") == "-j"
+    assert choice_value("12:00") == "12:00"        # 콜론 앞이 값처럼 보여도 공백 규칙으로 구분
+    with pytest.raises(ValueError):
+        cast_arg(spec, "-zz")
+
+
+# --- #140: 에이전트가 질문한 사용자 계정을 안다 -----------------------------------
+def test_agent_injects_caller_account_into_prompt():
+    """모델이 자기 이름(`ops_assistant`)을 사용자 계정으로 말한 사고가 있었다.
+    호출자 계정을 알려 주지 않았기 때문이다."""
+    src = open(os.path.join(ROOT, "agent_server", "agent.py"), encoding="utf-8").read()
+    assert 'caller_headers or {}).get("X-User-Id")' in src
+    assert "질문한 사용자 계정" in src
+
+
+def test_instruction_answers_other_user_question_in_one_line():
+    instr = _instruction_text()
+    assert "## 남의 계정을 묻는 질문" in instr
+    assert "가이드 문서 위치를 안내하지 않습니다" in instr
+    assert "질문한 사용자 계정" in instr
+
+
+# --- #140: 엑셀 양식이 인자까지 실어 나른다 ---------------------------------------
+def _exec_router():
+    """관리자 콘솔 실행 라우터를 DB 없이 임포트한다(모듈 상수/파서만 쓴다)."""
+    import importlib.util
+    for k, v in {"CONFIG_DB_DSN": "postgres://x/y", "POSTGRES_PASSWORD": "x",
+                 "ADMIN_PASSWORD": "x", "SESSION_SECRET": "x"}.items():
+        os.environ.setdefault(k, v)
+    sys.path.insert(0, os.path.join(ROOT, "admin_console", "backend", "routers"))
+    path = os.path.join(ROOT, "admin_console", "backend", "routers", "execution.py")
+    spec = importlib.util.spec_from_file_location("execrouter", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_excel_template_roundtrips_with_args():
+    """예전 일괄 등록은 이름·설명·실행 커맨드만 읽고 **인자를 버렸다**. `{option}`이 있는
+    커맨드는 엑셀로 넣어 봐야 인자가 빈 채로 들어가 한 건씩 다시 채워야 했다.
+
+    양식을 만들어 그대로 다시 읽었을 때 인자 정의가 살아 있고, 화면 등록과 같은 검증을
+    통과해야 한다(양식과 파서가 따로 놀면 사용자는 '업로드했는데 안 된다'만 겪는다)."""
+    import io
+    import openpyxl
+    from execution_exec import placeholders_in, validate_definition, deny_set, DEFAULT_DENY_CSV
+
+    m = _exec_router()
+    data = m._build_workbook([list(r) for r in m._TEMPLATE_EXAMPLES])
+    ws = openpyxl.load_workbook(io.BytesIO(data))["커맨드"]
+    rows = list(ws.iter_rows(values_only=True))
+    header = [str(h) for h in rows[0]]
+    deny = deny_set(DEFAULT_DENY_CSV)
+
+    parsed = {}
+    for r in rows[1:]:
+        def cell(col, _r=r):
+            v = _r[header.index(col)] if col in header else None
+            return "" if v is None else str(v)
+        exec_cmd = cell("실행 커맨드")
+        ph = [p for p in placeholders_in(exec_cmd) if p != "user_id"]
+        args = m._parse_args_from_row(cell, header, ph)
+        host = m._HOST_WORDS.get(cell("실행 위치").strip().lower(), "login_server")
+        validate_definition(cell("이름"), exec_cmd, args, host, deny)   # 화면 등록과 같은 문
+        parsed[cell("이름")] = args
+
+    assert parsed["myquota"] == []
+    info = {a["name"]: a for a in parsed["s2_phd_info"]}
+    # 자리표시자 순서대로 이름이 자동으로 붙는다(양식의 '이름' 칸을 비워도 되게 한 이유).
+    assert [a["name"] for a in parsed["s2_phd_info"]] == ["option", "job_id"]
+    assert info["option"]["type"] == "enum"
+    assert info["option"]["choices"][0].startswith("-j:")
+    assert info["job_id"]["required"] is True
+
+
+def test_excel_arg_names_default_to_placeholder_order():
+    """'인자N 이름'을 비워 두면 실행 커맨드의 자리표시자 순서로 채워진다.
+    관리자가 이름을 두 번 옮겨 적다 틀리면 그 커맨드만 통째로 거부된다."""
+    m = _exec_router()
+    header = ["인자1 설명", "인자2 설명"]
+    values = {"인자1 설명": "출력 형식", "인자2 설명": "job id"}
+    args = m._parse_args_from_row(lambda c: values.get(c, ""), header, ["option", "job_id"])
+    assert [a["name"] for a in args] == ["option", "job_id"]
+    assert args[1]["description"] == "job id"
+
+
+def test_excel_choices_split_on_newline_not_comma():
+    """선택지 설명에 콤마가 흔하다("Return job info, json format").
+    콤마로 쪼개면 설명 조각이 값으로 등록된다."""
+    m = _exec_router()
+    header = ["인자1 선택지"]
+    text = "-j: Return job info, json format\n-tl: Print additional info"
+    args = m._parse_args_from_row(lambda c: text if c == header[0] else "", header, ["option"])
+    assert args[0]["choices"] == ["-j: Return job info, json format",
+                                  "-tl: Print additional info"]
+    assert args[0]["type"] == "enum"        # 선택지를 적었으면 타입 칸이 비어도 선택형

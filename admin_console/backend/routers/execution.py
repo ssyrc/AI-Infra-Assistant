@@ -12,12 +12,15 @@ Execution MCP 관리 API - 등록 커맨드(execution_commands) + 실행 감사�
 따로 있어서 편집도 삭제도 안 됐는데, 그 7개는 전부 LLM이 이미 아는 표준 리눅스 명령이라
 run_command로 실행하면 그만이다. 목록에서 없앴더니 매 요청 프롬프트도 그만큼 가벼워졌다.
 """
+import io
 import json
+import re
 import sys
 import os
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from auth import require_admin
@@ -180,6 +183,138 @@ async def list_logs(limit: int = 100, admin: str = Depends(require_admin)):
     return [dict(r) for r in rows]
 
 
+# ---------------------------------------------------------------- 엑셀 양식(내려받기)
+# 한 커맨드 = 한 행. 인자는 열로 펼친다(`인자1 …` ~ `인자4 …`).
+#
+# 왜 이 모양인가: 예전 일괄 등록은 이름·설명·실행 커맨드 세 열만 읽고 **인자를 아예 버렸다**.
+# 그래서 `phd info {option} {job_id}`처럼 자리표시자가 있는 커맨드는 엑셀로 넣어 봐야 인자가
+# 빈 채로 등록됐고, 결국 한 건씩 화면에서 다시 채워야 했다(사용자 지적, #140).
+TEMPLATE_ARG_SLOTS = 4
+_ARG_FIELDS = ["이름", "설명", "타입", "필수", "기본값", "선택지"]
+_BASE_COLUMNS = ["이름", "설명", "실행 커맨드", "실행 위치", "활성", "필요 역할"]
+
+# `인자2 선택지` 같은 머리글을 (번호, 항목)으로 읽는다. 공백은 있어도 없어도 된다.
+_ARG_HEADER_RE = re.compile(r"^\s*인자\s*(\d+)\s*(이름|설명|타입|필수|기본값|선택지)\s*$")
+
+# 선택지 구분자: 셀 안 줄바꿈 또는 `|`. 콤마는 쓰지 않는다 - 설명에 콤마가 흔하다
+# ("-j: Return job info, json format").
+_CHOICE_SPLIT = re.compile(r"[\n|]+")
+
+_TEMPLATE_EXAMPLES = [
+    ["myquota", "사용자의 홈 스토리지 디렉토리, 할당 용량, 현재 사용 현황을 반환합니다.",
+     "myquota", "로그인 서버", "Y", "", *[""] * (TEMPLATE_ARG_SLOTS * len(_ARG_FIELDS))],
+    ["s2_phd_list", "사용자가 S2 스케줄러로 실행한 GPU batch job 목록을 반환합니다.",
+     "phd list {option}", "로그인 서버", "Y", "",
+     "option", "출력 형식 옵션. 비우면 요약 목록.", "선택형", "N", "",
+     "-l: 상세 정보를 길게 출력\n-lf: 선택 가능한 필드 목록 출력",
+     *[""] * ((TEMPLATE_ARG_SLOTS - 1) * len(_ARG_FIELDS))],
+    ["s2_phd_info", "S2 스케줄러 GPU batch job id의 상세 정보를 반환합니다.",
+     "phd info {option} {job_id}", "로그인 서버", "Y", "",
+     "option", "출력 형식 옵션.", "선택형", "N", "",
+     "-j: JSON 형식으로 반환\n-tl: 부가 정보까지 출력\n-lf: 선택 가능한 필드 목록",
+     "job_id", "S2 스케줄러 job id. s2_phd_list로 얻습니다.", "문자열", "Y", "", "",
+     *[""] * ((TEMPLATE_ARG_SLOTS - 2) * len(_ARG_FIELDS))],
+]
+
+_TEMPLATE_GUIDE = [
+    "■ 한 행이 커맨드 하나입니다. '이름'이 같으면 덮어씁니다(수정하려면 이름을 그대로 두세요).",
+    "■ 실행 커맨드의 {이름} 자리가 인자가 됩니다. 예: phd info {option} {job_id}",
+    "   → {option}이 인자1, {job_id}가 인자2 입니다. '인자N 이름'을 비워 두면 이 순서로 자동 연결됩니다.",
+    "■ 인자 타입: 문자열 / 정수 / 선택형. 비우면 문자열입니다.",
+    "■ '선택형'일 때만 '선택지'를 채웁니다. 한 줄에 하나씩(또는 | 로 구분), '값: 설명' 형태로 씁니다.",
+    "   예)  -j: JSON 형식으로 반환      ← '-j'가 실제로 붙는 값, 뒤는 에이전트가 읽는 설명",
+    "■ 설명은 에이전트가 이 커맨드를 고르는 유일한 근거입니다. 무엇을 돌려주는지 한두 줄로 쓰세요.",
+    "■ 필수: Y/N. 활성: Y/N(비우면 Y). 실행 위치: '로그인 서버' 또는 '대상 서버'(비우면 로그인 서버).",
+    "■ {user_id}는 쓰지 않아도 됩니다. 실행 계정은 시스템이 질문한 사용자로 강제 주입합니다.",
+    "■ 업로드 후 execution-mcp 재시작이 필요합니다.",
+]
+
+
+def _template_columns() -> list[str]:
+    cols = list(_BASE_COLUMNS)
+    for i in range(1, TEMPLATE_ARG_SLOTS + 1):
+        cols += [f"인자{i} {f}" for f in _ARG_FIELDS]
+    return cols
+
+
+def _build_workbook(rows: list[list]) -> bytes:
+    import openpyxl
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "커맨드"
+    columns = _template_columns()
+    ws.append(columns)
+    head_fill = PatternFill("solid", fgColor="DDE6F0")
+    for idx, name in enumerate(columns, start=1):
+        cell = ws.cell(row=1, column=idx)
+        cell.font = Font(bold=True)
+        cell.fill = head_fill
+        # 기본 열은 넓게, 인자 열은 항목에 맞춰. 설명·선택지는 줄바꿈이 들어간다.
+        wide = name in ("설명", "실행 커맨드") or name.endswith(("설명", "선택지"))
+        ws.column_dimensions[cell.column_letter].width = 42 if wide else 14
+    for row in rows:
+        ws.append(row)
+    for row in ws.iter_rows(min_row=2):
+        for cell in row:
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+    ws.freeze_panes = "A2"
+
+    guide = wb.create_sheet("작성 방법")
+    guide.column_dimensions["A"].width = 110
+    for line in _TEMPLATE_GUIDE:
+        guide.append([line])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _arg_type_label(kind: str) -> str:
+    return {"str": "문자열", "int": "정수", "enum": "선택형"}.get(kind, "문자열")
+
+
+def _command_to_row(c: dict) -> list:
+    row = [c.get("title") or "", c.get("description") or "", c.get("exec_command") or "",
+           "로그인 서버" if (c.get("host_mode") or "login_server") == "login_server" else "대상 서버",
+           "Y" if c.get("enabled") else "N",
+           ", ".join(c.get("required_roles") or [])]
+    args = c.get("args") or []
+    for i in range(TEMPLATE_ARG_SLOTS):
+        a = args[i] if i < len(args) else {}
+        row += [a.get("name") or "", a.get("description") or "",
+                _arg_type_label(a.get("type") or "str"),
+                "Y" if a.get("required") else "N", a.get("default") or "",
+                "\n".join(str(c2) for c2 in (a.get("choices") or []))]
+    return row
+
+
+@router.get("/commands/template.xlsx")
+async def download_template(mode: str = "template", admin: str = Depends(require_admin)):
+    """엑셀 양식을 내려준다.
+
+    mode=template  빈 양식 + 예시 3행(myquota / phd list / phd info).
+    mode=current   지금 등록된 커맨드를 **같은 양식으로** 내보낸다. 엑셀에서 고쳐 그대로
+                   다시 올리면 이름 기준으로 덮어써진다 - 이게 '엑셀로 수정'의 실체다.
+    """
+    if mode == "current":
+        pool = await get_pool(_DSN)
+        rows = await pool.fetch(
+            "SELECT title, description, exec_command, args, host_mode, enabled, required_roles "
+            "FROM execution_commands ORDER BY title")
+        data = [_command_to_row(_row(r)) for r in rows]
+        filename = "execution-commands.xlsx"
+    else:
+        data = [list(r) for r in _TEMPLATE_EXAMPLES]
+        filename = "execution-commands-template.xlsx"
+    content = await run_in_threadpool(_build_workbook, data)
+    return Response(
+        content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
 # ---------------------------------------------------------------- 엑셀/CSV 일괄 등록
 @router.post("/commands/excel/preview")
 async def preview_excel(
@@ -216,13 +351,75 @@ class ExcelCommitIn(BaseModel):
     exec_command_column: str | None = None
 
 
+_TYPE_WORDS = {"문자열": "str", "str": "str", "string": "str", "텍스트": "str",
+               "정수": "int", "int": "int", "숫자": "int", "number": "int",
+               "선택형": "enum", "enum": "enum", "선택": "enum", "선택지": "enum"}
+_HOST_WORDS = {"로그인 서버": "login_server", "로그인서버": "login_server",
+               "login_server": "login_server", "login": "login_server",
+               "대상 서버": "target_server", "대상서버": "target_server",
+               "target_server": "target_server", "target": "target_server"}
+
+
+def _truthy(text: str | None, default: bool) -> bool:
+    t = (text or "").strip().lower()
+    if not t:
+        return default
+    return t in ("y", "yes", "true", "1", "o", "예", "필수", "사용", "활성", "on")
+
+
+def _parse_args_from_row(cell, header: list[str], placeholders: list[str]) -> list[dict]:
+    """`인자N …` 열들을 인자 정의 목록으로. cell(열이름) -> 값.
+
+    이름을 비워 두면 **실행 커맨드의 자리표시자 순서**로 채운다. 이게 이 양식의 핵심이다 -
+    관리자는 `phd info {option} {job_id}`를 적고 설명만 쓰면 되고, 자리표시자 이름을
+    두 번 옮겨 적지 않아도 된다(옮겨 적다 틀리면 등록이 통째로 거부된다).
+    """
+    slots: dict[int, dict] = {}
+    for col in header:
+        m = _ARG_HEADER_RE.match(col or "")
+        if not m:
+            continue
+        slots.setdefault(int(m.group(1)), {})[m.group(2)] = (cell(col) or "").strip()
+
+    out = []
+    for pos, (idx, fields) in enumerate(sorted(slots.items())):
+        name = fields.get("이름") or (placeholders[pos] if pos < len(placeholders) else "")
+        if not name:
+            continue
+        # 이름 말고 아무것도 없고 자리표시자에도 없는 열은 빈 슬롯이다(양식의 남는 칸).
+        if name not in placeholders:
+            continue
+        kind = _TYPE_WORDS.get((fields.get("타입") or "").strip().lower(), "str")
+        choices = [c.strip() for c in _CHOICE_SPLIT.split(fields.get("선택지") or "") if c.strip()]
+        if choices and kind == "str":
+            kind = "enum"        # 선택지를 적었으면 선택형으로 본다(타입 칸을 안 채워도 되게)
+        out.append({"name": name, "type": kind,
+                    "required": _truthy(fields.get("필수"), False),
+                    "default": fields.get("기본값") or "",
+                    "description": fields.get("설명") or "",
+                    "choices": choices})
+
+    # 열에 안 적힌 자리표시자도 인자로 만들어 준다(설명 없이라도 있어야 등록이 통과한다).
+    named = {a["name"] for a in out}
+    for p in placeholders:
+        if p not in named:
+            out.append({"name": p, "type": "str", "required": False,
+                        "default": "", "description": "", "choices": []})
+    # 커맨드에 나온 순서대로 정렬한다(LLM이 보는 파라미터 순서).
+    return sorted(out, key=lambda a: placeholders.index(a["name"]))
+
+
 @router.post("/commands/excel/commit")
 async def commit_excel(body: ExcelCommitIn, admin: str = Depends(require_admin)):
     """열 매핑으로 일괄 등록/갱신한다(title 기준 upsert).
 
-    일괄 등록분은 인자 정의 없이 로그인 서버 고정으로 들어간다 - 매뉴얼에서 뽑은 커맨드
-    목록은 인자를 미리 알 수 없기 때문이다(인자는 에이전트가 채운다). 필요하면 개별 수정에서
-    자리표시자를 넣어 타입을 정의하면 된다.
+    이름·설명·실행 커맨드는 **열을 골라서** 받는다(사내 매뉴얼에서 뽑은 표처럼 머리글이
+    제각각인 파일도 올릴 수 있어야 하기 때문). 반면 인자·실행 위치·활성·역할은 양식의 머리글
+    (`인자1 설명`, `실행 위치`, …)을 **이름으로 알아본다** - 고르게 할 열이 스물 몇 개가 되면
+    매핑 화면이 못 쓸 물건이 된다.
+
+    그래서 양식을 받아 쓰면 인자까지 그대로 들어오고, 머리글이 다른 예전 파일을 올리면
+    예전처럼 인자 없이 들어온다(하위 호환).
     """
     session = await get_upload_session(_DSN, body.upload_id, admin, "execution_commands")
     opts = clean_options_from_dict(load_options(session))
@@ -247,8 +444,18 @@ async def commit_excel(body: ExcelCommitIn, admin: str = Depends(require_admin))
             desc = _cell(row, body.description_column)
             if not title or not desc:
                 continue
-            exec_command = _cell(row, body.exec_command_column) or title
-            built.append((title.strip(), desc, exec_command.strip()))
+            exec_command = (_cell(row, body.exec_command_column) or title).strip()
+            # `{user_id}`는 예약어라 인자 표에 넣지 않는다(호출자 신원에서 자동 주입).
+            placeholders = [p for p in placeholders_in(exec_command) if p != "user_id"]
+            args = _parse_args_from_row(lambda c: _cell(row, c), header, placeholders)
+            host_mode = _HOST_WORDS.get(
+                (_cell(row, "실행 위치") or "").strip().lower(), "login_server")
+            enabled = _truthy(_cell(row, "활성"), True)
+            roles = [r.strip() for r in re.split(r"[,\n|]+", _cell(row, "필요 역할") or "")
+                     if r.strip()]
+            built.append({"title": title.strip(), "description": desc,
+                          "exec_command": exec_command, "args": args,
+                          "host_mode": host_mode, "enabled": enabled, "required_roles": roles})
         return built
 
     # 실패해도 세션을 지우지 않는다(성공 시에만 정리) - 재시도가 404로 막혀 진짜 원인이 가려진다.
@@ -269,14 +476,17 @@ async def commit_excel(body: ExcelCommitIn, admin: str = Depends(require_admin))
     problems = []
     async with pool.acquire() as conn:
         async with conn.transaction():
-            for title, desc, exec_command in items:
+            for it in items:
+                title, exec_command = it["title"], it["exec_command"]
                 existing = await conn.fetchval(
                     "SELECT tool_name FROM execution_commands WHERE title = $1", title)
                 tool_name = existing or tool_name_for(title, taken, exec_command)
                 try:
-                    # 일괄 등록도 차단 목록을 통과해야 한다(매뉴얼 표에 위험한 줄이 섞일 수 있다).
-                    validate_definition(tool_name, exec_command, [], "login_server", deny,
-                                        set() if existing else taken)
+                    # 일괄 등록도 화면 등록과 **똑같은 검증**을 거친다. 차단 목록은 물론이고
+                    # 자리표시자와 인자 정의가 맞는지도 본다(매뉴얼 표에 위험한 줄이 섞일 수
+                    # 있고, 인자를 잘못 적으면 그 커맨드만 조용히 망가진다).
+                    validate_definition(tool_name, exec_command, it["args"], it["host_mode"],
+                                        deny, set() if existing else taken)
                 except ValueError as e:
                     skipped += 1
                     if len(problems) < 10:
@@ -287,13 +497,17 @@ async def commit_excel(body: ExcelCommitIn, admin: str = Depends(require_admin))
                     """
                     INSERT INTO execution_commands
                         (tool_name, title, description, exec_command, args,
-                         host_mode, enabled, updated_by)
-                    VALUES ($1,$2,$3,$4,'[]'::jsonb, 'login_server', true, $5)
+                         host_mode, enabled, required_roles, updated_by)
+                    VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9)
                     ON CONFLICT (title) DO UPDATE
                     SET description=EXCLUDED.description, exec_command=EXCLUDED.exec_command,
+                        args=EXCLUDED.args, host_mode=EXCLUDED.host_mode,
+                        enabled=EXCLUDED.enabled, required_roles=EXCLUDED.required_roles,
                         updated_by=EXCLUDED.updated_by, updated_at=now()
                     RETURNING (xmax = 0) AS inserted
-                    """, tool_name, title, desc, exec_command, admin)
+                    """, tool_name, title, it["description"], exec_command,
+                    json.dumps(it["args"], ensure_ascii=False),
+                    it["host_mode"], it["enabled"], it["required_roles"], admin)
                 if res["inserted"]:
                     inserted += 1
                 else:

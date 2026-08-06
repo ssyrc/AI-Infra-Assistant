@@ -1241,11 +1241,22 @@ function ExecutionPanel() {
           <CommandForm form={form} setForm={setForm} onSubmit={submit} editing={!!editingId}
                        onCancel={() => { setEditingId(null); setForm(EMPTY_FORM); }} />
 
-          <div className="toolbar" style={{ marginBottom: 12 }}>
+          <div className="toolbar" style={{ marginBottom: 4 }}>
+            <a href="/api/execution/commands/template.xlsx?mode=template" download>
+              <button type="button">엑셀 양식 받기</button>
+            </a>
+            <a href="/api/execution/commands/template.xlsx?mode=current" download>
+              <button type="button">현재 등록분 내보내기</button>
+            </a>
             <input type="file" accept=".xlsx,.xls,.csv,.tsv" disabled={busy}
                    onChange={e => { analyzeExcel(e.target.files[0]); e.target.value = ""; }} />
             <button disabled={busy} onClick={() => setShowBrowser(true)}>서버 파일에서 선택</button>
-            <span style={{ fontSize: 11.5, color: "var(--muted)" }}>엑셀·CSV 일괄 등록</span>
+          </div>
+          <div className="subtitle" style={{ marginBottom: 12 }}>
+            양식을 받아 채우거나, <strong>현재 등록분을 내려받아 고친 뒤 그대로 올리면</strong> 이름
+            기준으로 덮어써집니다. 인자는 <code>{"{option}"}</code> 같은 자리표시자 순서대로
+            <code>인자1·인자2</code> 열에 적습니다(이름 칸은 비워도 됩니다). 선택지는 한 줄에 하나씩
+            <code>-j: JSON 형식으로 반환</code> 처럼 <strong>값: 설명</strong> 으로 씁니다.
           </div>
 
           {showBrowser && (

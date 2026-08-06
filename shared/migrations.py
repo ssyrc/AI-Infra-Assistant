@@ -17,7 +17,7 @@ import secrets
 
 import asyncpg
 
-from execution_exec import DEFAULT_DENY_CSV, tool_name_for
+from execution_exec import DEFAULT_DENY_CSV, DEFAULT_USER_SCOPE_CSV, tool_name_for
 from agent_instruction import AGENT_INSTRUCTION
 
 PG_HOST = os.environ.get("POSTGRES_HOST", "postgres")
@@ -602,6 +602,12 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
         # 콤마 구분, 비우면 제한 없음.
         ("execution_deny_commands", DEFAULT_DENY_CSV,
          "실행을 거부할 명령 이름(콤마 구분). 커맨드의 모든 토큰을 검사한다. 비우면 제한 없음",
+         True, False, False),
+        # 실행 신원(runuser)은 이미 본인으로 고정돼 있지만, `phd list -u 남의계정`처럼
+        # **프로그램 자신이 대상을 고르는** 옵션은 OS가 막아 주지 않는다(#140).
+        ("execution_user_scope_flags", DEFAULT_USER_SCOPE_CSV,
+         "다른 사용자를 지목하는 옵션(콤마 구분). 이 옵션에 본인이 아닌 계정을 주면 거부한다. "
+         "`sort -u`처럼 계정과 무관한 옵션이 걸리면 목록에서 빼면 된다. 비우면 검사 안 함",
          True, False, False),
 
         # 도구 호출/결과를 답변에 접히는 블록으로 표시(사용자가 "생각 과정 보이게" 요청).

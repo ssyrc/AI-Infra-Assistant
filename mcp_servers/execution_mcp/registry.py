@@ -25,13 +25,16 @@ import json
 import os
 import re
 import sys
+from typing import Annotated, Literal
 
 import asyncpg
+from pydantic import Field
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../shared"))
 from ssh_exec import run_ssh_as_user  # noqa: E402
 from execution_exec import (  # noqa: E402
-    DEFAULT_DENY_CSV, build_registered_argv, deny_set, tool_name_for,
+    DEFAULT_DENY_CSV, DEFAULT_USER_SCOPE_CSV, build_registered_argv, choice_value,
+    deny_set, tool_name_for, user_flag_set,
 )
 
 # 실측(#108): 툴 하나가 매 요청 프롬프트에서 약 270자 ≈ 100토큰을 쓴다(스키마 고정분 + 설명).
@@ -44,6 +47,41 @@ DEFAULT_MAX_TOOLS = 80
 _TOOL_SCHEMA_OVERHEAD = 215
 
 _PY_TYPES = {"str": str, "int": int, "enum": str}
+
+# 인자 설명은 파라미터 하나당 이만큼까지만 스키마에 싣는다. 툴 설명(300자)과 마찬가지로
+# **매 요청** 프롬프트에 통째로 실리기 때문이다. 옵션 목록을 붙이면 금방 길어진다.
+MAX_ARG_DESC = 240
+
+
+def _annotation(spec: dict):
+    """인자 정의 한 개 -> LLM 스키마에 실릴 타입 어노테이션.
+
+    예전에는 `option: str = ''`처럼 **타입만** 넘겼다. 그래서 관리자가 콘솔에 적어 둔
+    "`-j`: JSON 형식으로 반환 / `-tl`: 부가 정보 출력" 같은 인자 설명이 모델에 **한 글자도
+    전달되지 않았다** - 등록은 했는데 에이전트가 옵션을 못 채우는 원인이었다(#140).
+    `Annotated[T, Field(description=...)]`로 주면 FastMCP가 JSON 스키마의 해당 파라미터
+    설명으로 넣어 준다. enum이면 Literal로 줘서 스키마에 선택지가 박히게 한다.
+    """
+    kind = spec.get("type", "str")
+    desc = (spec.get("description") or "").strip()
+    values = [v for v in (choice_value(c) for c in (spec.get("choices") or [])) if v]
+
+    if kind == "enum" and values:
+        # 선택지에 "값: 설명" 꼴로 적었으면 설명 쪽은 파라미터 설명으로 접어 넣는다.
+        labels = [c.strip() for c in (spec.get("choices") or []) if str(c).strip()]
+        if any(":" in lb for lb in labels):
+            desc = (desc + " " if desc else "") + " / ".join(labels)
+        # 선택형인데 필수가 아니면 **빈 값**도 스키마에 넣어야 한다. 그러지 않으면 기본값
+        # `""`이 Literal에 없어 pydantic이 스키마를 만들다 죽고, 툴 하나가 통째로 사라진다.
+        if not spec.get("required") and "" not in values:
+            values = values + [""]
+        base = Literal[tuple(values)]
+    else:
+        base = _PY_TYPES.get(kind, str)
+
+    if not desc:
+        return base
+    return Annotated[base, Field(description=desc[:MAX_ARG_DESC])]
 
 
 def estimate_prompt_tokens(descriptions: list[str]) -> tuple[int, int]:
@@ -79,7 +117,8 @@ def build_entry(row: dict, login_host_getter) -> dict:
         extra = kwargs.pop("args", None)
         deny = deny_set(await _deny_csv())
         argv = build_registered_argv(exec_command, arg_specs, kwargs, extra,
-                                     user_id, deny, allow_extra)
+                                     user_id, deny, allow_extra,
+                                     user_flag_set(await _user_flags_csv()))
         target = (host or "").strip() or await login_host_getter()
         return await run_ssh_as_user(target, user_id, argv)
 
@@ -92,11 +131,11 @@ def build_entry(row: dict, login_host_getter) -> dict:
     ]
     annotations = {"user_id": str, "host": str}
     for spec in arg_specs:
-        py = _PY_TYPES.get(spec.get("type", "str"), str)
+        ann = _annotation(spec)
         default = inspect.Parameter.empty if spec.get("required") else (spec.get("default") or "")
         params.append(inspect.Parameter(spec["name"], inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                                        default=default, annotation=py))
-        annotations[spec["name"]] = py
+                                        default=default, annotation=ann))
+        annotations[spec["name"]] = ann
     if allow_extra:
         params.append(inspect.Parameter("args", inspect.Parameter.POSITIONAL_OR_KEYWORD,
                                         default=None, annotation=list))
@@ -109,6 +148,9 @@ def build_entry(row: dict, login_host_getter) -> dict:
     return {
         "handler": handler,
         "description": _describe(row),
+        # 프롬프트 예산 계산용. 인자 설명도 스키마에 실리므로 툴 설명과 함께 세야 한다.
+        "schema_text": _describe(row) + " " + " ".join(
+            str(_annotation(s)) for s in arg_specs),
         "enabled": bool(row.get("enabled", True)),
         "required_roles": list(row.get("required_roles") or []),
         "user_scoped": True,
@@ -118,6 +160,7 @@ def build_entry(row: dict, login_host_getter) -> dict:
 
 
 _deny_csv_getter = None
+_user_flags_getter = None
 
 
 def set_deny_csv_getter(getter):
@@ -126,10 +169,22 @@ def set_deny_csv_getter(getter):
     _deny_csv_getter = getter
 
 
+def set_user_flags_getter(getter):
+    """설정에서 '다른 사용자 지정 옵션' 목록을 읽는 함수를 주입한다."""
+    global _user_flags_getter
+    _user_flags_getter = getter
+
+
 async def _deny_csv() -> str:
     if _deny_csv_getter is None:
         return DEFAULT_DENY_CSV
     return await _deny_csv_getter()
+
+
+async def _user_flags_csv() -> str:
+    if _user_flags_getter is None:
+        return DEFAULT_USER_SCOPE_CSV
+    return await _user_flags_getter()
 
 
 def load_registered_sync(login_host_getter, dsn_key: str = "execution_db_dsn") -> tuple[dict, int]:

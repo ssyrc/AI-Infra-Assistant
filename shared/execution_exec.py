@@ -65,6 +65,24 @@ AGENT_SELF_NAMES = {
 }
 PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 
+# **다른 사용자 계정을 가리키는 옵션.** 여기까지 막아야 "남의 자원 접근 불가"가 실제로 성립한다.
+#
+# 지금까지의 방어는 *실행 신원*만 고정했다: `X-User-Id`는 LLM 스키마에서 숨겨져 있고,
+# `ssh root@host` → `runuser -u <호출자>`로 항상 본인 계정으로 강등해 실행한다. 그래서 파일
+# 권한처럼 **OS가 판정하는 것**은 안전하다. 그런데 스케줄러 CLI는 다르다 -
+# `phd list -u cocoa.song`은 본인 계정으로 실행해도 **남의 job을 보여준다**. 판정 주체가
+# OS가 아니라 그 프로그램이기 때문이다.
+#
+# 실제로 "cocoa.song 계정이 어떤 gpu job 을 수행중이야?"에 에이전트가 거절하기는 했지만,
+# 그건 지시문을 따른 **모델의 선택**이었을 뿐 강제가 아니었다(#140). 모델이 마음을 바꾸거나
+# 등록 커맨드의 `{option}` 자리에 `-u 남의계정`을 채우면 그대로 나간다. 그래서 실행 직전에 끊는다.
+#
+# 설정 `execution_user_scope_flags`로 조정한다(비우면 검사 안 함). `sort -u`처럼 계정과 무관한
+# `-u`를 쓰는 커맨드가 걸리면 목록에서 `-u`를 빼거나 그 커맨드를 등록해서 쓴다.
+USER_SCOPE_FLAGS = {"-u", "--user", "--username", "--owner", "--uid", "--as-user", "-U"}
+
+DEFAULT_USER_SCOPE_CSV = ",".join(sorted(USER_SCOPE_FLAGS))
+
 ARG_TYPES = ("str", "int", "enum")
 ARG_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -119,6 +137,21 @@ def deny_set(csv_value: str | None) -> set[str]:
     return {t.strip().lower() for t in csv_value.split(",") if t.strip()}
 
 
+def choice_value(choice) -> str:
+    """선택지 한 칸에서 **실제 값**만 뽑는다. `"-j: JSON 형식으로 반환"` -> `"-j"`.
+
+    관리자가 선택지마다 설명을 달 수 있게 하기 위한 것이다. 예전에는 선택지에 값만 쓸 수 있어서,
+    `phd info {option}`처럼 옵션마다 뜻이 다른 커맨드를 등록할 때 설명을 전부 인자 설명 한 칸에
+    몰아 써야 했다(사용자 지적, #140).
+
+    "값: 설명"으로 보는 조건은 **콜론 뒤에 공백이 있고 앞이 공백 없는 한 낱말**일 때다.
+    콜론만으로 자르면 `12:00`이나 `http://…` 같은 정상적인 값이 반토막 난다.
+    """
+    text = str(choice if choice is not None else "").strip()
+    m = re.match(r"^(\S+):\s+\S", text)
+    return m.group(1) if m else text
+
+
 def _basename(word: str) -> str:
     """`/bin/rm` -> `rm`. 경로로 우회하는 것을 막는다."""
     return word.strip().lower().rsplit("/", 1)[-1]
@@ -148,6 +181,71 @@ def scan_denied(tokens: list[str], deny: set[str], *, strict: bool) -> str | Non
             if t and "/" not in t and not t.startswith("-") and t in deny:
                 return t
     return None
+
+
+def user_flag_set(csv_value: str | None) -> set[str]:
+    """설정값(콤마 구분)을 계정 지정 옵션 집합으로. 빈 값이면 검사하지 않음."""
+    if csv_value is None:
+        csv_value = DEFAULT_USER_SCOPE_CSV
+    return {t.strip().lower() for t in csv_value.split(",") if t.strip()}
+
+
+def _words(argv: list[str]) -> list[str]:
+    """토큰 안에 공백으로 붙어 있는 낱말까지 펼친다.
+
+    등록 커맨드는 `{option}` 한 자리에 `"-u cocoa.song"`이 통째로 들어올 수 있다.
+    `render_argv`가 토큰 경계를 치환 **전에** 정하므로 argv 상으로는 토큰 하나지만,
+    원격 셸 없이 exec될 때 프로그램이 받는 것도 토큰 하나다... 가 아니라, `su -c`로 넘길 때
+    한 낱말씩 다시 쪼개진다. 어느 쪽이든 **검사에서는 펼쳐서 본다**(미탐이 오탐보다 위험).
+    """
+    out = []
+    for token in argv:
+        out.extend(str(token).split())
+    return out
+
+
+def reject_other_user(argv: list[str], user_id: str, flags: set[str] | None = None) -> None:
+    """`-u 남의계정`처럼 **다른 사용자를 지목하는 인자**를 실행 전에 거부한다.
+
+    허용하는 값은 호출자 본인 계정뿐이다(`-u yr9.choi`는 통과 - 대부분의 CLI에서 본인 조회는
+    정상적인 사용법이다). 빈 값도 통과시킨다(자리표시자가 비어 렌더된 경우).
+
+    오류 문구가 **에이전트에게 그다음 행동까지 지시한다**: 실제 사고에서 모델이 거절은 했지만
+    이어서 매뉴얼을 뒤져 "가이드 위치: 슈퍼컴 Portal > ..." 같은 안내를 붙였다. 물어본 것은
+    권한이 없다는 사실 하나인데 문서 안내가 따라붙으면 답이 길어지기만 한다(#140).
+    """
+    flags = USER_SCOPE_FLAGS if flags is None else flags
+    if not flags:
+        return
+    me = (user_id or "").strip().lower()
+    words = _words(argv)
+
+    def _violate(flag: str, value: str) -> None:
+        raise PermissionError(
+            f"'{flag} {value}'는 다른 사용자의 자원을 조회하려는 것이라 실행하지 않았습니다. "
+            f"이 시스템은 본인({user_id}) 자원만 조회할 수 있습니다. "
+            "**이 사실만 한 줄로 답하세요.** 매뉴얼이나 과거 사례를 찾지 말고, "
+            "가이드 문서 위치를 안내하지 말고, 다른 방법을 제안하지 마세요.")
+
+    for i, word in enumerate(words):
+        low = word.lower()
+        # `--user=남` / `-u=남`
+        head, sep, tail = low.partition("=")
+        if sep and head in flags:
+            if tail and tail != me:
+                _violate(head, word.split("=", 1)[1])
+            continue
+        # `-u 남` (다음 낱말이 값)
+        if low in flags:
+            nxt = words[i + 1] if i + 1 < len(words) else ""
+            if nxt and not nxt.startswith("-") and nxt.lower() != me:
+                _violate(low, nxt)
+            continue
+        # `-u남` (짧은 옵션에 값이 붙은 꼴). 이걸 빼면 위 두 검사를 그대로 우회할 수 있다.
+        if len(low) > 2 and low[0] == "-" and low[1] != "-" and f"-{low[1]}" in flags:
+            value = word[2:]
+            if value.lower() != me:
+                _violate(f"-{low[1]}", value)
 
 
 def reject_self_name(argv: list[str], user_id: str) -> None:
@@ -261,7 +359,8 @@ def cast_arg(spec: dict, raw) -> str:
             raise ValueError(f"'{name}'은 정수여야 합니다: {raw!r}")
     text = str(raw)
     if kind == "enum":
-        choices = [str(c) for c in (spec.get("choices") or [])]
+        # 선택지는 "값" 또는 "값: 설명" 두 꼴을 모두 받는다. 비교는 항상 **값**으로 한다.
+        choices = [choice_value(c) for c in (spec.get("choices") or [])]
         if text not in choices:
             raise ValueError(f"'{name}'은 {', '.join(choices)} 중 하나여야 합니다: {raw!r}")
     return text
@@ -294,7 +393,8 @@ def normalize_extra(args) -> list[str]:
 
 def build_registered_argv(exec_command: str, arg_specs: list, values: dict,
                           extra, user_id: str, deny: set[str],
-                          allow_extra_args: bool) -> list[str]:
+                          allow_extra_args: bool,
+                          user_flags: set[str] | None = None) -> list[str]:
     """등록 커맨드의 argv를 만든다(관리자가 승인한 템플릿 + 정의된 인자 + 선택적 추가 인자)."""
     filled = {"user_id": user_id}
     for spec in arg_specs or []:
@@ -329,10 +429,14 @@ def build_registered_argv(exec_command: str, arg_specs: list, values: dict,
                         "다시 지정할 수 없습니다(다른 사용자의 자원은 조회할 수 없습니다).")
     out = argv + extra
     reject_self_name(out, user_id)
+    # 템플릿까지 포함해 검사한다. `{option}` 한 자리에 `-u 남의계정`이 통째로 들어오는 경로가
+    # 있고(자유 인자만 보면 놓친다), 관리자가 실수로 남의 계정을 박아 등록한 경우도 걸러진다.
+    reject_other_user(out, user_id, user_flags)
     return out
 
 
-def build_free_argv(command: str, extra, user_id: str, deny: set[str]) -> list[str]:
+def build_free_argv(command: str, extra, user_id: str, deny: set[str],
+                    user_flags: set[str] | None = None) -> list[str]:
     """미등록 커맨드(run_command)의 argv를 만든다. 승인한 사람이 없으므로 **엄격하게** 훑는다."""
     argv = split_command(command, "커맨드")
     argv = [user_id if t == "{user_id}" else t.replace("{user_id}", user_id) for t in argv]
@@ -345,4 +449,5 @@ def build_free_argv(command: str, extra, user_id: str, deny: set[str]) -> list[s
             "실행이 필요한 커맨드라면 관리자 콘솔 실행 탭에 등록해 주세요"
             "(등록된 커맨드는 정해진 뼈대로만 실행됩니다).")
     reject_self_name(argv, user_id)
+    reject_other_user(argv, user_id, user_flags)
     return argv

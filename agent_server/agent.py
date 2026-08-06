@@ -71,7 +71,16 @@ async def build_agent(caller_headers: dict | None = None,
     # 처럼 괄호 문장으로 붙였는데, 모델이 그 꼴을 '답변 꼬리말 서식'으로 보고 **답변에 그대로
     # 베껴 썼다**. 심지어 같은 모양으로 `(참고: GPU_서버_활용_가이드_(KOR))`을 새로 만들어
     # 붙이기까지 했다(#125). 값은 라벨로 주고, 이 블록을 옮겨 쓰지 말라고 못박는다.
-    env_lines = [f"로그인 서버 주소: {login_host}"]
+    # **질문한 사람의 계정을 알려 준다.** 이게 없으면 모델은 자기 이름(`ops_assistant` —
+    # ADK가 시스템 프롬프트에 넣는 에이전트 이름)을 사용자 계정으로 착각한다. 실제로
+    # "현재 로그인한 사용자(ops_assistant)의 job만 조회할 수 있습니다"라고 답했다(#140).
+    # 커맨드에 넣을 값이 아니라 **답변에서 사용자를 부를 때** 쓰는 값이다(실행 계정은
+    # 헤더에서 MCP가 강제 주입한다).
+    caller_id = (caller_headers or {}).get("X-User-Id") or ""
+    env_lines = []
+    if caller_id:
+        env_lines.append(f"질문한 사용자 계정: {caller_id}")
+    env_lines.append(f"로그인 서버 주소: {login_host}")
     if voc_intake:
         env_lines.append(f"운영팀 접수 경로: {voc_intake}")
     instruction = (

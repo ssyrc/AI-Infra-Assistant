@@ -39,9 +39,12 @@ from ssh_exec import (  # noqa: E402
     SSH_KEY, ensure_master, run_ssh_as_user, set_output_limit_getter,
     start_master_supervisor, stop_masters,
 )
-from execution_exec import DEFAULT_DENY_CSV, build_free_argv, deny_set  # noqa: E402
+from execution_exec import (  # noqa: E402
+    DEFAULT_DENY_CSV, DEFAULT_USER_SCOPE_CSV, build_free_argv, deny_set, user_flag_set,
+)
 from registry import (  # noqa: E402
     estimate_prompt_tokens, load_registered_sync, set_deny_csv_getter,
+    set_user_flags_getter,
 )
 
 from mcp.server.fastmcp import FastMCP
@@ -56,6 +59,14 @@ async def _deny_csv() -> str:
 
 
 set_deny_csv_getter(_deny_csv)
+
+
+async def _user_flags_csv() -> str:
+    """다른 사용자를 지목하는 옵션 목록. 비우면 검사하지 않는다(오탐이 나면 여기서 뺀다)."""
+    return await get_config("execution_user_scope_flags", DEFAULT_USER_SCOPE_CSV)
+
+
+set_user_flags_getter(_user_flags_csv)
 
 
 async def _output_limit() -> int:
@@ -81,7 +92,8 @@ async def run_command(user_id: str, command: str, args: list[str] | None = None,
     (`mpirun -n 4 rm -rf /`, `bash -c "..."` 같은 우회를 막기 위함).
     """
     deny = deny_set(await _deny_csv())
-    argv = build_free_argv(command, args, user_id, deny)
+    argv = build_free_argv(command, args, user_id, deny,
+                           user_flag_set(await _user_flags_csv()))
     target = (host or "").strip() or await _login_host()
     result = await run_ssh_as_user(target, user_id, argv)
     result["source"] = "미등록(run_command)"
@@ -154,7 +166,7 @@ if _DROPPED:
 
 ALL_TOOLS = {**REGISTERED, **FREE_TOOLS}
 _CHARS, _TOKENS = estimate_prompt_tokens(
-    [tool_description(n, e) for n, e in ALL_TOOLS.items()])
+    [e.get("schema_text") or tool_description(n, e) for n, e in ALL_TOOLS.items()])
 # 툴 설명은 **매 요청** 프롬프트에 통째로 실린다. 컨텍스트가 32768이라 등록이 늘수록
 # 검색 결과·대화 이력에 쓸 자리가 줄어들고, 프리필이 길어져 첫 글자까지의 시간도 늘어난다.
 print(f"[execution-mcp] 등록 {len(REGISTERED)}개 · run_command 1개 "
