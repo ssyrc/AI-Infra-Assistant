@@ -26,7 +26,11 @@ Authorization: Bearer <agent_api_key>
 ```
 
 **`agent_api_key`가 설정돼 있으면 이 헤더가 필수다.** 없거나 틀리면 401이다.
-값은 관리자 콘솔 설정 탭의 `agent_api_key`와 같아야 한다(Open WebUI가 쓰는 것과 같은 키다).
+값은 관리자 콘솔 설정 탭의 `agent_api_key`와 같아야 한다(Open WebUI가 쓰는 것과 **같은 키**다).
+
+키는 우리가 정하는 임의의 문자열이다(`openssl rand -hex 24`). 콘솔에서는 `is_secret`이라
+뒤 4자만 보이므로, 값을 잃어버렸으면 읽으려 하지 말고 **새로 만들어 쓰는 모든 곳에 다시
+넣는다**(콘솔 · Open WebUI 연결 · Service Hub).
 
 ### 요청
 

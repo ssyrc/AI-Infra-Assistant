@@ -30,46 +30,68 @@ cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
 docker compose -f docker-compose.dev.yml restart agent-server
 ```
 
-## 2. [서버] Open WebUI에 모델이 안 보이는 원인 찾기
+## 2. 키를 새로 만들어 **양쪽에** 넣기
 
-`agent_api_key`를 켰으니 **Open WebUI 연결(Connections)에도 같은 키가 들어가 있어야** 합니다.
-없으면 Open WebUI가 401을 받고 모델 목록이 빕니다. 이걸 먼저 가릅니다.
+`agent_api_key`는 **우리가 정하는 값**입니다. 기존 값을 읽으려 하지 마세요 —
+`is_secret=true`라 콘솔에서는 뒤 4자만 보이고(`••••••••a1b2`), DB에서 꺼내는 것도 번거롭습니다.
+어차피 양쪽 다 우리가 정하므로 **새로 만들어 덮어쓰는 게 가장 빠릅니다.**
+
+```bash
+# [아무 데서나] 키 생성 — 이 값을 메모장에 복사해 두세요
+openssl rand -hex 24
+```
+
+이 **하나의 값**을 두 곳에 똑같이 붙여넣습니다.
+
+| # | 넣을 곳 | 경로 |
+|---|---|---|
+| ① | 관리자 콘솔 | 설정 탭 → 에이전트 → `agent_api_key` → 저장 |
+| ② | Open WebUI | 관리자 패널 → 설정 → **연결(Connections)** → `http://agent-server:8000/v1` → **API 키** |
+
+②에서 URL이 아직 없으면 새로 추가하세요. URL은 `http://agent-server:8000/v1` 입니다
+(사용자 접속 주소 8502가 아니라 **도커 내부 주소**입니다).
+
+저장 후 Open WebUI의 **연결 테스트**가 통과해야 합니다.
+
+### 두 값이 같은지 확인하는 법
+
+콘솔은 뒤 4자를 보여줍니다. 아래로 길이와 뒤 4자를 확인해 눈으로 맞춰 보세요(값 자체는
+찍지 않습니다).
+
+```bash
+cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
+docker compose -f docker-compose.dev.yml exec -T postgres psql -U agent -d platform_config -c \
+  "select key, length(value) as 길이, right(value,4) as 끝4자
+     from platform_settings where key in ('agent_api_key','openwebui_admin_api_key');"
+```
+
+`openssl rand -hex 24`는 **길이 48**이 나옵니다. 그게 아니면 잘못 붙여넣은 것입니다.
+
+## 3. [서버] 모델이 보이는지 확인
+
+Open WebUI 컨테이너 **안에서** agent-server를 직접 불러 봅니다. 여기서 갈립니다.
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
 
-KEY=$(docker compose -f docker-compose.dev.yml exec -T postgres \
-  psql -U agent -d platform_config -tAc \
-  "select value from platform_settings where key='agent_api_key'" | tr -d '\r ')
-echo "콘솔에 저장된 키: $KEY"
-
-echo -n "키 없이 호출  : "
+echo -n "키 없이 : "
 docker compose -f docker-compose.dev.yml exec -T open-webui \
   curl -s -o /dev/null -w '%{http_code}\n' http://agent-server:8000/v1/models
 
-echo -n "키 넣고 호출  : "
+echo -n "키 넣고 : "
 docker compose -f docker-compose.dev.yml exec -T open-webui \
-  curl -s -H "Authorization: Bearer $KEY" http://agent-server:8000/v1/models
+  curl -s -H "Authorization: Bearer <2번에서_만든_키>" http://agent-server:8000/v1/models
 ```
 
-- **`키 없이` = 401 이고 `키 넣고` = 모델 JSON** → 정상입니다. 3번으로 가세요(Open WebUI 쪽에
-  키를 넣으면 해결됩니다).
-- **둘 다 실패** → 연결 자체가 안 되는 것입니다. 결과를 보내주세요.
+- `키 없이 = 401`, `키 넣고 = {"object":"list","data":[...]}` → **정상**입니다.
+  그래도 화면에 모델이 안 보이면 아래 두 가지를 하세요.
+- 둘 다 실패하면 결과를 보내주세요(연결 자체의 문제입니다).
 
-## 3. [웹] Open WebUI 연결 설정
+모델이 여전히 안 보일 때:
 
-관리자 패널 → 설정 → **연결(Connections)**
-
-| 항목 | 값 |
-|---|---|
-| URL | `http://agent-server:8000/v1` |
-| API 키 | **콘솔 `agent_api_key`와 같은 값** (2번에서 출력된 `$KEY`) |
-
-저장 후 **연결 테스트**가 통과해야 합니다. 그다음:
-
-- 관리자 패널 → 모델 → 해당 모델 → **공개범위(Visibility)를 `Public`** 으로.
+- 관리자 패널 → **모델** → 해당 모델 → **공개범위(Visibility)를 `Public`** 으로.
   이걸 안 하면 admin에게만 보이거나 아무에게도 안 보입니다.
-- 그래도 안 보이면 브라우저 **하드 새로고침**(Ctrl+Shift+R).
+- 브라우저 **하드 새로고침**(Ctrl+Shift+R).
 
 ## 4. [서버] Service Hub 연동 — 규격서를 만들어 뒀습니다
 
@@ -151,7 +173,8 @@ docker volume rm 1dc7527fd826d5a2afc08bd1b44e945219c2fd10da65c2747f49c2d367ab919
 
 | 증상 | 조치 |
 |---|---|
-| 모델 목록이 비고 질문이 401 | 3번의 Open WebUI 연결 키와 콘솔 `agent_api_key`가 다릅니다 |
+| 모델 목록이 비고 질문이 401 | 2번의 두 곳에 넣은 값이 다릅니다. 길이(48)와 끝 4자로 확인 |
+| Service Hub curl 이 401 | 같은 키를 `Authorization: Bearer` 로 보내야 합니다 |
 | "기본 모델 지정 실패 401" 계속 | `admin-console` 재시작을 빼먹은 것(`restart admin-console`) |
 | 401인데 방금 키를 바꿨다 | 설정 캐시 5초입니다. 잠시 뒤 다시 저장 |
 | 멀쩡한 커맨드가 `다른 사용자의 자원…`으로 거부 | 설정 탭 `execution_user_scope_flags`에서 그 옵션을 빼세요(`sort -u` 등) |
