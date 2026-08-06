@@ -1,81 +1,185 @@
-지금 당장 해야할 것들만 next-steps.md 파일에 적어. tsv 발행 했다고 다시 적지말라고. 지시문도 마찬가지고. 꼭 필요한 것들만 적으라고.
-
 1. execution_mcp
-사용자가 (1) openwebui 에서 새로고침하거나, (2) 로그인/접속하거나, (3) 새 채팅을 열면 바로 202.20.185.100 서버로 user id 활용해서 ssh 세션이 시작되어야 해. 
-지금 전혀 안되고 있는 것 같아. 그리고, 로그인 셸을 굳이 열어야 해? 다른 조직에서 만든 agent에서는 이런식으로 만들어서 굉장히 빠르게 결과를 보여줬었어.
-MCP 호출 방식 비교
+(1) 보안/인증: 사용자가 다른 사람 id로 커맨드 실행하고자 할 때 막아야 하는데, 현재는 어떻게 막고 있는지? 자세하게 알려줘.
+현재 agent는 이런식으로 답변 중이지만, 현재 openwebui에 로그인한 사용자의 id를 ops_assistant 대신 보여줘야 함. 그리고 가이드 문서는 제공하지 말아야 함. 
+Q: cocoa.song 계정이 어떤 gpu job 을 수행중이야?
+A: S2 스케줄러는 현재 로그인한 사용자(ops_assistant)의 job 정보만 조회할 수 있으며, 다른 사용자(cocoa.song)의 job 정보는 직접 확인할 수 없습니다.
+다른 사용자의 GPU job 상태를 확인하려면 운영팀에 문의하거나, 해당 사용자에게 직접 확인해야 합니다. 
+자세한 내용은 다음 문서를 참고하세요: 
+     가이드 위치: 슈퍼컴 Portal > 활용 가이드 > S2 스케줄러 사용 가이드
+     가이드 문서: S2 스케줄러 사용 가이드
+(2) tool list
+관리자 콘솔 - '커맨드 실행' 탭에 엑셀 업로드해서 등록/수정 가능하게 하면 좋겠음. 인자를 넣었을 때를 가정해서 엑셀 양식을 짜야함. 현재는 인자별 타입/필수/기본값/설명,선택지 입력하게 되어 있는데, {option} 인 경우 등록하기 조금 어려움. 조금 쉽게 사용자가 UI에서든, 엑셀에서든 커맨드별 설명을 적으면 좋겠음. 커맨드 실행 탭에 엑셀 양식을 다운받을 수 있게 하면 좋겠음
+현재 등록한 tool list, arg 는 모두 타입 '문자열'로 등록되어 있고, 다음과 같음.
+- myquota
+   커맨드: myquota   
+   설명: 사용자의 홈 스토리지 디렉토리, 할당 용량, 현재 사용 현황 반환합니다.[결과 예시][yr9.choi@login07 ~]$ myquotaFilesystem    Directory       Used(GB)   Limit(GB)       Files File limitsgpfs.gpu1     yr9.choi          10,555           0   4,205,190           0
+- s2_phd_info_job_id 
+   커맨드: phd info {option} {job_id}
+   설명: 사용자가 S2 스케줄러로 실행한 GPU batch job id의 상세 정보를 반환합니다.
+   인자1: -j: Return job info by json format -tl: Print out additional information -lf: Print out list of fields to select attribute of job info -O: Print out job info by user defined format
+   인자2: 사용자가 S2 스케줄러로 실행한 GPU batch job id 입니다. 로그인 서버에서 사용자 id로 s2_phd_list 실행 시 job_id 반환됩니다.
+- s2_phd_list
+   커맨드: phd list {option}
+   설명: 사용자가 S2 스케줄러로 실행한 GPU batch job 리스트를 반환합니다.사용자 요구 사항에 맞게 {option}을 채워주세요.
+[결과 예시]
+[yr9.choi@login07 ~]$ phd list
+23836848 Queued
+23836892 Queued
 
-┌───────────────┬───────────────────────────────────────────────────────────────────────────┬────────────────────────────────────────────────────────────────────────┐
-│     구분      │                            AI-Infra-Assistant                             │                                spagent                                 │
-├───────────────┼───────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────┤
-│ Transport     │ Streamable HTTP (별도 컨테이너, http://execution-mcp:8002/mcp)            │ stdio (로컬 서브프로세스, mcp-server-supcom)                           │
-├───────────────┼───────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────┤
-│ 서버 실행     │ Docker Compose로 분리된 컨테이너 4개 (manual/execution/voc/chart)         │ 로컬 프로세스로 직접 spawn                                             │
-│ 형태          │                                                                           │                                                                        │
-├───────────────┼───────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────┤
-│ 세션 관리     │ 요청마다 새 McpToolset 생성 → 매번 새 세션/커넥션, 응답 후 close()        │ Google ADK MCPSessionManager가 세션 풀링 → 최초 1회만 프로세스 기동,   │
-│               │                                                                           │ 이후 재사용                                                            │
-├───────────────┼───────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────┤
-│ 실제 명령     │ asyncio.create_subprocess_exec로 로컬 ssh 실행 (su - <user> -c ...)       │ paramiko.SSHClient로 매 tool 호출마다 새 SSH 커넥션 생성               │
-│ 실행          │                                                                           │                                                                        │
-├───────────────┼───────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────┤
-│ SSH 최적화    │ ControlMaster 예열(warm_master()) + 180초 keepalive로 핸드셰이크 비용     │ 캐싱/재사용 없음 (매 호출 새 handshake, 재시도 로직만 존재)            │
-│               │ 상쇄                                                                      │                                                                        │
-├───────────────┼───────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────┤
-│ 도구 스키마   │ 등록된 명령 수만큼 스키마가 매 요청 프롬프트에 통째로 실림 (8000토큰 초과 │ 상대적으로 가벼운 구성                                                 │
-│               │  시 경고)                                                                 │                                                                        │
-├───────────────┼───────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────┤
-│ 설정 위치     │ DB(platform_settings 테이블), 파일 없음                                   │ config.yml + pyproject.toml 진입점                                     │
-└───────────────┴───────────────────────────────────────────────────────────────────────────┴────────────────────────────────────────────────────────────────────────┘
+[yr9.choi@login07 ~]$ phd list -l
 
-왜 spagent는 빠르고 AI-Infra-Assistant의 execution MCP는 느린가
-
-역설적으로, SSH 실행 자체는 AI-Infra-Assistant가 더 최적화되어 있습니다(ControlMaster 예열 + keepalive). spagent는 SSH를 매번 새로 맺는데도 더 빠르게 느껴지는데, 이는 SSH 레이어가 병목이 아니라는 뜻입니다. 실제 지연 요인은 MCP 세션/프로토콜 레이어에 있을 가능성이 큽니다.
-
-1. 세션 재생성 오버헤드 (가장 큰 원인 추정)
- AI-Infra-Assistant는 사용자 요청마다 McpToolset을 새로 만들고 응답 후 닫습니다. 즉 HTTP 기반 MCP initialize 핸드셰이크 + 툴 목록(list_tools) 조회를 매 요청마다 처음부터 다시 수행합니다.
- spagent는 stdio 세션을 한 번 띄운 뒤 재사용하므로, 이 초기화 비용이 최초 1회로 상각됩니다.
-2. 툴 스키마 크기가 프롬프트 프리필 지연을 유발
- 등록된 명령이 많을수록 execution MCP의 tool schema가 매 프롬프트에 그대로 실려, LLM 프리필(prefill) 단계 자체가 느려질 수 있습니다(코드 내 8000토큰 초과 경고가 이를 방증).
-3. 네트워크 홉 추가
- HTTP 기반(컨테이너 간 통신)이라 stdio(로컬 파이프) 대비 왕복 지연이 추가됩니다. 미미하지만 매 요청 세션 재생성과 결합되면 누적됩니다.
-
-이거 토대로 좀더 빠르게 결과를 보여줄 수 있는 방법이 있을까?
-우선 아래 결과도 참고해줘.
-
-[root@24-gp19 AI-Infra-Assistant]# bash scripts/bench-exec.sh yr9.choi "phd list"
-대상: root@202.20.185.100 · 실행 계정: yr9.choi · 커맨드: phd list
-
-=== 1회차: 마스터 연결이 없는 상태(첫 커맨드와 같은 조건) ===
-  접속만 (true)                    17.39초  (종료코드 0)
-
-=== 2회차 이후: 마스터 재사용 ===
-  접속만 (true)                     1.11초  (종료코드 0)
-  su - 로그인 셸만 (su - … -c true)   3.10초  (종료코드 0)
-  실제 커맨드                     7.12초  (종료코드 0)
-
-읽는 법
-  · 1회차 "접속만"이 크고 2회차가 작다 → 다중화는 동작 중. 기동 로그에서 마스터 예열이
-    성공했는지 확인한다(execution-mcp 로그의 "ssh 다중화 마스터 준비 완료").
-  · 2회차 "접속만"도 크다 → 마스터가 유지되지 않는다. 방화벽이 유휴 연결을 끊는지 확인
-    (.env의 SSH_ALIVE_INTERVAL / SSH_CONTROL_PERSIST).
-  · "su - 로그인 셸만"이 크다 → 원격 계정 프로필이 무겁다. 이건 우리 쪽에서 줄일 수 없고,
-    커맨드를 여러 번 부를수록 그대로 곱해진다(= 도구 호출 횟수를 줄여야 한다).
-  · "실제 커맨드"만 크다 → 커맨드 자체가 느린 것이다(GPFS 쿼터 조회 등). 정상이다.
-
-그리고 왜자꾸 phd info -u (user.id) 는 쓰는거야? 잘못된 커맨드야 절대 쓰지마.
-
-2. openwebui 에서 질문 후 로그
-[root@24-gp19 AI-Infra-Assistant]# docker compose -f docker-compose.dev.yml logs --tail=200 execution-mcp | grep "ssh_exec"
-execution-mcp-1  | [ssh_exec] phd 25,048ms (새 접속 · 202.20.185.100 · yr9.choi)
-
-"S2 스케줄러 job list확인해줘" 질문하니 이런 에러 뜸
-[오류가 발생했습니다: Expecting value: line 1 column 11 (char 10)]
-
-홈 파일 리스트 보여달라고 하니 또 이상한 얘기함. command_mcp 가 제대로 동작하는거야? user.id 로 실행해야 한다고 말귀를 못알아들어?
-· 'ls' 실행하는 중
-· 확인 완료 
-
-/home/ops_assistant 경로가 존재하지 않습니다. 홈 디렉터리 경로를 확인해 주세요. 
+            id: 23836848
+            user: yr9.choi
+            command: sh submit.sh run_autotune.sh
+            job name:
+            job set: []
+            fair share group: /gpu/batch/share/yr9.choi
+            status: Queued
+            cjob: False
+            submit time: 22:52:03 - Jul 14,26
+            start time:
+            end time:
+            cpu usage:
+            number of process: 0
+            job peak vsz:
+            job peak pss:
+            job peak rss:
+            peak mem util:
+            tmp used:
+            execution host:
+            working directory: /home/gpu1/yr9.choi/99_SNU/sw_workspace/Fractal/Fractal/scripts
+            exit code: <not finished yet>
 
 
+            id: 23836892
+            user: yr9.choi
+            command: sh submit.sh run_test.sh
+            job name:
+            job set: []
+            fair share group: /gpu/batch/share/yr9.choi
+            status: Queued
+            cjob: False
+            submit time: 22:58:04 - Jul 14,26
+            start time:
+            end time:
+            cpu usage:
+            number of process: 0
+            job peak vsz:
+            job peak pss:
+            job peak rss:
+            peak mem util:
+            tmp used:
+            execution host:
+            working directory: /home/gpu1/yr9.choi/99_SNU/sw_workspace/Fractal/Fractal/scripts
+            exit code: <not finished yet>
+
+[yr9.choi@login07 ~]$ phd list -lf
+Field                          Type                   Description
+-----------------------------  ---------------------  ----------------------------------------------------------------------------------------
+array_index                    uint                   Index of this job within job array.
+array_n_jobs                   uint
+auto_fail                      bool                   Mark job failed upon sight?
+aux_hosts                      [string]               If the job is a dp job, aux_hosts records the slave hosts which are
+                                                      assigned to run the job.
+bucketize_time                 time                   The time at which the job is bucketized in B2, which means B2 should
+                                                      dispatch the job when computing resources are availiable.
+command                        [string]               String token list of job command.
+core_affinity                  int                    The assigned core affinity for this job by
+core_dumpsize                  int64                  Core dump size limit. -1 is unlimited.
+cores                          int                    Number of CPU cores requested for this job.
+cpu_usage                      double                 Cpu usage of this job, percent
+critical_job                   bool                   Is this a critical job
+cwd                            string                 Working directory of job.
+dp_app_profile                 string                 Name of application profile for DP job.
+dp_config_file                 string                 Name of config file for DP job.
+dp_num_cnodes                  uint                   Number of c-nodes which DP job will span.
+dra_workers                    [string]               If the job is a dra job, dra_workers records all its worker hosts. The
+                                                      format of a dra worker is: c_port@c_host#id. We don't save it in job
+                                                      properties because it will be frequently updated as a worker can be
+                                                      frequently added or removed during the dra job lifecycle based on fs
+                                                      policy.
+end_time                       time                   The time at which the job finishes executing.
+env                            [string]
+env_file                       string                 file with environment key=value pairs. Used as alternative to that of 'phd run' process.
+exec_host                      string                 The machine to which this job is assigned for execution.
+exec_port                      int                    The port number of the cnode agent which assigned to run this job.
+exit_code                      int                    Not set till job completes and we collect the real exit code.
+expected_runtime               int                    How long (in seconds) does user expect
+free_mem                       int                    Bottom available memory on host machine, mb
+fsgroup                        string                 fsnode = fsgroup + user_node +
+                                                      subgroup. Otherwise, fsnode = fsgroup + subgroup.
+fsnode                         string                 If fsgroup is allowed to use user node, then
+gid                            int                    Group id (gid) of the job owner.
+gpu_cores                      int                    Number of GPGPU cores requested for this job.
+groups                         [uint]                 All groups of which job owner is a member.
+has_migrated                   bool                   Has this job been migrated from one snode to another? If yes, that means
+                                                      the it has inactive copies in some snodes.
+has_successors                 bool                   Does job have known successors?
+hold_until_time                time                   The earliest time at which the job is allowed to run. If not set (0.),
+                                                      there is no wall clock start constraint.
+host_exclusive_duration        int                    Duration to ensure exclusively running on a host, units of second.
+host_order                     {string:int}           Host order expression: host_attr, order*priority
+id                             int64                  Unique identifier for the job.
+input_files                    {string:int64}         The files that this job will use as input
+interactive                    bool                   Is this job a interactive job? It is false by default.
+is_active                      bool                   Does this copy of the job record require execution?
+jname                          string                 Optional job name.
+job_class                      string                 The name of job class
+launch_failure                 bool                   Did anything go wrong with launch?
+launch_msg                     string                 If there was trouble, what was it?
+lic_info                       {string:License}
+licenses                       {string:int}
+limits                         [string]
+log_file                       string                 Pathname of job log, relative to working dir.
+log_file_mtime                 time                   Time of last modification of log_file.
+max_queue_time                 time                   Queued job will be stopped when it hits the max_queue_time.
+max_runtime                    double                 Job will be automatically killed if it exceeds this limit.
+                                                      zero == no limit.
+mem_util                       double                 Peak memory utilization, percent
+multicore_affinity             [int]                  Multicore job core affinity
+num_cnodes                     int                    number of cnodes required to execute this job; defaults to 1
+num_proc                       int                    Number of processes of this job
+output_files                   {string:int64}         The files that this job will create
+post_command                   [string]               String token list of post command.
+pre_command                    [string]               String token list of pre command.
+predecessor_jnames             [string]
+predecessor_jnames_states      {string:[string]}
+predecessor_jobs               [int64]
+predecessor_jobs_states        {int64:[string]}
+predecessor_sets               [string]
+preemptable                    bool                   Can this job be preempted?
+priority                       uint                   The priority number for this job, which is
+project                        string                 The offiicial accounting project with which this job is associated.
+properties                     {string:string}
+ram_request                    int                    Requested RAM reservation for this job, units of MB.
+resources                      [string]
+resume_time                    time                   The time at which the job is recently resumed.
+server_job_log                 bool
+sets                           [string]               Names of sets to which job belongs.
+slot_limit_per_node            int                    A limit on how many slots a node can have.
+start_time                     time                   The time at which the job is dispatched for execution.
+status                         string                 Status of the job.
+stuck_reason                   string                 Reason the job transitioned to Stuck.
+sub_host                       string                 The machine from which this job was submitted.
+subgroup                       string
+submit_time                    time                   The time at which the job was submitted to the system.
+susp_intervals                 [time_interval]
+susp_time                      time                   The time at which the job is recently suspended.
+tmp_request                    int                    /tmp space reservation for this job, units of MB
+tmp_used                       int                    /tmp space peak usage for this job, units of MB
+total_susp_time                time                   In seconds.
+uid                            int                    User id (uid) of the job owner.
+umask                          int                    Job owner's umask at time of submission.
+user                           string                 Username of job owner.
+user_pss                       int                    Peak proportional set size, mb
+user_rss                       int                    Peak resident set size, mb
+user_vsz                       int                    Peak used virtual memory size of this job, mb
+wait_reason                    string                 Reason the job hasn't started yet.
+wall_clock                     double                 Job wall clock time, hours
+worker_profiles                {string:proc_profile}  worker profiles
+properties[emu_type]           string                 Type of the requested emulator
+properties[num_emu_board]      int                    Number of emulator boards requested
+properties[emu_id]             string                 ID of the assigned emulator
+properties[emu_boards]         string                 List of assigned emulator boards
+properties[pz1_cross_cluster]  bool                   Cross cluster mode for PZ1 jobs
+  - 인자 1개: -l: Output job information in long format -lf: List the fields of jobs
