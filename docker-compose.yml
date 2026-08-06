@@ -109,7 +109,7 @@ services:
       SSH_PRIVDROP: ${SSH_PRIVDROP:-su-login}
     volumes:
       - /etc/hosts:/etc/hosts.targets:ro
-      - ${SSH_KEY_PATH:-./secrets/id_ed25519}:/root/.ssh/id_ed25519:ro
+      - ${SSH_KEY_PATH:-/root/.ssh/id_ed25519}:/root/.ssh/id_ed25519:ro
     expose: ["8002"]
     depends_on:
       db-init:

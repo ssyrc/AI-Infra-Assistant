@@ -22,29 +22,20 @@ rsync -avz --delete --progress \
   yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
 ```
 
-## 2. [서버] ⚠ ssh 키부터 되살립니다 — **컨테이너를 재생성하기 전에**
+## 2. [서버] `.env` 만들기 — **키를 꺼낼 필요 없습니다**
 
-`.env`가 없다는 건 **rsync `--delete`가 지웠다**는 뜻입니다(`.env`도 `secrets/`도 저장소에
-없는 파일이라). 지금 컨테이너는 예전에 마운트한 키를 아직 쥐고 있어서 동작하지만,
-**이 상태로 `up -d` 하면 키 자리에 빈 디렉토리가 생겨 모든 커맨드가 인증 실패합니다.**
-1번의 rsync는 이제 두 경로를 제외하므로, 한 번만 복구하면 다시 지워지지 않습니다.
+호스트에 `/root/.ssh/id_ed25519` 가 있으니 그걸 그대로 쓰면 됩니다(복사하지 마세요).
+compose 기본값도 이 경로로 바꿔 뒀습니다.
+
+`.env`가 없던 이유는 **rsync `--delete`가 지웠기 때문**입니다(`.env`가 저장소에 없는 파일이라).
+1번의 rsync는 이제 `.env`와 `secrets/`를 제외하므로 다시 지워지지 않습니다.
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-
-# (1) 지금 떠 있는 컨테이너에서 키를 꺼내 되살린다
-mkdir -p secrets && chmod 700 secrets
-docker compose -f docker-compose.dev.yml exec -T execution-mcp \
-  cat /root/.ssh/id_ed25519 > secrets/id_ed25519
-chmod 600 secrets/id_ed25519
-head -1 secrets/id_ed25519      # "-----BEGIN OPENSSH PRIVATE KEY-----" 가 나와야 합니다
-
-# (2) .env 를 만든다
+ls -l /root/.ssh/id_ed25519          # 파일이어야 합니다(디렉토리면 멈추고 알려주세요)
 cp -n .env.example .env
-printf 'SSH_KEY_PATH=./secrets/id_ed25519\nSSH_PRIVDROP=runuser\n' >> .env
+printf '\nSSH_KEY_PATH=/root/.ssh/id_ed25519\nSSH_PRIVDROP=runuser\n' >> .env
 ```
-
-`head -1` 이 비었거나 이상하면 **여기서 멈추고 알려주세요.** 그대로 진행하면 실행이 다 막힙니다.
 
 ## 3. [서버] 재생성
 
@@ -118,3 +109,14 @@ docker compose -f docker-compose.dev.yml logs --tail=100 agent-server | grep 완
 | 커맨드가 `command not found` | 로그에 `'xxx'은 로그인 셸이 필요합니다`가 있으면 자동 복구된 것. 계속 실패하면 `.env`의 `SSH_PRIVDROP=su-login` |
 | 첫 커맨드만 계속 느림 | `curl -s http://localhost:8504/warm` 결과를 보내주세요 |
 | 강등 방식별 시간이 궁금할 때 | `bash scripts/bench-exec.sh yr9.choi "phd list"` |
+| `docker compose exec` 가 아무것도 안 뱉음 | 아래 진단을 돌려 결과를 보내주세요 |
+
+```bash
+cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
+docker compose -f docker-compose.dev.yml ps          # execution-mcp 가 Up 인가
+docker compose -f docker-compose.dev.yml ps -a       # 죽은 컨테이너는 ps에 안 나온다
+docker compose -f docker-compose.dev.yml logs --tail=30 execution-mcp
+```
+
+`exec`는 **컨테이너가 Up일 때만** 됩니다. 죽어 있으면 `ps`에 안 보이고 조용히 실패합니다
+(`ps -a`로 확인). 출력이 비었던 것도 대부분 이 경우입니다.
