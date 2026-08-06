@@ -3561,4 +3561,42 @@ dev에는 지킬 볼륨 자체가 없다는 것을 확인하지 않았다.** 컨
 
 ---
 
+## 142. `/v1/*`에 인증을 걸면서 내부 호출자를 확인하지 않았다 (완료)
+
+사용자: "`openwebui_admin_api_key`를 넣고 저장하면 이런 에러가 뜨네 —
+`기본 모델 지정은 실패했습니다: agent-server /v1/models 조회 실패: 401 Unauthorized`"
+
+### 두 가지가 겹쳐 있었다
+
+**(1) 사용자 실수**: `agent_api_key` 칸에 `openwebui_admin_api_key` 값을 넣었다. 두 키는
+방향이 정반대다 — `agent_api_key`는 *Open WebUI → agent-server*, `openwebui_admin_api_key`는
+*관리자 콘솔 → Open WebUI*. 이름이 비슷해 헷갈릴 만하다.
+
+**(2) 내 버그 — 이쪽이 진짜 원인**: #139에서 agent-server의 `/v1/*` 네 엔드포인트에
+`require_api_key`를 걸었는데, **관리자 콘솔의 "기본 모델 동기화"가 `/v1/models`를 헤더 없이
+부르고 있었다**(`ops.py`). 그래서 `agent_api_key`를 넣는 순간, **값이 맞든 틀리든** 이 기능이
+401로 죽는다. 사용자가 올바른 값을 넣었어도 똑같이 났을 오류다.
+
+`_AUTO_SYNC_OPENWEBUI` 때문에 `openwebui_admin_api_key`를 저장할 때마다 동기화가 자동으로
+따라 붙어서, 저장할 때마다 이 오류를 보게 됐다.
+
+### 조치
+
+- 콘솔이 agent-server를 부를 때 `Authorization: Bearer <agent_api_key>`를 함께 보낸다.
+  콘솔과 agent-server는 **같은 DB의 같은 키**를 읽으므로 값이 어긋날 여지가 없다.
+- 401 안내 문구를 정확하게 고쳤다. 처음에 "agent-server를 재시작하세요"라고 썼다가,
+  시드 플래그를 확인해 보니 `agent_api_key`는 `hot_reload=true`라 **재시작이 필요 없었다**
+  (매 요청 새로 읽고, 설정 캐시 5초만 지나면 반영된다). 틀린 안내를 낼 뻔했다.
+- 회귀 테스트 둘: 콘솔이 `/v1/models`에 인증 헤더를 붙이는가(원래 버그),
+  그 헤더를 **`agent_api_key`로** 만드는가(Open WebUI 키를 잘못 보내는 반대 실수).
+  `agent_api_key`의 `hot_reload=true`도 고정했다 — false로 바뀌면 안내 문구가 틀려진다.
+
+### 교훈
+
+**제약을 새로 걸 때는 그 경로에 이미 붙어 있던 호출자를 전부 훑는다.** #139에서 나는 "누가
+`/v1/*`를 부르는가"를 Open WebUI만 생각했고, 같은 저장소 안의 관리자 콘솔을 놓쳤다.
+`grep -rn "agent-server:8000"` 한 번이면 나왔을 것이다.
+
+---
+
 ## 다음 항목은 이어서 여기 아래에 추가

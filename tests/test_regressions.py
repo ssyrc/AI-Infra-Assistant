@@ -1871,3 +1871,38 @@ def test_openwebui_has_named_data_volume():
     mounts = conf["services"]["open-webui"]["volumes"]
     data = [m for m in mounts if str(m).endswith(":/app/backend/data")]
     assert data and not str(data[0]).startswith(".")
+
+
+# --- #142: /v1/*에 인증을 걸면서 **내부 호출자**를 확인하지 않았다 --------------------
+def test_admin_console_sends_agent_api_key_to_agent_server():
+    """#139에서 agent-server의 `/v1/*`에 `agent_api_key` 인증을 걸었는데, 관리자 콘솔의
+    "기본 모델 동기화"가 `/v1/models`를 **헤더 없이** 부르고 있었다. 그래서 키를 넣는 순간
+    값이 맞든 틀리든 401로 죽었다(사용자가 저장할 때마다 오류를 봤다).
+
+    제약을 새로 걸 때는 그 경로에 이미 붙어 있던 호출자를 전부 훑어야 한다.
+    """
+    src = open(os.path.join(ROOT, "admin_console", "backend", "routers", "ops.py"),
+               encoding="utf-8").read()
+    assert 'get_config("agent_api_key"' in src, "콘솔이 agent_api_key를 읽지 않는다"
+
+    # agent-server를 부르는 줄에 **인증 헤더가 붙어 있어야** 한다.
+    get_line = next((ln for ln in src.split("\n") if "/v1/models" in ln and "client.get" in ln), "")
+    assert get_line, "ops.py에서 /v1/models 호출을 찾지 못했다(테스트를 갱신할 것)"
+    assert "headers=agent_headers" in get_line, \
+        f"콘솔이 agent-server를 부를 때 인증 헤더를 안 보낸다: {get_line.strip()}"
+
+    # 그 헤더는 **agent_api_key**로 만들어야 한다. Open WebUI 키를 보내면 방향이 뒤집힌다
+    # (두 키는 목적지가 정반대다 - 사용자가 실제로 헷갈린 지점이다).
+    hdr = next((ln for ln in src.split("\n") if "agent_headers =" in ln), "")
+    assert "agent_key" in hdr and "openwebui" not in hdr, \
+        f"agent-server용 헤더를 agent_api_key로 만들지 않는다: {hdr.strip()}"
+
+
+def test_agent_api_key_is_hot_reload():
+    """`agent_api_key`가 hot_reload=false면 저장 후 재시작 전까지 콘솔↔agent-server 값이
+    어긋나 401이 계속된다. 안내 문구도 '재시작하세요'로 바뀌어야 하므로 고정해 둔다."""
+    src = open(os.path.join(ROOT, "shared", "migrations.py"), encoding="utf-8").read()
+    i = src.index('("agent_api_key"')
+    seed = src[i:src.index("),", i)]
+    # (key, value, desc, hot_reload, is_secret, force) — hot_reload가 True여야 한다.
+    assert seed.rstrip().endswith("True, True, False"), f"시드 플래그가 바뀌었다: {seed[-40:]}"

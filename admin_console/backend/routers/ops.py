@@ -57,13 +57,32 @@ async def sync_openwebui_model(admin: str = Depends(require_admin)):
         )
 
     client = await get_http_client()
+    # **agent-server의 /v1/*에는 인증이 걸려 있다**(#139의 `agent_api_key`). 콘솔도 예외가
+    # 아니라서 키를 함께 보내야 한다 - 예전에는 헤더 없이 불렀고, 그래서 `agent_api_key`를
+    # 넣는 순간 이 버튼이 값이 맞든 틀리든 401로 죽었다(#142).
+    agent_key = (await get_config("agent_api_key", "") or "").strip()
+    agent_headers = {"Authorization": f"Bearer {agent_key}"} if agent_key else {}
     try:
-        models_resp = await client.get(f"{AGENT_SERVER_URL}/v1/models")
+        models_resp = await client.get(f"{AGENT_SERVER_URL}/v1/models", headers=agent_headers)
         models_resp.raise_for_status()
         models = models_resp.json().get("data") or []
         if not models:
             raise HTTPException(502, "agent-server가 노출하는 모델이 없습니다.")
         model_id = models[0]["id"]
+    except httpx.HTTPStatusError as e:
+        # 401이면 원인이 좁다. 콘솔과 agent-server는 **같은 DB의 같은 키**를 읽으므로,
+        # 값이 다를 수 있는 경우는 설정 캐시(5초) 창뿐이다. 재시작은 필요 없다
+        # (`agent_api_key`는 hot_reload=true라 매 요청 새로 읽는다).
+        if e.response.status_code == 401:
+            raise HTTPException(
+                502,
+                "agent-server가 401을 돌려줬습니다. `agent_api_key`를 방금 바꿨다면 "
+                "설정 캐시(5초) 때문일 수 있으니 잠시 뒤 다시 저장해 보세요. "
+                "계속 401이면 agent-server가 콘솔과 다른 DB를 보고 있는 것입니다"
+                + ("(콘솔에는 키가 설정돼 있습니다)." if agent_key
+                   else "(콘솔의 agent_api_key는 비어 있는데 agent-server는 키를 "
+                        "요구하고 있습니다)."))
+        raise HTTPException(502, f"agent-server /v1/models 조회 실패: {e}")
     except httpx.HTTPError as e:
         raise HTTPException(502, f"agent-server /v1/models 조회 실패: {e}")
 
