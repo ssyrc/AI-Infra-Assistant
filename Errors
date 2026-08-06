@@ -17,3 +17,126 @@ Error response from daemon: No such container: pg-rescue
 [root@24-gp19 AI-Infra-Assistant]# docker exec pg-rescue psql -U agent -d command_db -c \
 >   "select count(*) from execution_commands;"
 Error response from daemon: No such container: pg-rescue
+
+
+[root@24-gp19 AI-Infra-Assistant]# sh find-lost-db.sh
+
+===== 1) 지금 postgres 컨테이너가 쓰는 볼륨 =====
+postgres 컨테이너를 찾지 못했습니다.
+
+===== 2) 볼륨 전체 (dangling 조건 없이) =====
+DRIVER    VOLUME NAME
+local     1dc7527fd826d5a2afc08bd1b44e945219c2fd10da65c2747f49c2d367ab9198
+local     2f7f1348f930e3714ed4047b3599c754e01957b17ec35c6536b7b22096e84f38
+local     4f7c8f2ee8fef3ed6647aadfa6bd177b0e9008f35a3ea85622df664045693f8b
+local     516c65ccc32e6eb620daaec7980524d096ebdfe6490ebb835ed148bf25c1aaaf
+local     553dd7066a559e45d37bb0d7d7d4b47fadeff60309477e7b9a8ebe0d6a769448
+local     3385e1ccebd5e91808f3623ea53e3cd832387612a735b91c470e75fc6a16eb05
+local     3825b66b733b18d66de88275789f2daeb4d9fb2f898bc1ad20f0ed446b984f85
+local     12077a3bbc771dabef289ebc1e115480cbbb9c5635b50f03eb21483f06e3e603
+local     36646c91f73a0c48bfb5879668bfac69f4980aa7146617744e26de2bff45e2ca
+local     ai-infra-assistant_chart_files
+local     ai-infra-assistant_open_webui_dev_data
+local     bb195b55445ee5917884dac47f9d65f3b36960e5576d55cdf7bb7cad4e6d7cf1
+local     bdd52fd2baac739ffdf4a0effee8f9d3ed508485d33ea29fbfbfd3fedd316842
+local     e8befe59a571ce73a00a3f6218d4e7cdc95e72a67e967bd04914c6a028c00aa4
+local     langfuse-3630_langfuse_clickhouse_data
+local     langfuse-3630_langfuse_clickhouse_logs
+local     langfuse-3630_langfuse_minio_data
+local     langfuse-3630_langfuse_postgres_data
+local     langfuse_langfuse_clickhouse_data
+local     langfuse_langfuse_clickhouse_logs
+local     langfuse_langfuse_minio_data
+local     langfuse_langfuse_postgres_data
+local     open-webui
+
+===== 3) 컨테이너 전체 (죽은 것 포함) =====
+ai-infra-assistant-postgres-1   Up 50 minutes (healthy) pgvector/pgvector:pg16
+ai-infra-assistant-execution-mcp-1      Up 4 hours      ai-infra-assistant-mcp:dev
+ai-infra-assistant-admin-console-1      Up 5 hours      ai-infra-assistant-admin-console:latest
+ai-infra-assistant-chart-mcp-1  Up 7 days       ai-infra-assistant-mcp:dev
+ai-infra-assistant-db-init-1    Exited (0) 5 hours ago  ai-infra-assistant-db-init:latest
+ai-infra-assistant-open-webui-1 Up 7 days (healthy)     ghcr.io/open-webui/open-webui:v0.6.5
+ai-infra-assistant-dev-config-1 Exited (0) 5 hours ago  postgres:16-alpine
+ai-infra-assistant-manual-mcp-1 Up 7 days       ai-infra-assistant-mcp:dev
+ai-infra-assistant-voc-mcp-1    Up 7 days       ai-infra-assistant-mcp:dev
+ai-infra-assistant-agent-server-1       Up 5 hours      ai-infra-assistant-agent-server:latest
+ai-infra-assistant-mock-vllm-1  Up 7 days       ai-infra-assistant-mock-vllm:latest
+langfuse-redis-1        Exited (128) 4 weeks ago        repo.samsungds.net/docker.io/redis:7
+langfuse-clickhouse-1   Exited (128) 4 weeks ago        repo.samsungds.net/docker.io/clickhouse/clickhouse-server
+milvus-attu     Exited (137) 7 weeks ago        repo.samsungds.net/docker.io/zilliz/attu:latest
+milvus-minio    Exited (0) 7 weeks ago  repo.samsungds.net/docker.io/minio/minio:RELEASE.2023-03-20T20-16-18Z
+milvus-etcd     Exited (0) 4 weeks ago  repo.samsungds.net/quay.io/coreos/etcd:v3.5.18
+halo-rag-mcp    Exited (137) 7 weeks ago        nemo_halo_mcp_server:langfuse
+wizardly_aryabhata      Exited (0) 4 months ago nemo_halo_mcp_server:langfuse
+nemo_halo_rag   Exited (137) 7 weeks ago        repo.samsungds.net/nvcr.io/nvidia/nemo:25.02.rc2
+langfuse-3630-langfuse-web-1    Exited (137) 4 weeks ago        repo.samsungds.net/docker.io/langfuse/langfuse:3
+langfuse-3630-langfuse-worker-1 Exited (137) 4 weeks ago        repo.samsungds.net/docker.io/langfuse/langfuse-worker:3
+langfuse-3630-postgres-1        Exited (128) 4 weeks ago        repo.samsungds.net/docker.io/postgres:17.0
+halo_db Exited (1) 7 weeks ago  repo.samsungds.net/docker.io/postgres:17.0
+open-webui-zhijie       Exited (0) 7 weeks ago  repo.samsungds.net/ghcr.io/open-webui/open-webui:main
+
+===== 4) 어떤 볼륨이 postgres 데이터인가 =====
+사용할 이미지(로컬): ellie0/ai-infra-assistant-pgvector:main-10bc550
+  [PG 데이터] 1dc7527fd826d5a2afc08bd1b44e945219c2fd10da65c2747f49c2d367ab9198   PG_VERSION=16   크기=137M
+  [PG 데이터] 4f7c8f2ee8fef3ed6647aadfa6bd177b0e9008f35a3ea85622df664045693f8b   PG_VERSION=16   크기=2.4G
+  [PG 데이터] 553dd7066a559e45d37bb0d7d7d4b47fadeff60309477e7b9a8ebe0d6a769448   PG_VERSION=16   크기=132M
+  [PG 데이터] langfuse-3630_langfuse_postgres_data   PG_VERSION=17   크기=45M
+  [PG 데이터] langfuse_langfuse_postgres_data   PG_VERSION=17   크기=61M
+
+===== 5) 볼륨의 호스트 경로 (도커로 안 될 때 직접 확인) =====
+  1dc7527fd826d5a2afc08bd1b44e945219c2fd10da65c2747f49c2d367ab9198
+      /var/lib/docker/volumes/1dc7527fd826d5a2afc08bd1b44e945219c2fd10da65c2747f49c2d367ab9198/_data
+  2f7f1348f930e3714ed4047b3599c754e01957b17ec35c6536b7b22096e84f38
+      /var/lib/docker/volumes/2f7f1348f930e3714ed4047b3599c754e01957b17ec35c6536b7b22096e84f38/_data
+  4f7c8f2ee8fef3ed6647aadfa6bd177b0e9008f35a3ea85622df664045693f8b
+      /var/lib/docker/volumes/4f7c8f2ee8fef3ed6647aadfa6bd177b0e9008f35a3ea85622df664045693f8b/_data
+  516c65ccc32e6eb620daaec7980524d096ebdfe6490ebb835ed148bf25c1aaaf
+      /var/lib/docker/volumes/516c65ccc32e6eb620daaec7980524d096ebdfe6490ebb835ed148bf25c1aaaf/_data
+  553dd7066a559e45d37bb0d7d7d4b47fadeff60309477e7b9a8ebe0d6a769448
+      /var/lib/docker/volumes/553dd7066a559e45d37bb0d7d7d4b47fadeff60309477e7b9a8ebe0d6a769448/_data
+  3385e1ccebd5e91808f3623ea53e3cd832387612a735b91c470e75fc6a16eb05
+      /var/lib/docker/volumes/3385e1ccebd5e91808f3623ea53e3cd832387612a735b91c470e75fc6a16eb05/_data
+  3825b66b733b18d66de88275789f2daeb4d9fb2f898bc1ad20f0ed446b984f85
+      /var/lib/docker/volumes/3825b66b733b18d66de88275789f2daeb4d9fb2f898bc1ad20f0ed446b984f85/_data
+  12077a3bbc771dabef289ebc1e115480cbbb9c5635b50f03eb21483f06e3e603
+      /var/lib/docker/volumes/12077a3bbc771dabef289ebc1e115480cbbb9c5635b50f03eb21483f06e3e603/_data
+  36646c91f73a0c48bfb5879668bfac69f4980aa7146617744e26de2bff45e2ca
+      /var/lib/docker/volumes/36646c91f73a0c48bfb5879668bfac69f4980aa7146617744e26de2bff45e2ca/_data
+  ai-infra-assistant_chart_files
+      /var/lib/docker/volumes/ai-infra-assistant_chart_files/_data
+  ai-infra-assistant_open_webui_dev_data
+      /var/lib/docker/volumes/ai-infra-assistant_open_webui_dev_data/_data
+  bb195b55445ee5917884dac47f9d65f3b36960e5576d55cdf7bb7cad4e6d7cf1
+      /var/lib/docker/volumes/bb195b55445ee5917884dac47f9d65f3b36960e5576d55cdf7bb7cad4e6d7cf1/_data
+  bdd52fd2baac739ffdf4a0effee8f9d3ed508485d33ea29fbfbfd3fedd316842
+      /var/lib/docker/volumes/bdd52fd2baac739ffdf4a0effee8f9d3ed508485d33ea29fbfbfd3fedd316842/_data
+  e8befe59a571ce73a00a3f6218d4e7cdc95e72a67e967bd04914c6a028c00aa4
+      /var/lib/docker/volumes/e8befe59a571ce73a00a3f6218d4e7cdc95e72a67e967bd04914c6a028c00aa4/_data
+  langfuse-3630_langfuse_clickhouse_data
+      /var/lib/docker/volumes/langfuse-3630_langfuse_clickhouse_data/_data
+  langfuse-3630_langfuse_clickhouse_logs
+      /var/lib/docker/volumes/langfuse-3630_langfuse_clickhouse_logs/_data
+  langfuse-3630_langfuse_minio_data
+      /var/lib/docker/volumes/langfuse-3630_langfuse_minio_data/_data
+  langfuse-3630_langfuse_postgres_data
+      /var/lib/docker/volumes/langfuse-3630_langfuse_postgres_data/_data
+  langfuse_langfuse_clickhouse_data
+      /var/lib/docker/volumes/langfuse_langfuse_clickhouse_data/_data
+  langfuse_langfuse_clickhouse_logs
+      /var/lib/docker/volumes/langfuse_langfuse_clickhouse_logs/_data
+  langfuse_langfuse_minio_data
+      /var/lib/docker/volumes/langfuse_langfuse_minio_data/_data
+  langfuse_langfuse_postgres_data
+      /var/lib/docker/volumes/langfuse_langfuse_postgres_data/_data
+  open-webui
+      /var/lib/docker/volumes/open-webui/_data
+
+  root 권한이 있으면 이렇게 직접 볼 수 있습니다(pull 불필요):
+      sudo ls -la <위 경로>/ | head
+      sudo cat <위 경로>/PG_VERSION
+
+===== 6) 지금 떠 있는 DB에 실제로 데이터가 있는가 =====
+postgres가 running이 아닙니다. 먼저: docker compose -f docker-compose.dev.yml up -d postgres
+
+이 출력을 통째로 보내주세요.
