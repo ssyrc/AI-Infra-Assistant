@@ -1779,3 +1779,34 @@ def test_excel_choices_split_on_newline_not_comma():
     assert args[0]["choices"] == ["-j: Return job info, json format",
                                   "-tl: Print additional info"]
     assert args[0]["type"] == "enum"        # 선택지를 적었으면 타입 칸이 비어도 선택형
+
+
+# --- #141: 상태를 담는 서비스에는 **이름 있는 볼륨**이 반드시 있어야 한다 --------------
+# dev compose의 postgres에 데이터 볼륨이 없었다. pgvector 이미지가
+# `VOLUME /var/lib/postgresql/data`를 선언하므로 **익명 볼륨**이 붙는데, 익명 볼륨은
+# 컨테이너를 다시 만들 때 떨어져 나간다. #139에서 `ports:`를 127.0.0.1로 바꾼 것만으로
+# compose가 postgres를 재생성했고, 매뉴얼·VOC·설정·등록 커맨드가 전부 사라졌다.
+@pytest.mark.parametrize("compose_file", ["docker-compose.yml", "docker-compose.dev.yml"])
+def test_postgres_has_named_data_volume(compose_file):
+    yaml = pytest.importorskip("yaml")
+    with open(os.path.join(ROOT, compose_file), encoding="utf-8") as f:
+        conf = yaml.safe_load(f)
+    mounts = conf["services"]["postgres"]["volumes"]
+    data = [m for m in mounts if str(m).endswith(":/var/lib/postgresql/data")]
+    assert data, (
+        f"{compose_file}: postgres에 데이터 볼륨이 없습니다. 익명 볼륨이 붙어 "
+        "컨테이너를 다시 만들 때마다 DB가 통째로 사라집니다.")
+    name = str(data[0]).split(":")[0]
+    assert not name.startswith("."), f"{compose_file}: 데이터 볼륨이 바인드 마운트({name})입니다."
+    assert name in (conf.get("volumes") or {}), \
+        f"{compose_file}: '{name}'이 최상위 volumes에 선언돼 있지 않습니다."
+
+
+def test_openwebui_has_named_data_volume():
+    """Open WebUI 계정·대화도 같은 이유로 이름 있는 볼륨이어야 한다."""
+    yaml = pytest.importorskip("yaml")
+    with open(os.path.join(ROOT, "docker-compose.dev.yml"), encoding="utf-8") as f:
+        conf = yaml.safe_load(f)
+    mounts = conf["services"]["open-webui"]["volumes"]
+    data = [m for m in mounts if str(m).endswith(":/app/backend/data")]
+    assert data and not str(data[0]).startswith(".")

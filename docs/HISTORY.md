@@ -3461,4 +3461,55 @@ curl :8507 (psql agent/devpass)                  → 설정·매뉴얼·VOC 전�
 
 ---
 
+## 141. dev postgres에 데이터 볼륨이 없어 DB가 통째로 날아갔다 (복구 진행 중)
+
+사용자: "그대로 실행했더니 기존 등록한 매뉴얼들이랑 파일들 다 삭제됐어... 파라미터들도.
+아예 초기화됐는데?" — **내 지시로 낸 사고다.**
+
+### 원인
+
+`docker-compose.dev.yml`의 postgres에 **데이터 볼륨이 아예 없었다.**
+
+```
+prod (docker-compose.yml)      pg_data:/var/lib/postgresql/data   ← 있음
+dev  (docker-compose.dev.yml)  (없음)                              ← 익명 볼륨에 의존
+```
+
+pgvector 이미지가 `VOLUME /var/lib/postgresql/data`를 선언하므로 익명 볼륨이 붙는다.
+**익명 볼륨은 컨테이너를 다시 만들면 떨어져 나간다.** 그리고 #139에서 내가 postgres의
+`ports:`를 `127.0.0.1:`로 바꿨다 — 포트가 바뀌면 compose는 컨테이너를 재생성한다.
+NEXT-STEPS에 `up -d --no-build --remove-orphans`를 그대로 적어 뒀으니, 시키는 대로 하면
+반드시 터지는 순서였다.
+
+### 내가 놓친 것
+
+CLAUDE.md에 "**postgres 볼륨이 삭제되면** 설정·매뉴얼·VOC가 전부 사라진다 — `down -v`는 쓰지
+말 것"이라고 이미 적혀 있었다. 위험은 알고 있었는데 **`down -v`만 위험하다고 생각했고,
+dev에는 지킬 볼륨 자체가 없다는 것을 확인하지 않았다.** 컨테이너를 재생성시키는 변경
+(`ports:`)을 하면서 그 서비스의 볼륨을 보지 않은 것이 잘못이다.
+
+#137(`rsync --delete`가 `.env`와 ssh 키를 지웠다)과 같은 부류다. 그때는 `.env`·`secrets/`
+두 개만 제외 목록에 넣고 **다른 상태 저장소를 훑지 않았다.** 두 번째다.
+
+### 조치
+
+- `pg_data_dev` 이름 있는 볼륨을 dev compose에 추가.
+- **회귀 테스트**: `test_postgres_has_named_data_volume` — dev/prod 양쪽에서 postgres가
+  `:/var/lib/postgresql/data`로 끝나는 마운트를 갖고, 그것이 바인드가 아니라 최상위
+  `volumes:`에 선언된 이름 있는 볼륨인지 확인한다. 볼륨 줄을 빼면 실패하는 것까지 확인했다.
+  Open WebUI 데이터 볼륨도 같이 고정했다.
+- 복구 절차를 NEXT-STEPS에 넣었다. 핵심: **익명 볼륨은 떨어져 나갔을 뿐 지워지지 않았다.**
+  `docker volume ls -qf dangling=true`로 찾아 `PG_VERSION=16`인 것을 새 이름 볼륨으로
+  `cp -a` 하면 그대로 살아난다. 그래서 맨 앞에 **`prune`·`down -v` 금지**를 크게 적었다 —
+  그 셋만이 복구를 불가능하게 만든다.
+- 반영 작업 **전에** `pg_dumpall` 백업을 돌리는 절차를 상시 항목으로 넣었다.
+
+### 교훈 (다음에 compose를 고칠 때)
+
+컨테이너를 재생성시키는 변경(`ports`·`environment`·`image`·`command`)을 할 때는 **그 서비스가
+상태를 갖는지, 이름 있는 볼륨이 붙어 있는지 먼저 본다.** dev라고 예외가 아니다 — 사용자의
+실제 운영 데이터가 dev compose 위에 올라가 있다.
+
+---
+
 ## 다음 항목은 이어서 여기 아래에 추가

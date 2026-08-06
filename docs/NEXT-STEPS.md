@@ -1,16 +1,69 @@
-# 지금 할 일
+# 지금 할 일 — DB 복구가 최우선
 
-**[WSL]** `/home/yrc/AI-Infra-Assistant`
 **[서버]** 202.20.183.30 · `/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant`
-**[웹]** 관리자 콘솔 `http://202.20.183.30:8501`
+**[WSL]** `/home/yrc/AI-Infra-Assistant`
 
-> 아직 서버에 반영되지 않은 것이 쌓여 있습니다(#128~#140). 1~4번을 한 번에 하시면 됩니다.
-> 이번에 들어간 것: **보안 강화**(내부 호출 인증 · 남의 계정 조회 차단) ·
-> **엑셀로 커맨드 일괄 등록**(인자 포함) · 인자 설명이 에이전트에 실제로 전달되도록 수정.
+> ## ⛔ 먼저 읽으세요
+> **`docker volume prune` / `docker system prune` / `docker compose down -v` 를 실행하지 마세요.**
+> 데이터는 **지워진 게 아니라 연결만 끊긴** 상태일 가능성이 높습니다. 위 세 명령만이
+> 그것을 영구 삭제합니다. 1번으로 복구 가능 여부부터 확인합니다.
+
+**무슨 일이 있었나**: `docker-compose.dev.yml`의 postgres에 이름 있는 볼륨이 없어서 익명
+볼륨이 붙어 있었습니다. 익명 볼륨은 **컨테이너를 다시 만들면 떨어져 나갑니다.** 지난 반영에서
+postgres의 `ports:` 를 `127.0.0.1:` 로 바꿨는데, 포트가 바뀌면 compose가 컨테이너를 재생성합니다.
+그래서 빈 볼륨이 새로 붙고 initdb → 기본값 시드가 돌아 전부 초기화된 것처럼 보입니다.
+
+**살아 있는 것**: Open WebUI 계정·대화(`open_webui_dev_data`), 차트(`chart_files`),
+업로드 원본 파일(`05_halo/datasets` — 저장소 밖이라 rsync가 건드리지 않음).
+**사라진 것**: 설정값·매뉴얼·VOC·등록 커맨드(전부 postgres 안).
 
 ---
 
-## 1. [WSL] 코드 받아서 서버로
+## 1. [서버] 떨어져 나간 볼륨 찾기 — 복구 가능한지부터
+
+```bash
+cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
+for v in $(docker volume ls -qf dangling=true); do
+  ver=$(docker run --rm -v "$v":/v alpine cat /v/PG_VERSION 2>/dev/null)
+  [ -n "$ver" ] && echo "$v  PG_VERSION=$ver  $(docker run --rm -v "$v":/v alpine du -sh /v | cut -f1)"
+done
+```
+
+`PG_VERSION=16` 이 찍히는 볼륨이 나오면 **데이터가 살아 있습니다.** 그 이름을 적어 두세요
+(64자리 16진수입니다). 두 개 이상 나오면 용량이 가장 큰 것이 찾는 볼륨입니다.
+
+**아무것도 안 나오면 여기서 멈추고 알려주세요.** 그다음은 재등록 절차라 방법이 달라집니다.
+
+## 2. [서버] 내용 확인 + 백업 파일 뽑기
+
+`<VOL>` 자리에 1번에서 찾은 이름을 넣으세요.
+
+```bash
+docker run -d --name pg-rescue -v <VOL>:/var/lib/postgresql/data \
+  -e POSTGRES_PASSWORD=devpass pgvector/pgvector:pg16
+sleep 10
+docker exec pg-rescue psql -U agent -d platform_config -c \
+  "select count(*) from platform_settings;"
+docker exec pg-rescue psql -U agent -d manual_db -c \
+  "select count(*) from manuals;"
+docker exec pg-rescue psql -U agent -d command_db -c \
+  "select count(*) from execution_commands;"
+```
+
+숫자가 예전 그대로면 맞게 찾은 것입니다. **결과를 보내주세요.** 이어서 백업 파일을 뽑습니다.
+
+```bash
+docker exec pg-rescue pg_dumpall -U agent > /home/gpu1/yr9.choi/05_halo/pg-backup-$(date +%F).sql
+ls -lh /home/gpu1/yr9.choi/05_halo/pg-backup-*.sql
+docker stop pg-rescue && docker rm pg-rescue
+```
+
+이 `.sql` 파일은 **이후 단계가 잘못돼도 되돌릴 수 있는 보험**입니다. 지우지 마세요.
+
+## 3. [WSL] 고친 코드 받아서 서버로
+
+`docker-compose.dev.yml`에 `pg_data_dev` 이름 있는 볼륨을 넣었습니다. 이제 컨테이너를 다시
+만들어도 DB가 사라지지 않습니다(회귀 테스트도 걸어 뒀습니다).
 
 ```bash
 git -C /home/yrc/AI-Infra-Assistant fetch origin main
@@ -21,119 +74,91 @@ rsync -avz --delete --progress \
   yr9.choi@202.20.185.100:/home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant/
 ```
 
-## 2. [서버] `.env` 확인 — **ssh 키를 꺼낼 필요 없습니다**
+## 4. [서버] 새 볼륨을 만들고 **옛 데이터를 그대로 옮긴다**
 
-호스트에 `/root/.ssh/id_ed25519` 가 있으니 그걸 그대로 씁니다(복사하지 마세요).
+`down`에 **`-v`를 붙이지 마세요.**
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-ls -l /root/.ssh/id_ed25519          # 파일이어야 합니다(디렉토리면 멈추고 알려주세요)
-cp -n .env.example .env
-grep -q SSH_KEY_PATH .env || printf '\nSSH_KEY_PATH=/root/.ssh/id_ed25519\nSSH_PRIVDROP=runuser\n' >> .env
+docker compose -f docker-compose.dev.yml up -d postgres     # 새 이름 볼륨 생성
+sleep 10
+docker compose -f docker-compose.dev.yml down               # -v 금지
+NEW=$(docker volume ls -q | grep pg_data_dev)
+echo "새 볼륨: $NEW"
 ```
 
-## 3. [서버] 재생성
+`$NEW`가 한 줄 나오는지 확인한 뒤, 옛 데이터를 덮어씁니다(`<VOL>`은 1번의 이름).
+
+```bash
+docker run --rm -v <VOL>:/from -v "$NEW":/to alpine \
+  sh -c 'rm -rf /to/* /to/..?* 2>/dev/null; cp -a /from/. /to/ && ls /to/PG_VERSION'
+```
+
+마지막에 `/to/PG_VERSION`이 찍히면 복사 성공입니다.
+
+## 5. [서버] 기동 — **`db-init`은 아직 돌리지 마세요**
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker compose -f docker-compose.dev.yml run --rm db-init
-docker compose -f docker-compose.dev.yml up -d --no-build --remove-orphans
-docker compose -f docker-compose.dev.yml restart admin-console
+docker compose -f docker-compose.dev.yml up -d --no-build
 docker compose -f docker-compose.dev.yml ps
-docker compose -f docker-compose.dev.yml exec -T execution-mcp ls -l /root/.ssh/id_ed25519
+docker compose -f docker-compose.dev.yml exec -T postgres \
+  psql -U agent -d manual_db -c "select count(*) from manuals;"
 ```
 
-- `db-init`을 빼면 새 설정 키(`execution_user_scope_flags` 등)가 안 생깁니다.
-- `restart admin-console`을 빼면 4번 버튼이 **`405 Method Not Allowed`** 로 실패합니다
-  (화면은 rsync로 바로 새 코드가 되는데 백엔드는 재시작해야 바뀝니다).
-- 마지막 줄이 `-rw------- 1 root root 399 ...` 처럼 **파일**이어야 합니다.
+매뉴얼 수가 예전대로면 복구 완료입니다. **그 결과를 보내주세요.**
+확인된 뒤에 마이그레이션을 올립니다(새 설정 키가 필요합니다).
 
-## 4. [웹] 콘솔 → 설정 탭 → 에이전트
+```bash
+docker compose -f docker-compose.dev.yml run --rm db-init
+docker compose -f docker-compose.dev.yml restart admin-console
+```
 
-**`지시문을 최신 기본값으로 되돌리기`** 버튼 클릭 → 이어서 나오는 `agent-server 재시작` 승인.
-(이번에 지시문이 바뀌었습니다 — 이걸 안 누르면 남의 계정 질문에 계속 가이드 문서를 안내합니다.)
+`db-init`은 기존 행을 덮어쓰지 않고 없는 것만 넣습니다. 그래도 **복구 확인 후에** 도는 것이
+안전해서 순서를 나눴습니다.
 
-같은 화면에서 값 확인 · 입력:
+## 6. [웹] 콘솔에서 값 확인
+
+복구가 끝나면 설정 탭에서 아래를 확인하세요(값이 mock으로 돌아가 있으면 다시 넣습니다).
 
 | key | 값 |
 |---|---|
+| `vllm_llm_base_url` | `http://75.23.32.41:8000/v1` |
+| `vllm_llm_model` | `qwen3-235b-a22b` |
+| `vllm_embed_base_url` | `http://75.23.32.41:8010/v1` |
+| `vllm_embed_model` | `bge-m3` |
+| `rerank_provider` / `rerank_base_url` / `rerank_model` | `vllm` / `http://75.23.32.41:8020/v1` / `bge-reranker-v2-m3` |
 | `execution_host` | `202.20.185.100` |
 | `openwebui_public_url` | `http://202.20.183.30:8502` |
-| `voc_intake_guide` | 실제 VOC 접수 경로 |
-| **`agent_api_key`** | **Open WebUI 연결(Connections)에 넣은 API 키와 같은 값** |
+| `agent_api_key` | Open WebUI 연결(Connections)의 API 키와 같은 값 |
 
-`agent_api_key`를 넣어야 `/v1/*`에 인증이 걸립니다. 비워 두면 **같은 망의 누구나 헤더만 바꿔
-남의 계정으로 커맨드를 실행할 수 있습니다.** 넣은 뒤 agent-server를 재시작하고 Open WebUI에서
-질문이 되는지 확인하세요(키가 서로 다르면 모델 목록이 비고 401이 납니다).
-키 확인: Open WebUI 관리자 패널 → 설정 → 연결(Connections) → `http://agent-server:8000/v1`.
+그리고 **`지시문을 최신 기본값으로 되돌리기`** → `agent-server 재시작`.
 
-## 5. [웹] 콘솔 → 커맨드 실행 탭 → 엑셀로 등록된 커맨드 정리
+## 7. 복구 뒤에 — 정기 백업을 겁니다
 
-**`현재 등록분 내보내기`** 를 눌러 지금 등록된 커맨드를 엑셀로 받으세요. 거기서 고치고
-그대로 다시 올리면 이름 기준으로 덮어써집니다. (빈 양식은 `엑셀 양식 받기`.)
-
-지금 `myquota` / `s2_phd_list` / `s2_phd_info` 세 개가 전부 인자 타입 '문자열'로 되어 있는데,
-`{option}` 은 **선택형**으로 바꾸는 게 맞습니다. 엑셀에서 이렇게 적으시면 됩니다.
-
-| 이름 | 실행 커맨드 | 인자1 이름 | 인자1 타입 | 인자1 선택지 |
-|---|---|---|---|---|
-| s2_phd_list | `phd list {option}` | (비워도 됨) | 선택형 | `-l: 상세 정보를 길게 출력`<br>`-lf: 선택 가능한 필드 목록` |
-| s2_phd_info | `phd info {option} {job_id}` | (비워도 됨) | 선택형 | `-j: JSON 형식으로 반환`<br>`-tl: 부가 정보까지 출력` |
-
-- **인자 이름 칸은 비워도 됩니다** — 실행 커맨드의 `{option}` `{job_id}` 순서로 자동 연결됩니다.
-- 선택지는 **한 칸 안에서 줄바꿈**(`Alt+Enter`)으로 하나씩, `값: 설명` 형태로 씁니다.
-  콜론 뒤에 **공백**을 넣어야 값과 설명이 갈립니다.
-- 콤마로 구분하지 마세요(설명에 콤마가 들어가면 깨집니다).
-- 올린 뒤 **execution-mcp 재시작**(화면에 버튼이 뜹니다).
-
-지금까지는 여기 적은 인자 설명이 **에이전트에게 전혀 전달되지 않았습니다**(#140에서 수정).
-이제 전달되므로, 설명을 제대로 적으면 옵션 선택이 눈에 띄게 좋아질 겁니다.
-
-## 6. [웹] Open WebUI에서 확인 — 각 항목 **소요 시간**을 적어 주세요
-
-1. `S2 스케줄러 job list 확인해줘`
-2. `내 홈 파일 리스트 보여줘`
-3. `내 홈 스토리지 용량 얼마나 써?`
-4. `cocoa.song 계정이 어떤 gpu job 을 수행중이야?` ← **이번에 고친 것**
-
-4번은 이렇게 한 줄로만 나와야 합니다.
-
-> 본인(yr9.choi) 자원만 조회할 수 있어 cocoa.song의 job은 확인할 수 없습니다.
-
-`ops_assistant`라는 말이 나오거나, "가이드 위치: 슈퍼컴 Portal > …" 이 붙으면 **4번의
-지시문 되돌리기를 안 한 것**입니다.
-
-1~3번은 진행 줄을 **통째로** 보내주세요.
-
-```
-· `ls -lh` 실행하는 중
-· 완료 (202.20.185.100 · yr9.choi · 0.4초) ⚠ 출력 132줄 중 58줄만
-```
-
-- 앞줄 = **실제로 실행된 커맨드**. 숨김 파일이 안 보이면 여기에 `-A`가 없는 것입니다.
-- `(202.20.185.100 · yr9.choi)` = 로그인 서버에서 본인 계정으로 돌았다는 **증거**입니다
-  (답변 본문의 "…기준입니다" 같은 문장은 근거가 아닙니다).
-- `⚠ 출력 N줄 중 M줄만` 이 보이면 목록이 잘린 것입니다. 자주 보이면 설정 탭의
-  `execution_result_max_chars`(기본 4000)를 올리세요.
-
-## 7. [서버] 로그 3종 — 6번 뒤에 보내주세요
+같은 일이 다시 나도 5분이면 되돌릴 수 있게, 백업을 습관으로 만드는 게 좋습니다.
+**반영 작업 전에는 항상** 이 한 줄을 먼저 돌리세요.
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker compose -f docker-compose.dev.yml logs execution-mcp | grep -E "상주 마스터|노출된 툴|스키마"
-docker compose -f docker-compose.dev.yml logs --tail=100 execution-mcp | grep ssh_exec
-docker compose -f docker-compose.dev.yml logs --tail=100 agent-server | grep 완료
+docker compose -f docker-compose.dev.yml exec -T postgres \
+  pg_dumpall -U agent > /home/gpu1/yr9.choi/05_halo/pg-backup-$(date +%F-%H%M).sql
 ```
 
-각각 이렇게 나와야 정상입니다.
+되돌릴 때:
 
-- `상주 마스터 준비 완료` — root 세션이 떠 있음
-- `등록 3개 · run_command 1개 = 툴 4개 (스키마 …자 ≈ …토큰/요청)` — 인자 설명이 포함된 값
-- `[ssh_exec] phd 320ms (연결 재사용 · runuser · ...)` — 접속 0, 로그인 셸 생략
-- `[agent] chatcmpl-… 완료 8.1초 (준비 0.3초 · 첫 글자 3.2초 · 도구 1회 · 커맨드 실행 0.4초)`
+```bash
+docker compose -f docker-compose.dev.yml exec -T postgres \
+  psql -U agent -d postgres < /home/gpu1/yr9.choi/05_halo/pg-backup-<날짜>.sql
+```
 
-`준비`가 크면 MCP 세션, `커맨드 실행`이 크면 실행 쪽, `전체 − 커맨드 실행`이 크면 LLM 턴 수가
-문제입니다. 그 숫자로 다음 작업을 정합니다.
+---
+
+## 복구가 끝난 뒤에 할 일 (지금 하지 마세요)
+
+1번이 성공했는지 확인되면 그때 안내하겠습니다. 대기 중인 것: 엑셀로 커맨드 재등록
+(`현재 등록분 내보내기` → 수정 → 업로드), 남의 계정 차단 동작 확인
+(`cocoa.song 계정이 어떤 gpu job 을 수행중이야?` → 한 줄 거절), 소요 시간 측정.
 
 ---
 
@@ -141,20 +166,7 @@ docker compose -f docker-compose.dev.yml logs --tail=100 agent-server | grep 완
 
 | 증상 | 조치 |
 |---|---|
-| 멀쩡한 커맨드가 `다른 사용자의 자원을 조회하려는 것` 으로 거부됨 | 설정 탭 `execution_user_scope_flags` 에서 걸리는 옵션(예: `-u`)을 빼세요. `sort -u` 처럼 계정과 무관한 `-u`가 있습니다 |
-| 엑셀 업로드 후 일부가 `건너뜀` | 사유가 화면에 나옵니다. 대부분 자리표시자와 인자 열 개수가 안 맞는 경우 — 인자 이름 칸을 **비우면** 자동으로 맞춰집니다 |
-| `Expecting value: ...` 오류 반복 | 설정 탭 `llm_streaming` → `false` → agent-server 재시작 |
-| 커맨드가 `command not found` | 로그에 `'xxx'은 로그인 셸이 필요합니다`가 있으면 자동 복구된 것. 계속 실패하면 `.env`의 `SSH_PRIVDROP=su-login` |
-| 첫 커맨드만 계속 느림 | `curl -s http://localhost:8504/warm` 결과를 보내주세요 |
-| 강등 방식별 시간이 궁금할 때 | `bash scripts/bench-exec.sh yr9.choi "phd list"` |
-| `docker compose exec` 가 아무것도 안 뱉음 | 아래 진단을 돌려 결과를 보내주세요 |
-
-```bash
-cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker compose -f docker-compose.dev.yml ps          # execution-mcp 가 Up 인가
-docker compose -f docker-compose.dev.yml ps -a       # 죽은 컨테이너는 ps에 안 나온다
-docker compose -f docker-compose.dev.yml logs --tail=30 execution-mcp
-```
-
-`exec`는 **컨테이너가 Up일 때만** 됩니다. 죽어 있으면 `ps`에 안 보이고 조용히 실패합니다
-(`ps -a`로 확인).
+| 1번에서 `PG_VERSION` 볼륨이 안 나옴 | 멈추고 알려주세요. `docker ps -a`에 옛 postgres 컨테이너가 남아 있을 수 있습니다 |
+| 4번에서 `$NEW`가 비어 있음 | 3번 rsync가 안 된 것입니다. 서버에서 `grep pg_data_dev docker-compose.dev.yml` 확인 |
+| 5번에서 postgres가 안 뜸 | `docker compose -f docker-compose.dev.yml logs postgres` 를 보내주세요 |
+| `docker compose exec` 가 아무것도 안 뱉음 | 컨테이너가 죽은 것입니다. `ps -a`로 확인(`ps`에는 안 보입니다) |

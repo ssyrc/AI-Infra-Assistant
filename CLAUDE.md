@@ -102,7 +102,12 @@ docker compose -f docker-compose.dev.yml up -d --no-build
 - **왜 초기화되나**: `docker-compose.dev.yml`의 `dev-config` 서비스가 `up` 할 때마다 vLLM 주소를
   mock으로 되돌린다. 콘솔에서 저장한 값(`updated_by`가 관리자 계정)과 `.env`에 실제 주소를 넣은
   환경은 건드리지 않도록 이중 가드를 걸어뒀다(RUN-LOG #28, #48). 그래도 **postgres 볼륨이
-  삭제되면**(`docker compose down -v`) 설정·매뉴얼·VOC가 전부 사라진다 — `down -v`는 쓰지 말 것.
+  삭제되면** 설정·매뉴얼·VOC가 전부 사라진다 — `down -v`·`volume prune`은 쓰지 말 것.
+- **compose에서 컨테이너를 재생성시키는 변경(`ports`·`environment`·`image`·`command`)을 할 때는
+  그 서비스에 이름 있는 볼륨이 붙어 있는지 먼저 확인한다**(#141). dev postgres에는 볼륨이 아예
+  없어서 `ports:` 한 줄을 고친 것만으로 DB가 통째로 날아갔다. `down -v`만 위험한 게 아니다.
+  회귀 테스트 `test_postgres_has_named_data_volume`가 dev/prod 양쪽을 고정한다.
+- **반영 작업 전에는 `pg_dumpall` 백업을 먼저 돌린다**(NEXT-STEPS 7번에 커맨드).
 - 실서버의 `.env`에 `VLLM_LLM_BASE_URL`/`VLLM_EMBED_BASE_URL`/`RERANK_*`/`EXECUTION_HOST`를
   실제 값으로 넣어두면 DB를 새로 만들어도 시드 단계에서 올바른 값이 들어간다.
 

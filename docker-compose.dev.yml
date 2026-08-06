@@ -44,6 +44,12 @@ services:
       POSTGRES_USER: agent
       POSTGRES_PASSWORD: *pgpass
     volumes:
+      # **이름 있는 볼륨이 반드시 있어야 한다.** 이게 없으면 pgvector 이미지의
+      # `VOLUME /var/lib/postgresql/data` 선언 때문에 **익명 볼륨**이 붙는데, 익명 볼륨은
+      # 컨테이너를 다시 만들 때 떨어져 나간다. `ports:` 한 줄만 바꿔도 compose는 컨테이너를
+      # 재생성하므로, 그것만으로 매뉴얼·VOC·설정이 전부 사라진다(#141에서 실제로 발생).
+      # prod(docker-compose.yml)에는 처음부터 pg_data가 있었고 dev에만 빠져 있었다.
+      - pg_data_dev:/var/lib/postgresql/data
       - ./shared/init-db:/docker-entrypoint-initdb.d
     # 호스트 포트 충돌 시 .env에서 *_PORT 변수만 바꾸면 된다(컨테이너 내부 포트는 고정).
     # **127.0.0.1에만 연다** - dev 비밀번호가 고정값이라 같은 망에 열어 두면 안 된다.
@@ -246,6 +252,8 @@ services:
       agent-server: { condition: service_started }
 
 volumes:
+  # 설정·매뉴얼·VOC·등록 커맨드가 전부 여기 들어 있다. 지우면 복구할 수 없다.
+  pg_data_dev:
   open_webui_dev_data:
   # 생성된 차트 SVG. 컨테이너를 다시 만들어도 최근 대화의 그림이 깨지지 않게 볼륨에 둔다.
   chart_files:
