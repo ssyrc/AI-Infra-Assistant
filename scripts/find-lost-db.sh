@@ -12,7 +12,21 @@
 set -uo pipefail
 
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.dev.yml}"
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+# compose 파일이 있는 곳을 **찾아서** 들어간다.
+# 예전에는 `cd "$(dirname "$0")/.."` 였는데, 스크립트를 저장소 루트에 복사해 두고 실행하면
+# 한 단계 위(`05_halo/`)로 올라가 compose 파일을 못 찾았다. 그래서 postgres가 멀쩡히 떠 있는데도
+# "컨테이너를 찾지 못했습니다"라고 찍혔다 - 진단이 거짓말을 하면 없느니만 못하다.
+_here=$(cd "$(dirname "$0")" && pwd)
+for _cand in "$_here" "$_here/.." "$PWD" "$PWD/.."; do
+  if [ -f "$_cand/$COMPOSE_FILE" ]; then cd "$_cand" && break; fi
+done
+if [ ! -f "$COMPOSE_FILE" ]; then
+  echo "[진단] $COMPOSE_FILE 을 찾지 못했습니다. 저장소 루트에서 실행하세요:" >&2
+  echo "       cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant && bash scripts/find-lost-db.sh" >&2
+  exit 1
+fi
+echo "[진단] 작업 디렉토리: $PWD"
 
 hr() { printf '\n===== %s =====\n' "$1"; }
 
