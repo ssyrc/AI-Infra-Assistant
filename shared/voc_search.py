@@ -20,8 +20,9 @@ from retrieval import (
 _DSN = "voc_db_dsn"
 
 # 답변에 '사람이 시스템을 직접 확인한 흔적'이 있으면 사용자가 따라 할 수 있는 절차가 아니다.
-# 이런 사례는 방법을 안내하는 대신 운영팀 접수를 안내해야 하므로 여기서 미리 분류해 준다.
-# (표현이 다양해서 정확히 다 잡을 수는 없다 - 애매하면 operator로 보수적으로 분류한다.)
+# **주의: 여기 없는 표현은 전부 `user`로 떨어진다** — 보수적인 쪽이 아니다. 예전 주석에는
+# "애매하면 operator로 본다"고 적혀 있었는데 코드는 정반대였다. 이 목록이 한계인 이유이고,
+# #157에서 LLM 분류(`voc_classify.py`)로 옮긴 이유다. 여기는 백필 전 임시 경로일 뿐이다.
 _OPERATOR_HINTS = (
     "확인 결과", "확인결과", "확인해보니", "확인한 결과", "점검 결과", "점검해", "조회해보니",
     "로그를 확인", "로그 확인", "서버에 이상", "장애가 있", "장비 이상", "이상이 있었",
@@ -33,7 +34,16 @@ _OPERATOR_HINTS = (
 
 
 def classify_handling(answer: str | None) -> str:
-    """"user"(사용자가 직접 해결 가능) | "operator"(운영자가 확인·조치한 건)."""
+    """**아직 분류되지 않은 행에만 쓰는 임시 추론** ("user" | "operator").
+
+    사용자 지적: "키워드 사용에 한계가 있더라고." 맞다 — 표현은 무한하고 이 목록은 계속
+    뚫린다. 그래서 #157부터 진짜 판정은 `voc_classify.py`(LLM)가 하고 `handled_by` 컬럼에
+    저장한다. 이 함수는 그 컬럼이 아직 비어 있을 때(백필 전, 갓 등록된 행)만 쓰인다.
+
+    **매칭이 안 되면 `user`로 떨어진다** — 즉 안전한 쪽이 `user`가 아니라는 점에 유의.
+    운영자 건을 `user`로 잘못 보면 남이 해 준 조치를 사용자에게 시킬 수 있다.
+    그래서 백필을 돌려 이 경로를 비우는 것이 맞다.
+    """
     text = (answer or "").replace(" ", "")
     for hint in _OPERATOR_HINTS:
         if hint.replace(" ", "") in text:
@@ -62,7 +72,7 @@ async def search_voc_records(query: str, top_k: int = 5) -> list[dict]:
     if vec is None:
         rows = await pool.fetch(
             """
-            SELECT id, question, answer, created_at,
+            SELECT id, question, answer, created_at, handled_by, handled_by_reason,
                    ts_rank(tsv, to_tsquery('simple', $1)) AS score
             FROM voc_records
             WHERE tsv @@ to_tsquery('simple', $1)
@@ -103,7 +113,8 @@ async def search_voc_records(query: str, top_k: int = 5) -> list[dict]:
                 FULL OUTER JOIN keyword_search k ON v.id = k.id
                 FULL OUTER JOIN trgm_search t ON COALESCE(v.id, k.id) = t.id
             )
-            SELECT r.id, r.question, r.answer, r.created_at, fused.rrf_score AS score
+            SELECT r.id, r.question, r.answer, r.created_at,
+                   r.handled_by, r.handled_by_reason, fused.rrf_score AS score
             FROM fused
             JOIN voc_records r ON r.id = fused.id
             ORDER BY fused.rrf_score DESC
@@ -129,7 +140,8 @@ async def search_voc_records(query: str, top_k: int = 5) -> list[dict]:
                        COALESCE(1.0/(60+v.rank),0) + COALESCE(1.0/(60+k.rank),0) AS rrf_score
                 FROM vector_search v FULL OUTER JOIN keyword_search k ON v.id = k.id
             )
-            SELECT r.id, r.question, r.answer, r.created_at, fused.rrf_score AS score
+            SELECT r.id, r.question, r.answer, r.created_at,
+                   r.handled_by, r.handled_by_reason, fused.rrf_score AS score
             FROM fused
             JOIN voc_records r ON r.id = fused.id
             ORDER BY fused.rrf_score DESC
@@ -161,7 +173,10 @@ async def search_voc_records(query: str, top_k: int = 5) -> list[dict]:
     result = []
     for idx, rr_score in ranked:
         item = candidates[idx]
-        item["handled_by"] = classify_handling(item.get("answer"))
+        # 저장된 판정을 쓰고, 아직 분류 전인 행에서만 키워드 추론으로 떨어진다(#157).
+        item["handled_by"] = (item.get("handled_by")
+                              or classify_handling(item.get("answer")))
+        item.pop("handled_by_reason", None)
         item["question"] = clip(item.get("question"))
         item["answer"] = clip(item.get("answer"))
         # 개인·조직 식별 정보는 에이전트에 넘기기 전에 지운다(프롬프트에 원문이 들어가지 않게).

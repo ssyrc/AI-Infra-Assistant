@@ -1176,9 +1176,11 @@ def _voc_block(results: list) -> str:
     lines.append("아래는 실제로 접수됐던 문의와 그 답변입니다. 지금 질문과 **정말 같은 건인지** "
                  "보고 쓰세요(증상만 비슷하고 대상이 다르면 쓰지 않습니다).")
     for i, r in enumerate(results, 1):
-        by = r.get("handled_by") or ""
+        # `unknown`(분류기가 가리지 못한 건)은 **운영자 건과 같이** 다룬다.
+        # 남이 해 준 조치를 사용자에게 시키는 쪽이 반대 오류보다 나쁘다.
+        by = "user" if (r.get("handled_by") or "") == "user" else "operator"
         lines.append(f"\n## 과거 사례 {i} (처리: "
-                     f"{'운영자가 확인·조치' if by == 'operator' else '사용자가 직접 해결'})")
+                     f"{'사용자가 직접 해결' if by == 'user' else '운영자가 확인·조치'})")
         lines.append(f"- 문의: {(r.get('question') or '').strip()}")
         lines.append(f"- 답변: {(r.get('answer') or '').strip()}")
     return "\n".join(lines)

@@ -4,8 +4,10 @@ VOC(사용자/운영자 질의응답 이력) 관리 API.
 질문/답변만 다룬다 - 부서·해결여부는 실제로 쓰이지 않아 화면과 API에서 제외했다
 (DB 컬럼은 기존 데이터를 위해 남겨 두고 새 등록 시 기본값이 들어간다).
 """
+import asyncio
 import tempfile
 import uuid
+from datetime import datetime, timezone
 
 import openpyxl
 from fastapi import APIRouter, Depends, Form, UploadFile, File, HTTPException
@@ -58,7 +60,8 @@ async def list_voc(q: str | None = None, batch_id: str | None = None,
     )
     rows = await pool.fetch(
         """
-        SELECT id, question, answer, created_at, batch_id, source_file
+        SELECT id, question, answer, created_at, batch_id, source_file,
+               handled_by, handled_by_reason, handled_by_source
         FROM voc_records
         WHERE ($1::text IS NULL OR question ILIKE '%' || $1 || '%')
           AND ($2::text IS NULL OR batch_id = $2)
@@ -137,7 +140,10 @@ async def update_voc(voc_id: int, body: VocIn, admin: str = Depends(require_admi
     pool = await get_pool("voc_db_dsn")
     row = await pool.fetchrow(
         """
-        UPDATE voc_records SET question=$1, answer=$2, embedding=$3::vector
+        UPDATE voc_records SET question=$1, answer=$2, embedding=$3::vector,
+               -- 답변이 바뀌면 처리 주체 판정도 무효다. 비워서 다시 분류되게 한다(#157).
+               handled_by=NULL, handled_by_reason=NULL,
+               handled_by_source=NULL, handled_by_at=NULL
         WHERE id=$4 RETURNING id
         """,
         body.question,
@@ -155,6 +161,66 @@ async def delete_voc(voc_id: int, admin: str = Depends(require_admin)):
     pool = await get_pool("voc_db_dsn")
     await pool.execute("DELETE FROM voc_records WHERE id = $1", voc_id)
     return {"ok": True}
+
+
+# --- 처리 주체 분류 (#157) -----------------------------------------------------------
+# 수천 건을 LLM으로 훑는 작업이라 요청 안에서 끝낼 수 없다(브라우저가 먼저 끊는다).
+# 백그라운드 태스크로 돌리고 진행 상황만 폴링하게 한다.
+_classify_state: dict = {"running": False, "done": 0, "total": 0,
+                         "classified": 0, "failed": 0, "error": "", "finished_at": None}
+_classify_task = None
+
+
+@router.get("/classify/status")
+async def classify_status(admin: str = Depends(require_admin)):
+    """미분류 건수와 진행 상황. 화면이 이걸 폴링한다."""
+    pool = await get_pool("voc_db_dsn")
+    row = await pool.fetchrow(
+        """
+        SELECT count(*) AS total,
+               count(*) FILTER (WHERE handled_by IS NULL) AS pending,
+               count(*) FILTER (WHERE handled_by = 'user') AS c_user,
+               count(*) FILTER (WHERE handled_by = 'operator') AS c_operator,
+               count(*) FILTER (WHERE handled_by = 'unknown') AS c_unknown
+        FROM voc_records
+        """
+    )
+    return {**dict(row), "progress": dict(_classify_state)}
+
+
+@router.post("/classify")
+async def classify_voc(limit: int = 0, admin: str = Depends(require_admin)):
+    """미분류 VOC의 처리 주체를 LLM으로 판정해 저장한다(백그라운드).
+
+    `limit`을 주면 그만큼만 — 수천 건을 돌리기 전에 몇 건으로 품질을 먼저 보기 위한 것이다.
+    결과는 `handled_by_reason`에 남으므로 콘솔 목록에서 판정 근거를 확인할 수 있다.
+    """
+    global _classify_task
+    if _classify_state["running"]:
+        raise HTTPException(409, "이미 분류가 진행 중입니다.")
+
+    from voc_classify import classify_pending
+
+    pool = await get_pool("voc_db_dsn")
+    _classify_state.update(running=True, done=0, total=0, classified=0, failed=0,
+                           error="", finished_at=None)
+
+    def progress(done, total, classified, failed):
+        _classify_state.update(done=done, total=total,
+                               classified=classified, failed=failed)
+
+    async def _run():
+        try:
+            await classify_pending(pool, limit=limit, progress=progress)
+        except Exception as e:  # noqa: BLE001
+            _classify_state["error"] = f"{type(e).__name__}: {e}"
+            print(f"[voc] 분류 실패: {e}")
+        finally:
+            _classify_state["running"] = False
+            _classify_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+    _classify_task = asyncio.create_task(_run())
+    return {"ok": True, "started": True}
 
 
 def _header_row(ws, row_num: int) -> list[str]:

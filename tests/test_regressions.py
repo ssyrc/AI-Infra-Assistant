@@ -2562,6 +2562,92 @@ def test_instruction_guides_before_escalating():
     assert "먼저 안내" in voc, "operator 사례에서 곧바로 접수로 넘기는 길이 열려 있다"
 
 
+# --- #157: 처리 주체를 키워드가 아니라 LLM이 판정한다 ---------------------------------
+def test_voc_classify_puts_reason_before_label():
+    """생성 순서가 곧 조건이다. 스키마에서 `reason`이 `label`보다 **먼저** 나와야
+    라벨이 자기가 방금 쓴 근거를 조건으로 결정된다. 뒤집으면 근거가 사후 정당화가 된다."""
+    import voc_classify as vc
+    props = list(vc._SCHEMA["properties"]["results"]["items"]["properties"])
+    assert props.index("reason") < props.index("label"), props
+
+
+def test_voc_classify_offers_abstention():
+    """애매한 건을 찍지 않도록 기권 라벨이 있어야 한다."""
+    import voc_classify as vc
+    assert "unknown" in vc.LABELS
+    assert "unknown" in vc._SCHEMA["properties"]["results"]["items"]["properties"]["label"]["enum"]
+
+
+def test_voc_classify_rubric_is_criteria_not_keywords():
+    """키워드 목록으로 돌아가지 않는다 — 사용자 지적이 바로 그것이었다
+    ("키워드 사용에 한계가 있더라고"). 기준을 주고 모델이 적용하게 한다."""
+    import voc_classify as vc
+    assert "낱말로 판단하지 마세요" in vc._RUBRIC
+    assert "권한이 필요한지" in vc._RUBRIC
+    # 예전 키워드 목록이 프롬프트로 옮겨오지 않았는지 본다.
+    from voc_search import _OPERATOR_HINTS
+    leaked = [h for h in _OPERATOR_HINTS if h in vc._RUBRIC]
+    assert len(leaked) <= 2, f"키워드 목록이 프롬프트로 새어 들어왔다: {leaked}"
+
+
+def test_voc_classify_drops_hallucinated_and_misaligned_ids():
+    """배치 분류가 조용히 어긋나는 두 경우 — 모델이 없는 id를 지어내거나, 한 칸씩 밀려
+    답하는 것. id를 대조해 **버려야** 한다(미분류로 남아 다음 회차에 다시 시도)."""
+    import voc_classify as vc
+    sent = {10, 11, 12}
+    got = vc.validate([
+        {"id": 10, "reason": "본인 스크립트 수정", "label": "user"},
+        {"id": 99, "reason": "없는 행", "label": "operator"},        # 지어낸 id
+        {"id": 11, "reason": "라벨 오타", "label": "operater"},       # 모르는 라벨
+        {"id": 12, "reason": "권한 변경", "label": "OPERATOR"},       # 대소문자는 허용
+        {"id": 10, "reason": "중복", "label": "operator"},           # 먼저 온 것만
+    ], sent)
+    assert got == {10: ("user", "본인 스크립트 수정"), 12: ("operator", "권한 변경")}
+    assert 11 not in got and 99 not in got
+
+
+def test_voc_classify_parses_reasoning_and_fenced_output():
+    """구조화 출력을 서버가 거부하면 평문으로 떨어진다. 그때 Qwen3의 <think> 블록과
+    ```json 펜스, 앞뒤 설명 문장을 견뎌야 한다."""
+    import voc_classify as vc
+    assert vc.parse_response(
+        '<think>음 이건...</think>\n```json\n{"results":[{"id":1,"reason":"r","label":"user"}]}\n```'
+    ) == [{"id": 1, "reason": "r", "label": "user"}]
+    assert vc.parse_response(
+        '분류했습니다: {"results":[{"id":2,"reason":"r","label":"operator"}]} 이상입니다.'
+    ) == [{"id": 2, "reason": "r", "label": "operator"}]
+    assert vc.parse_response("설명만 하고 JSON이 없음") == []
+    assert vc.parse_response("") == []
+
+
+def test_voc_search_prefers_stored_label_over_keywords():
+    """저장된 판정이 있으면 그것을 쓰고, 없을 때만 키워드로 떨어진다."""
+    src = open(os.path.join(ROOT, "shared", "voc_search.py"), encoding="utf-8").read()
+    assert 'item.get("handled_by")\n                              or classify_handling(' in src
+    # 세 검색 갈래(키워드 전용 / 3축 RRF / 2축 RRF) 모두 컬럼을 읽어 와야 한다.
+    # 하나라도 빠지면 그 경로에서만 조용히 키워드 추론으로 떨어진다.
+    selects = [b for b in src.split("SELECT ") if "FROM voc_records" in b or "JOIN voc_records" in b]
+    reading = [b for b in selects if "handled_by" in b.split("FROM")[0].split("JOIN")[0]]
+    assert len(reading) == 3, f"{len(reading)}개 갈래만 handled_by를 읽는다"
+
+
+def test_voc_update_clears_stale_classification():
+    """답변을 고치면 처리 주체 판정도 무효다. 안 지우면 옛 판정이 계속 쓰인다."""
+    src = open(os.path.join(ROOT, "admin_console", "backend", "routers", "voc.py"),
+               encoding="utf-8").read()
+    i = src.index("async def update_voc")
+    upd = src[i:src.index("@router.", i)]
+    assert "handled_by=NULL" in upd
+
+
+def test_unknown_is_treated_like_operator_in_prompt():
+    """분류기가 못 가린 건(`unknown`)을 '사용자가 직접 해결'로 보여주면, 남이 해 준 조치를
+    사용자에게 시키게 된다. 보수적인 쪽으로 붙인다."""
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    block = src[src.index("def _voc_block("):src.index("async def _rag_context")]
+    assert 'if (r.get("handled_by") or "") == "user"' in block
+
+
 def test_instruction_forbids_deciding_scope_by_itself():
     """"~~ 클러스터는 슈퍼컴 인프라가 아니니까 다른 운영팀에 문의하라" — 지어낸 것이다.
     무엇이 우리 소관인지는 검색 결과가 정하지, 모델이 정하지 않는다."""

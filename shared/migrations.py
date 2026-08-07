@@ -404,6 +404,20 @@ MIGRATIONS: list[tuple[str, int, str]] = [
             ) STORED;
         CREATE INDEX IF NOT EXISTS manual_chunks_tsv_idx ON manual_chunks USING gin (tsv);
     """),
+    # v8: 처리 주체(사용자가 직접 한 건 / 운영자가 확인·조치한 건)를 **저장**한다.
+    #     예전에는 검색할 때마다 답변 텍스트에서 키워드로 추론했는데(`확인 결과`, `재기동`…),
+    #     그 표현을 안 쓴 답변을 통째로 놓쳤다. 목록을 늘리는 방식은 계속 뚫린다(#157).
+    #     이제 LLM이 '사용자가 자기 권한으로 재현할 수 있는가'를 판정해 여기에 넣는다.
+    #     NULL이면 아직 분류 전이라는 뜻이고, 그때만 예전 키워드 추론으로 떨어진다.
+    ("voc_db", 8, """
+        ALTER TABLE voc_records ADD COLUMN IF NOT EXISTS handled_by TEXT;
+        ALTER TABLE voc_records ADD COLUMN IF NOT EXISTS handled_by_reason TEXT;
+        ALTER TABLE voc_records ADD COLUMN IF NOT EXISTS handled_by_source TEXT;
+        ALTER TABLE voc_records ADD COLUMN IF NOT EXISTS handled_by_at TIMESTAMPTZ;
+        -- 미분류 행만 훑는 백필용. WHERE 절이 붙은 부분 인덱스라 크기가 작다.
+        CREATE INDEX IF NOT EXISTS voc_records_unclassified_idx
+            ON voc_records (id) WHERE handled_by IS NULL;
+    """),
     # v7: VOC를 '업로드 묶음' 단위로도 다룰 수 있게 한다.
     #     CSV 한 개를 올리면 수천 행이 개별 레코드로 들어가는데, 콘솔에서 낱개로만 보이면
     #     "방금 올린 그 파일"을 통째로 되돌릴 방법이 없었다. batch_id로 묶어 두면
@@ -590,6 +604,10 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
          True, False, False),
         ("voc_prefetch_top_k", "3",
          "VOC 선검색으로 프롬프트에 넣을 과거 사례 수(늘리면 프롬프트가 커진다)",
+         True, False, False),
+        ("voc_classify_batch", "12",
+         "VOC 처리 주체를 LLM으로 판정할 때 한 번에 묶어 보낼 건수. "
+         "늘리면 빠르지만 컨텍스트를 넘겨 배치가 통째로 실패할 수 있다",
          True, False, False),
         ("execution_raw_output", "true",
          "실행 결과 원문을 모델 답변 뒤에 그대로 붙인다(모델이 행을 줄여도 전체가 보인다)",

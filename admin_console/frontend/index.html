@@ -576,6 +576,9 @@ function ManualsPanel() {
 
 
 // ---------------------------------------------------------------- VOC
+// 처리 주체 라벨(#157). `unknown`은 "판정보류" — 에이전트는 이것을 운영자 건과 같이 다룬다.
+const HANDLED_LABEL = { user: "사용자", operator: "운영자", unknown: "판정보류" };
+
 function VocPanel() {
   const [items, setItems] = useState([]);
   const [q, setQ] = useState("");
@@ -589,6 +592,7 @@ function VocPanel() {
   const [unbatched, setUnbatched] = useState(0);
   const [batchId, setBatchId] = useState("");     // "" = 전체
   const [selected, setSelected] = useState([]);   // 체크한 행 id들
+  const [cls, setCls] = useState(null);           // 처리 주체 분류 현황(#157)
   const PAGE = 100;
 
   const load = useCallback(async () => {
@@ -604,8 +608,29 @@ function VocPanel() {
     const data = await api("/api/voc/batches");
     setBatches(data.batches); setUnbatched(data.unbatched);
   }, []);
+  const loadClassify = useCallback(async () => {
+    try { setCls(await api("/api/voc/classify/status")); } catch { /* 구버전 서버 */ }
+  }, []);
+  const runClassify = async (limit) => {
+    try {
+      await api(`/api/voc/classify?limit=${limit}`, { method: "POST" });
+      loadClassify();
+    } catch (e) { alert("분류 시작 실패: " + e.message); }
+  };
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadBatches(); }, [loadBatches]);
+  useEffect(() => { loadClassify(); }, [loadClassify]);
+  // 분류가 도는 동안만 2초마다 진행 상황을 갱신하고, 끝나면 목록도 다시 읽는다.
+  useEffect(() => {
+    if (!cls?.progress?.running) return;
+    const t = setInterval(async () => {
+      const next = await api("/api/voc/classify/status").catch(() => null);
+      if (!next) return;
+      setCls(next);
+      if (!next.progress?.running) load();
+    }, 2000);
+    return () => clearInterval(t);
+  }, [cls?.progress?.running, load]);
   // 검색어·묶음을 바꾸면 첫 페이지로 되돌린다(빈 페이지가 뜨는 걸 막는다).
   useEffect(() => { setOffset(0); }, [q, batchId]);
 
@@ -823,6 +848,40 @@ function VocPanel() {
         )}
       </div>
 
+      <div className="card">
+        <div style={{marginBottom: 6}}><strong>처리 주체 분류</strong>
+          <span style={{fontSize: 12, color: "var(--muted)", marginLeft: 8}}>
+            답변의 조치를 <b>사용자가 자기 권한으로 재현할 수 있는지</b>를 LLM이 판정합니다.
+            에이전트는 이 값을 보고 "방법을 안내할지 / 운영팀 접수로 안내할지"를 정합니다.
+          </span>
+        </div>
+        {cls && (
+          <div style={{fontSize: 12.5, marginBottom: 8}}>
+            전체 {cls.total}건 · <b>미분류 {cls.pending}건</b> ·
+            {" "}사용자 {cls.c_user} / 운영자 {cls.c_operator} / 판정보류 {cls.c_unknown}
+            {cls.progress?.running && (
+              <span style={{marginLeft: 10, color: "var(--muted)"}}>
+                진행 중… {cls.progress.done}/{cls.progress.total}
+                {" "}(판정 {cls.progress.classified} · 실패 {cls.progress.failed})
+              </span>
+            )}
+            {cls.progress?.error && (
+              <span style={{marginLeft: 10, color: "var(--danger, #c33)"}}>{cls.progress.error}</span>
+            )}
+          </div>
+        )}
+        <div className="row-actions">
+          <button disabled={cls?.progress?.running || !cls?.pending}
+                  onClick={() => runClassify(30)}>먼저 30건만 분류</button>
+          <button className="primary" disabled={cls?.progress?.running || !cls?.pending}
+                  onClick={() => runClassify(0)}>미분류 전부 분류</button>
+          <span style={{fontSize: 11.5, color: "var(--muted)"}}>
+            먼저 30건으로 판정 품질을 확인한 뒤 전체를 돌리세요. 이미 판정된 행은 건드리지 않으므로
+            여러 번 눌러도 됩니다. 답변을 수정하면 그 행만 자동으로 다시 분류 대상이 됩니다.
+          </span>
+        </div>
+      </div>
+
       <div className="toolbar">
         <input placeholder="질문 검색..." value={q} onChange={e => setQ(e.target.value)} style={{width: 260}} />
         {batchId && <button onClick={() => setBatchId("")}>묶음 필터 해제</button>}
@@ -842,7 +901,7 @@ function VocPanel() {
             <input type="checkbox" checked={allChecked} onChange={toggleAll}
                    title="이 페이지 전체 선택" />
           </th>
-          <th>질문</th><th>답변</th><th>출처 파일</th><th>등록일</th><th></th>
+          <th>질문</th><th>답변</th><th style={{width: 92}}>처리 주체</th><th>출처 파일</th><th>등록일</th><th></th>
         </tr></thead>
         <tbody>
           {items.map(v => (
@@ -850,6 +909,14 @@ function VocPanel() {
               <td><input type="checkbox" checked={selected.includes(v.id)} onChange={() => toggleOne(v.id)} /></td>
               <td style={{maxWidth: 260}}>{v.question}</td>
               <td style={{maxWidth: 320}}>{v.answer}</td>
+              <td style={{fontSize: 12}} title={v.handled_by_reason || "아직 분류하지 않았습니다"}>
+                {HANDLED_LABEL[v.handled_by] || "미분류"}
+                {v.handled_by_reason && (
+                  <div style={{color: "var(--muted)", fontSize: 11, marginTop: 2}}>
+                    {v.handled_by_reason}
+                  </div>
+                )}
+              </td>
               <td style={{fontSize: 12, color: "var(--muted)", maxWidth: 160}}>{v.source_file || "-"}</td>
               <td>{new Date(v.created_at).toLocaleDateString()}</td>
               <td className="row-actions">
@@ -858,7 +925,7 @@ function VocPanel() {
               </td>
             </tr>
           ))}
-          {items.length === 0 && <tr><td colSpan="6" className="empty">기록이 없습니다.</td></tr>}
+          {items.length === 0 && <tr><td colSpan="7" className="empty">기록이 없습니다.</td></tr>}
         </tbody>
       </table>
     </div>
