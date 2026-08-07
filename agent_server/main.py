@@ -556,22 +556,41 @@ _PATH_RE = re.compile(r"(?<![\w.])/(?:[\w.@+-]+/){1,}[\w.@+-]*")
 _GUIDE_MARKERS = ("자세한 내용은 다음 문서", "가이드 문서:", "가이드 위치:")
 
 
-class _Grounding:
-    """답변에 **조회 결과에 없는 값**이 들어갔는지 검사해 경고를 붙인다 (#154).
+class _AnswerGuard:
+    """근거 없는 답변을 **내보내지 않는다** (#155).
 
-    왜 코드인가: "지어내지 마라"를 지시문으로 네 번 강화했는데 계속 재발했다 - 없는 서버 IP를
-    만들어 안내하고, 매뉴얼을 검색하지도 않고 가이드 문서를 안내했다. 지시문은 확률이다.
-    #150의 원문 블록과 같은 방식으로, **LLM을 거치지 않고** 화면에 남긴다.
+    #154에서는 경고 문구를 덧붙였는데, 사용자가 분명히 거절했다 —
+    "저런 그대로 믿지마세요 문구를 넣지말라고. **아예 지어내지 말라고.**
+     우리 매뉴얼에 없거나 그 어떤 db에서 확인할 수 없는거면 **운영팀에 문의하라**고 하라고."
 
-    답변을 고쳐 쓰지는 않는다(모델 문장을 기계가 손대면 더 이상해진다). 대신 **근거 없는 값을
-    지목**해서, 사용자가 그걸 믿고 쓰지 않게 한다.
+    맞는 지적이다. 틀린 IP를 보여주면서 "믿지 마세요"를 붙이는 것은 답이 아니다.
+    근거가 없으면 **그 답변을 버리고** 운영팀 문의 안내로 바꾼다.
+
+    스트리밍에서도 바꿀 수 있어야 하므로, 이 검사가 켜져 있으면 본문을 **끝까지 모았다가**
+    한 번에 내보낸다(진행 줄은 그대로 흘러서 사용자는 기다리는 동안 무엇을 하는지 본다).
     """
 
-    def __init__(self, enabled: bool, question: str, env_text: str = ""):
+    def __init__(self, enabled: bool, question: str, env_text: str = "",
+                 intake: str = ""):
         self.enabled = enabled
+        self.intake = (intake or "").strip()
         self.searched_manual = False
-        # 근거로 인정할 텍스트: 도구 결과 + 사용자 질문 + 우리가 프롬프트에 넣어 준 환경 값.
         self.corpus = [question or "", env_text or ""]
+
+    def seed_manual(self, results: list):
+        """선검색(`_manual_context`)으로 이미 확보한 매뉴얼 근거를 등록한다.
+
+        모델이 툴을 부르지 않아도 매뉴얼을 본 것과 같으므로, 여기 실린 값은 근거로 인정한다.
+        **결과가 0건이면 검색한 것으로 치지 않는다** — 그 상태에서 문서를 안내하면 지어낸 것이다.
+        """
+        if not results:
+            return
+        self.searched_manual = True
+        for r in results:
+            try:
+                self.corpus.append(json.dumps(r, ensure_ascii=False, default=str))
+            except Exception:  # noqa: BLE001
+                self.corpus.append(str(r))
 
     def observe(self, event):
         if not self.enabled:
@@ -585,29 +604,47 @@ class _Grounding:
             except Exception:  # noqa: BLE001
                 self.corpus.append(str(fr.response))
 
-    def check(self, answer: str) -> str:
-        if not self.enabled or not answer:
-            return ""
+    def _ungrounded(self, answer: str) -> list:
         haystack = "\n".join(self.corpus)
-        problems = []
-
-        ungrounded = []
+        out = []
         for pat in (_IP_RE, _PATH_RE):
-            for m in dict.fromkeys(pat.findall(answer)):     # 순서 유지 + 중복 제거
+            for m in dict.fromkeys(pat.findall(answer)):
                 if m not in haystack:
-                    ungrounded.append(m)
-        if ungrounded:
-            problems.append("조회 결과에 없는 값: " + ", ".join(f"`{x}`" for x in ungrounded[:8]))
+                    out.append(m)
+        return out
 
+    def fallback(self, reason: str) -> str:
+        """근거가 없을 때 **대신 내보낼 답변**. 지어낸 값을 지우고 이것만 남긴다."""
+        text = ("문의하신 내용은 매뉴얼과 과거 사례에서 확인되지 않았습니다.\n"
+                "정확하지 않은 정보를 드리지 않기 위해 답변을 드리지 않습니다. "
+                "운영팀에 문의해 주세요.")
+        if self.intake:
+            text += f"\n\n접수 경로: {self.intake}"
+        print(f"[agent] 근거 없는 답변을 차단했습니다: {reason}")
+        return text
+
+    @property
+    def hold(self) -> bool:
+        """본문을 흘리지 않고 모아 두어야 하는가.
+
+        검사가 켜져 있으면 **참**이다. 이미 화면에 나간 글자는 도로 거둘 수 없으므로,
+        갈아 끼우려면 끝까지 모으는 수밖에 없다. 진행 줄(도구 실행 표시)은 그대로 흘러서
+        사용자는 기다리는 동안 무슨 일이 벌어지는지 계속 본다.
+        본문이 한 번에 나오는 게 싫으면 설정에서 `answer_grounding_check`를 끈다 —
+        대신 지어낸 값이 그대로 나간다.
+        """
+        return self.enabled
+
+    def review(self, answer: str) -> str:
+        """내보낼 최종 본문. 근거가 없으면 운영팀 문의 안내로 **갈아 끼운다**."""
+        if not self.enabled or not (answer or "").strip():
+            return answer
+        bad = self._ungrounded(answer)
+        if bad:
+            return self.fallback("조회 결과에 없는 값: " + ", ".join(bad[:8]))
         if not self.searched_manual and any(k in answer for k in _GUIDE_MARKERS):
-            problems.append("매뉴얼을 검색하지 않고 문서를 안내했습니다")
-
-        if not problems:
-            return ""
-        print(f"[agent] 근거 없는 값 감지: {problems}")
-        return ("\n\n> ⚠️ **아래 내용은 근거가 확인되지 않았습니다 — 그대로 믿지 마세요.**\n> "
-                + "\n> ".join(problems)
-                + "\n> 운영팀에 확인하시거나, 다시 질문해 주세요.")
+            return self.fallback("매뉴얼을 검색하지 않고 문서를 안내함")
+        return answer
 
 
 async def _make_grounding(question: str, user_id: str = ""):
@@ -616,13 +653,14 @@ async def _make_grounding(question: str, user_id: str = ""):
     `build_agent`가 프롬프트에 넣어 주는 '이 환경의 값'은 우리가 준 사실이므로 근거로 인정한다
     (그러지 않으면 로그인 서버 IP를 그대로 안내한 답변이 매번 경고를 받는다)."""
     on = _mem_on(await get_config("answer_grounding_check", "true"))
+    intake = await get_config("voc_intake_guide", "")
     env = " ".join(str(x) for x in (
         user_id,
         await get_config("execution_host", ""),
         await get_config("openwebui_public_url", ""),
-        await get_config("voc_intake_guide", ""),
+        intake,
     ) if x)
-    return _Grounding(on, question, env)
+    return _AnswerGuard(on, question, env, intake)
 
 
 class _Pace:
@@ -895,6 +933,9 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     mem_enabled = _mem_on(await get_config("memory_enabled", "true"))
     show_tools = _mem_on(await get_config("show_tool_activity", "true"))
     extra_instruction = await _longterm_memory_block(user_id, conv, last_text) if mem_enabled else None
+    manual_block, manual_hits = await _manual_context(last_text)
+    if manual_block:
+        extra_instruction = (extra_instruction or "") + manual_block
 
     # 요청 단위로 에이전트를 만들어 호출자 헤더를 MCP에 전달한다.
     # System MCP는 X-User-Id로 user_scoped 툴(예: 본인 job 조회)의 user_id를 강제 주입하고,
@@ -911,6 +952,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
 
     raw = await _make_raw_outputs()
     ground = await _make_grounding(last_text, user_id)
+    ground.seed_manual(manual_hits)
 
     if not req.stream:
         final_text = ""
@@ -931,8 +973,8 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         # 이력에는 **표시자 그대로** 저장한다(data URI가 들어가면 다음 프롬프트가 부푼다).
         _bg_persist(user_id, conv, "openwebui", last_text, final_text, mem_enabled)
         # 원문 블록은 **이력에 저장한 뒤** 붙인다(다음 프롬프트가 부풀지 않게).
-        body = await _chart_inliner().whole(final_text)
-        body += ground.check(final_text)          # 근거 없는 값을 지목(모델을 거치지 않는다)
+        # 근거 없는 답변은 여기서 **버려진다**(모델을 거치지 않는다).
+        body = await _chart_inliner().whole(ground.review(final_text))
         if raw:
             body += raw.block() + await _raw_output_summary(raw, last_text)
         return JSONResponse({
@@ -970,6 +1012,8 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                     delta = dedup.feed(event)
                     if delta:
                         pace.mark_first_text()
+                        if ground.hold:
+                            continue          # 검사 후 한 번에 내보낸다(#155)
                         # 차트 표시자가 델타 경계에 걸쳐 쪼개져 올 수 있어 안전한 부분만 흘린다.
                         out = await charts.feed(delta)
                         if out:
@@ -978,7 +1022,9 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                                 in_think = False
                             yield _sse(request_id, model_name, out)
 
-            tail = await charts.flush()       # 붙들고 있던 꼬리 마무리
+            # 모아 둔 본문을 검사한 뒤 내보낸다. 근거가 없으면 운영팀 문의 안내로 바뀐다.
+            tail = (await charts.whole(ground.review(dedup.full)) if ground.hold
+                    else await charts.flush())    # 붙들고 있던 꼬리 마무리
             if tail:
                 if in_think:
                     yield _sse(request_id, model_name, "\n")
@@ -987,9 +1033,6 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             if in_think:
                 yield _sse(request_id, model_name, "\n")
             # **모델 답변이 끝난 뒤** 원문을 붙인다. 모델이 행을 줄여도 전체가 화면에 남는다.
-            warn = ground.check(dedup.full)
-            if warn:
-                yield _sse(request_id, model_name, warn)
             if raw:
                 block = raw.block()
                 if block:
@@ -1038,6 +1081,68 @@ async def _longterm_memory_block(user_id: str, conversation_id: str | None, quer
         tk = 5
     ctx = await load_context(user_id, conversation_id, query, 0, tk)
     return format_memory_block(ctx["longterm"]) or None
+
+
+async def _manual_context(question: str) -> tuple[str, list]:
+    """**매 질문마다 매뉴얼을 먼저 검색해 프롬프트에 넣는다** (#155).
+
+    사용자 지시: "무조건 manual_mcp 사용해서 그 기반으로 대답하게끔 해줘.
+    콘솔에 매뉴얼 reference path 다 있는데 agent가 사용을 안한다고."
+
+    지시문으로 세 번 시켰지만("검색하지 않은 채로 설명하지 않습니다") 모델은 자기가 아는
+    일반지식으로 답할 수 있다고 판단하면 툴을 부르지 않았다. **부를지 말지를 모델에게
+    맡기지 않는다** — 우리가 먼저 검색해서 결과를 프롬프트에 넣는다. 그러면
+    "검색을 안 했다"는 실패 자체가 성립하지 않고, `guide_location`/`guide_document`도
+    모델 눈앞에 놓인다.
+
+    Manual MCP를 거치지 않고 같은 함수(`search_manual_chunks`)를 직접 부른다 — 검색 경로는
+    하나뿐이므로 결과가 갈릴 일이 없다. 툴 `search_manual`은 그대로 남아서, 첫 결과로
+    부족하면 모델이 다른 질의로 다시 찾는다.
+
+    Returns:
+        (프롬프트에 붙일 블록, 검색 결과) — 결과는 근거 검사(_AnswerGuard)의 근거로도 쓴다.
+    """
+    if not _mem_on(await get_config("manual_prefetch", "true")):
+        return "", []
+    if not (question or "").strip():
+        return "", []
+    try:
+        top_k = int(await get_config("manual_prefetch_top_k", "3"))
+    except (TypeError, ValueError):
+        top_k = 3
+    t0 = time.monotonic()
+    try:
+        from manual_search import search_manual_chunks
+        _mode, results = await search_manual_chunks(question, max(1, top_k),
+                                                    with_neighbors=True)
+    except Exception as e:  # noqa: BLE001
+        # 매뉴얼 DB나 임베딩이 죽어도 답변 자체는 계속돼야 한다(모델이 툴로 다시 시도한다).
+        print(f"[agent] 매뉴얼 선검색 실패(무시): {type(e).__name__}: {e}")
+        return "", []
+    ms = int((time.monotonic() - t0) * 1000)
+    if not results:
+        print(f"[agent] 매뉴얼 선검색 0건 ({ms}ms)")
+        return ("\n\n# 이번 질문에 대한 매뉴얼 검색 결과\n"
+                "**검색 결과가 없습니다.** 이 회사 시스템의 사용법·절차·정책에 대한 질문이라면, "
+                "매뉴얼에 없는 내용을 지어내지 말고 운영팀 문의로 안내하세요.\n"), []
+    print(f"[agent] 매뉴얼 선검색 {len(results)}건 ({ms}ms)")
+    lines = ["\n\n# 이번 질문에 대한 매뉴얼 검색 결과",
+             "아래는 사내 매뉴얼에서 이미 찾아 둔 근거입니다. **답변은 이 내용으로 만드세요.**",
+             "문서를 안내할 때 `문서 위치`는 **한 글자도 바꾸지 말고 그대로** 옮겨 적습니다."]
+    for i, r in enumerate(results, 1):
+        loc = (r.get("guide_location") or "").strip()
+        doc = (r.get("guide_document") or "").strip()
+        lines.append(f"\n## 근거 {i}")
+        if loc:
+            lines.append(f"- 문서 위치: {loc}")
+        if doc:
+            lines.append(f"- 문서 이름: {doc}")
+        if r.get("section_title"):
+            lines.append(f"- 섹션: {r['section_title']}")
+        lines.append(f"- 내용:\n{(r.get('chunk_text') or '').strip()}")
+    lines.append("\n여기에 답이 없으면 다른 표현으로 `search_manual`을 다시 부르거나, "
+                 "그래도 없으면 운영팀 문의로 안내하세요. 지어내지 마세요.")
+    return "\n".join(lines), results
 async def _summarize_turns(turns: list[dict]) -> list[str]:
     """대화 턴들에서 '이 사용자에 대해 기억할' 사실/선호를 vLLM으로 뽑아 한 줄씩 반환한다."""
     base = await get_config("vllm_llm_base_url")
@@ -1141,6 +1246,9 @@ async def agent_query(body: AgentQueryIn, request: Request):
     history, extra_instruction = ([], None)
     if mem_enabled:
         history, extra_instruction = await _memory_context(user_id, conv, body.message)
+    manual_block, manual_hits = await _manual_context(body.message)
+    if manual_block:
+        extra_instruction = (extra_instruction or "") + manual_block
 
     session_id = await _create_session(user_id, history)
     new_message = types.Content(role="user", parts=[types.Part(text=body.message)])
@@ -1155,6 +1263,7 @@ async def agent_query(body: AgentQueryIn, request: Request):
 
     raw = await _make_raw_outputs()
     ground = await _make_grounding(body.message, user_id)
+    ground.seed_manual(manual_hits)
 
     if not body.stream:
         final_text = ""
@@ -1171,7 +1280,7 @@ async def agent_query(body: AgentQueryIn, request: Request):
             await _cleanup_session(user_id, session_id)
             await _close_toolsets(toolsets)
         _bg_persist(user_id, conv, body.source, body.message, final_text, mem_enabled)
-        answer = final_text + ground.check(final_text)
+        answer = ground.review(final_text)
         if raw:
             answer += raw.block() + await _raw_output_summary(raw, body.message)
         return JSONResponse({"answer": answer, "conversation_id": conv,
@@ -1198,6 +1307,8 @@ async def agent_query(body: AgentQueryIn, request: Request):
                             yield _sse(request_id, model_name, status + "\n")
                     delta = dedup.feed(event)
                     if delta:
+                        if ground.hold:
+                            continue          # 검사 후 한 번에 내보낸다(#155)
                         # 차트 표시자가 델타 경계에 걸쳐 쪼개져 올 수 있어 안전한 부분만 흘린다.
                         out = await charts.feed(delta)
                         if out:
@@ -1205,7 +1316,8 @@ async def agent_query(body: AgentQueryIn, request: Request):
                                 yield _sse(request_id, model_name, "\n")
                                 in_think = False
                             yield _sse(request_id, model_name, out)
-            tail = await charts.flush()       # 붙들고 있던 꼬리 마무리
+            tail = (await charts.whole(ground.review(dedup.full)) if ground.hold
+                    else await charts.flush())    # 붙들고 있던 꼬리 마무리
             if tail:
                 if in_think:
                     yield _sse(request_id, model_name, "\n")
@@ -1213,9 +1325,6 @@ async def agent_query(body: AgentQueryIn, request: Request):
                 yield _sse(request_id, model_name, tail)
             if in_think:
                 yield _sse(request_id, model_name, "\n")
-            warn = ground.check(dedup.full)
-            if warn:
-                yield _sse(request_id, model_name, warn)
             if raw:
                 block = raw.block()
                 if block:
@@ -1392,6 +1501,8 @@ async def voc_query(body: VocQueryIn, request: Request):
         history, extra_instruction = await _memory_context(user_id, conv, message)
     fmt = _voc_format_instruction(body.output_option)
     extra_instruction = (extra_instruction + fmt) if extra_instruction else fmt
+    manual_block, manual_hits = await _manual_context(body_text)
+    extra_instruction += manual_block
 
     session_id = await _create_session(user_id, history)
     new_message = types.Content(role="user", parts=[types.Part(text=message)])
@@ -1415,6 +1526,7 @@ async def voc_query(body: VocQueryIn, request: Request):
 
     raw = await _make_raw_outputs()
     ground = await _make_grounding(body_text, user_id)
+    ground.seed_manual(manual_hits)
 
     if not body.stream:
         final_text, ok = "", True
@@ -1438,7 +1550,7 @@ async def voc_query(body: VocQueryIn, request: Request):
         if not ok or not final_text:
             return JSONResponse({"success": False, "answer": None})
         # 외부로 나가는 본문에서는 차트 표시자를 실제 이미지로 바꿔 준다(이력은 표시자 유지).
-        content = await _chart_inliner().whole(final_text) + ground.check(final_text)
+        content = await _chart_inliner().whole(ground.review(final_text))
         if raw:
             content += raw.block() + await _raw_output_summary(raw, body_text)
         answer = {"content": content}
@@ -1460,12 +1572,14 @@ async def voc_query(body: VocQueryIn, request: Request):
                         raw.observe(event)
                     ground.observe(event)
                     delta = dedup.feed(event)
-                    if delta:
+                    # 검사가 켜져 있으면 델타를 흘리지 않는다 — 아래 envelope이 검사를 통과한
+                    # 본문을 통째로 싣는다(#155). 델타를 먼저 보내면 되돌릴 수 없다.
+                    if delta and not ground.hold:
                         yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
             # 마지막에 가이드 계약 형태의 완성 envelope을 한 번 더 보낸다.
             if dedup.full:
                 similar = await _collect_similar()
-                content = await _chart_inliner().whole(dedup.full) + ground.check(dedup.full)
+                content = await _chart_inliner().whole(ground.review(dedup.full))
                 if raw:
                     content += raw.block() + await _raw_output_summary(raw, body_text)
                 answer = {"content": content}

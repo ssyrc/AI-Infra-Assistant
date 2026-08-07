@@ -738,7 +738,8 @@ def test_history_keeps_marker_not_data_uri():
     src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
     # 저장은 원문(final_text)으로, 응답 본문만 치환한다.
     assert '_bg_persist(user_id, conv, "openwebui", last_text, final_text, mem_enabled)' in src
-    assert 'await _chart_inliner().whole(final_text)' in src
+    # 치환은 내보내는 본문에만 건다(#155부터 근거 검사를 통과한 본문에 건다).
+    assert "await _chart_inliner().whole(ground.review(final_text))" in src
     # 스트리밍도 dedup.full(원문)을 저장한다.
     assert "_bg_persist(user_id, conv, \"openwebui\", last_text, dedup.full" in src \
         or "dedup.full" in src
@@ -2006,7 +2007,9 @@ def test_instruction_forbids_fabricating_environment_values():
     # 지어내는 중임을 스스로 알아채는 신호 - 헤지 문구를 명시적으로 금지한다.
     for hedge in ("일반적으로 …입니다", "보통 …입니다", "정확한 것은 직접 확인해 보세요"):
         assert hedge in instr, f"헤지 문구를 금지 목록에 넣지 않았다: {hedge}"
-    assert "확인해 봐야 알 수 있습니다" in instr, "모른다고 답할 문구를 주지 않았다"
+    # 모를 때 **갈 곳**을 준다. #155부터는 "모른다"에서 끝내지 않고 운영팀 문의로 보낸다
+    # (사용자 지시: "그 어떤 db에서 확인할 수 없는거면 운영팀에 문의하라고 하라고").
+    assert "운영팀에 문의하라" in instr, "모를 때 어디로 보낼지 알려 주지 않았다"
     assert "지어낸 값을 주는 것이 실패입니다" in instr
 
 
@@ -2340,7 +2343,7 @@ def test_instruction_routing_covers_all_three_mcps():
         assert tool in routing, f"도구 선택 절에 '{tool}'이 없다"
 
 
-# --- #154: 지어내기를 **코드로** 잡는다 ------------------------------------------------
+# --- #154·#155: 지어내기를 **코드로** 잡는다 -------------------------------------------
 def _grounding_cls():
     import json as _json
     import re as _re
@@ -2348,7 +2351,10 @@ def _grounding_cls():
     i = src.index("_IP_RE = re.compile")
     ns = {"json": _json, "re": _re, "_mem_on": lambda x: True}
     exec(src[i:src.index("\nclass _Pace:")], ns)
-    return ns["_Grounding"]
+    return ns["_AnswerGuard"]
+
+
+_FALLBACK_MARK = "운영팀에 문의해 주세요"
 
 
 class _FakeCall:
@@ -2368,53 +2374,147 @@ class _FakeEv2:
         return self._r
 
 
-def test_grounding_flags_invented_ip():
+def test_guard_replaces_answer_with_invented_ip():
     """없는 서버 IP를 만들어 안내한 사고(#154). 사용자가 그 주소로 접속을 시도하므로
-    곧바로 사고다. 지시문으로 네 번 막았는데 재발해서 코드로 잡는다."""
+    곧바로 사고다.
+
+    #155에서 **경고 덧붙이기를 버렸다.** 사용자: "저런 그대로 믿지마세요 문구를 넣지말라고.
+    아예 지어내지 말라고." 틀린 IP를 보여주면서 경고를 붙이는 것은 답이 아니다 —
+    그 답변 자체를 운영팀 문의 안내로 갈아 끼운다."""
     G = _grounding_cls()
     g = G(True, "login server 접속이 안됩니다", "202.20.185.100")
     g.observe(_FakeEv2(calls=["search_manual"],
                        responses=[{"results": [{"chunk_text": "ETX 클라이언트로 접속"}]}]))
-    assert "10.20.30.40" in g.check("10.20.30.40 으로 접속하세요.")
-    # 우리가 프롬프트에 넣어 준 환경 값은 근거로 인정한다(매번 경고가 뜨면 못 쓴다).
-    assert g.check("202.20.185.100 으로 접속합니다.") == ""
+    out = g.review("10.20.30.40 으로 접속하세요.")
+    assert "10.20.30.40" not in out, "지어낸 IP가 그대로 사용자에게 나갔다"
+    assert _FALLBACK_MARK in out
+    # 우리가 프롬프트에 넣어 준 환경 값은 근거로 인정한다(매번 막히면 못 쓴다).
+    assert g.review("202.20.185.100 으로 접속합니다.") == "202.20.185.100 으로 접속합니다."
 
 
-def test_grounding_flags_guide_without_manual_search():
+def test_guard_blocks_guide_without_manual_search():
     """매뉴얼을 검색하지도 않고 '가이드 문서: …'를 안내한 사고(#154).
     사용자: '가이드 위치와 제목은 manual_mcp에서 확인할 수 있을 때만 알려야 함'."""
     G = _grounding_cls()
     g = G(True, "접속이 안돼요", "")
     g.observe(_FakeEv2(responses=[{"exit_code": 0, "stdout": "x\ny"}]))
-    warn = g.check("자세한 내용은 다음 문서를 참고하세요:\n - 가이드 문서: 사용자 매뉴얼")
-    assert "매뉴얼을 검색하지 않고" in warn
+    body = "자세한 내용은 다음 문서를 참고하세요:\n - 가이드 문서: 사용자 매뉴얼"
+    assert _FALLBACK_MARK in g.review(body)
 
-    # 검색했으면 경고하지 않는다.
+    # 검색했으면 그대로 내보낸다.
     g2 = G(True, "접속이 안돼요", "")
     g2.observe(_FakeEv2(calls=["search_manual"], responses=[{"results": [{"chunk_text": "a"}]}]))
-    assert g2.check("자세한 내용은 다음 문서를 참고하세요:\n - 가이드 문서: 사용자 매뉴얼") == ""
+    assert g2.review(body) == body
 
 
-def test_grounding_flags_invented_path_but_allows_real_one():
+def test_guard_accepts_prefetched_manual_as_evidence():
+    """#155: 매뉴얼을 **우리가 먼저** 검색해 프롬프트에 넣는다. 모델이 툴을 부르지 않아도
+    그 근거로 답한 것은 정상이므로 막으면 안 된다. 반대로 선검색이 0건이면 검색한 것으로
+    치지 않는다 — 그 상태의 문서 안내는 지어낸 것이다."""
+    G = _grounding_cls()
+    body = ("자세한 내용은 다음 문서를 참고하세요:\n"
+            " - 가이드 위치: 슈퍼컴 Portal > 활용 가이드\n - 가이드 문서: GPU 활용 가이드")
+    g = G(True, "GPU 어떻게 신청해요", "")
+    g.seed_manual([{"guide_location": "슈퍼컴 Portal > 활용 가이드",
+                    "guide_document": "GPU 활용 가이드", "chunk_text": "신청 절차"}])
+    assert g.review(body) == body
+
+    g0 = G(True, "GPU 어떻게 신청해요", "")
+    g0.seed_manual([])                      # 0건 = 검색 안 한 것과 같다
+    assert _FALLBACK_MARK in g0.review(body)
+
+
+def test_guard_blocks_invented_path_but_allows_real_one():
     """`/home/ops_assistant` 처럼 없는 경로를 안내한 사고가 있었다(#125)."""
     G = _grounding_cls()
     g = G(True, "홈이 어디야", "")
     g.observe(_FakeEv2(responses=[{"exit_code": 0, "stdout": "/home/gpu1/yr9.choi"}]))
-    assert g.check("홈은 /home/gpu1/yr9.choi 입니다.") == ""
-    assert "/home/yr9.choi" in g.check("홈은 /home/yr9.choi 입니다.")
+    assert g.review("홈은 /home/gpu1/yr9.choi 입니다.") == "홈은 /home/gpu1/yr9.choi 입니다."
+    assert "/home/yr9.choi 입니다" not in g.review("홈은 /home/yr9.choi 입니다.")
 
 
-def test_grounding_is_quiet_on_normal_answers():
-    """정상 답변에 경고가 붙으면 경고를 아무도 안 읽게 된다."""
+def test_guard_is_quiet_on_normal_answers():
+    """정상 답변까지 막으면 서비스가 못 쓰게 된다."""
     G = _grounding_cls()
     g = G(True, "job 목록 보여줘", "")
     g.observe(_FakeEv2(responses=[{"exit_code": 0, "stdout": "23836848 Queued\n23836892 Queued"}]))
-    assert g.check("Queued 상태인 job은 23836848, 23836892 두 건입니다.") == ""
+    answer = "Queued 상태인 job은 23836848, 23836892 두 건입니다."
+    assert g.review(answer) == answer
 
 
-def test_grounding_wired_into_every_answer_path():
+def test_guard_includes_intake_path_in_fallback():
+    """운영팀 문의로 보낼 때 접수 경로를 알려 준다(설정 `voc_intake_guide`)."""
+    G = _grounding_cls()
+    g = G(True, "질문", "", "포탈 > 문의하기")
+    assert "포탈 > 문의하기" in g.fallback("테스트")
+
+
+def test_guard_holds_body_so_it_can_be_replaced():
+    """스트리밍에서 본문을 흘려보내면 되돌릴 수 없다. 검사가 켜져 있으면 모아 두었다가
+    한 번에 내보낸다 — 그래야 갈아 끼울 수 있다."""
+    G = _grounding_cls()
+    assert G(True, "q", "").hold is True
+    assert G(False, "q", "").hold is False
+
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    # 델타를 흘리기 전에 hold를 확인하는 지점이 세 스트리밍 경로에 모두 있어야 한다.
+    assert src.count("ground.hold") == 5, src.count("ground.hold")
+
+
+def test_guard_wired_into_every_answer_path():
     """여섯 지점(엔드포인트 3 × 스트리밍/비스트리밍) 전부에 붙어야 한다."""
     src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
     assert src.count("ground.observe(event)") == 6, src.count("ground.observe(event)")
-    assert src.count("ground.check(") == 6, src.count("ground.check(")
+    assert src.count("ground.review(") == 6, src.count("ground.review(")
+    assert src.count("ground.seed_manual(") == 3, src.count("ground.seed_manual(")
     assert 'get_config("answer_grounding_check"' in src, "설정으로 끌 수 없다"
+
+
+# --- #155: 매뉴얼은 **무조건** 먼저 검색해서 그 근거로 답한다 --------------------------
+def test_manual_prefetch_wired_into_every_endpoint():
+    """사용자: "무조건 manual_mcp 사용해서 그 기반으로 대답하게끔 해줘.
+    콘솔에 매뉴얼 reference path 다 있는데 agent가 사용을 안한다고."
+
+    지시문으로 세 번 시켰지만 모델은 자기가 안다고 판단하면 툴을 건너뛰었다.
+    **부를지 말지를 모델에게 맡기지 않는다** — 세 엔드포인트 모두에서 우리가 먼저 검색한다."""
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    assert src.count("await _manual_context(") == 3, src.count("await _manual_context(")
+    assert "search_manual_chunks" in src, "Manual MCP와 같은 검색 함수를 써야 결과가 안 갈린다"
+    assert 'get_config("manual_prefetch"' in src, "설정으로 끌 수 없다"
+
+
+def test_manual_prefetch_block_carries_reference_path():
+    """선검색 블록에 `guide_location`(콘솔에 등록된 문서 위치)이 실려야 한다.
+    이게 프롬프트에 없으니 모델이 문서 위치를 안내하지 못했다."""
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    block = src[src.index("async def _manual_context"):src.index("async def _summarize_turns")]
+    assert 'r.get("guide_location")' in block
+    assert 'r.get("guide_document")' in block
+    assert "문서 위치" in block and "문서 이름" in block
+
+
+def test_manual_tool_docstring_declares_reference_fields():
+    """#155 진짜 원인: 툴이 `guide_location`/`guide_document`를 돌려주는데도
+    docstring의 Returns에 그 이름이 없었다. 지시문은 그 이름으로 쓰라고 하는데
+    툴 계약에는 없으니 모델이 있는 줄도 몰랐다."""
+    src = open(os.path.join(ROOT, "mcp_servers", "manual_mcp", "server.py"),
+               encoding="utf-8").read()
+    doc = src[src.index("async def search_manual"):src.index("async def get_document")]
+    for field in ("guide_location", "guide_document", "chunk_text"):
+        assert field in doc, f"search_manual docstring에 {field}가 없다"
+
+
+def test_instruction_sends_unknown_to_operations_team():
+    """사용자: "우리 매뉴얼에 없거나 그 어떤 db에서 확인할 수 없는거면 운영팀에 문의하라고
+    하라고." 그리고 "그대로 믿지마세요" 류의 면피 문구를 붙이지 말 것."""
+    instr = _instruction_text()
+    assert instr.count("운영팀") >= 3, "확인 실패 시 운영팀 문의로 보내지 않는다"
+    assert "그대로 믿지 마세요" in instr and "붙이지 말고" in instr, \
+        "경고를 붙여 추측을 내보내는 길이 막혀 있지 않다"
+
+
+def test_instruction_tells_model_the_manual_block_is_already_there():
+    """선검색 결과를 프롬프트에 넣어도, 그게 있다는 걸 지시문이 말해 주지 않으면
+    모델이 같은 검색을 또 부르거나 블록을 무시한다."""
+    instr = _instruction_text()
+    assert "# 이번 질문에 대한 매뉴얼 검색 결과" in instr

@@ -23,8 +23,12 @@ async def search_manual(query: str, top_k: int = 5) -> list[dict]:
         query: 자연어 질문 또는 키워드. 예: "배치 스케줄 등록 방법"
         top_k: 최대 문단 수(기본 5)
     Returns:
-        각 항목: doc_title(원본 문서 이름), reference(안내에 그대로 쓸 전체 경로),
-        section_title, page_no, chunk_text(앞뒤 문단 포함), manual_file_id.
+        각 항목:
+          guide_location  — **문서 안내에 그대로 옮겨 쓸 위치**(관리자가 넣은 메뉴 경로/URL).
+                            줄이거나 요약하지 말고 한 글자도 바꾸지 않는다.
+          guide_document  — 그 위치 안의 문서 이름. 위치와 **함께** 안내한다.
+          chunk_text      — 근거 문단(앞뒤 문단 포함). 답변은 이 내용으로만 만든다.
+          doc_title, section_title, page_no, manual_file_id, reference(위치+문서명 합본)
     """
     _mode, results = await search_manual_chunks(query, top_k, with_neighbors=True)
     return results
