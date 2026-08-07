@@ -18,7 +18,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "shared"))
 sys.path.insert(0, os.path.join(ROOT, "admin_console", "backend"))
 
-from cleaning import clean_text, CleanOptions  # noqa: E402
+from cleaning import clean_text  # noqa: E402
 from parser import parse_file  # noqa: E402
 
 
@@ -2273,8 +2273,11 @@ def test_instruction_check_compares_file_not_magic_string():
     # **구분자를 끼워 이어 붙이지 않는다**(#152). 처음에 앞뒤 200자를 `\x01`로 이어 비교했는데,
     # psql에서는 리터럴 4글자, 파이썬에서는 1바이트가 되어 **내용이 같아도 항상 불일치**였다.
     # 실제 postgres로 확인했다: md5는 파이썬 md5(t.encode("utf-8"))와 정확히 일치한다.
-    assert "x01" not in script, "이스케이프가 필요한 구분자를 다시 쓰고 있다"
-    assert "left(value" not in script and "right(value" not in script, \
+    # **주석은 빼고** 본다. 스크립트 주석에 "왜 \\x01을 쓰면 안 되는지"를 적어 뒀는데,
+    # 통짜 substring 검사면 그 설명 때문에 테스트가 실패한다(실제로 겪었다).
+    code = "\n".join(ln for ln in script.split("\n") if not ln.lstrip().startswith("#"))
+    assert "x01" not in code, "이스케이프가 필요한 구분자를 다시 쓰고 있다"
+    assert "left(value" not in code and "right(value" not in code, \
         "앞뒤 조각 이어붙이기로 되돌아갔다 - psql/파이썬 이스케이프가 어긋난다"
 
     # NEXT-STEPS 가 지시문 본문의 문구로 최신 여부를 판정하면 안 된다.

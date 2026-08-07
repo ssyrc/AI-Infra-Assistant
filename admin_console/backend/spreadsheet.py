@@ -11,7 +11,6 @@ CSV/TSV는 엑셀과 완전히 같은 "열 매핑" 흐름을 타도록 여기서
 """
 import csv
 import os
-import sys
 
 import openpyxl
 

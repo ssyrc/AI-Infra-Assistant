@@ -18,7 +18,7 @@ from db import get_pool, embed_text, embed_texts, vector_literal
 from server_files import read_upload_or_server_file
 from spreadsheet import TABLE_EXTS, read_table_meta, load_table_rows
 from uploads import (
-    create_upload_session, get_upload_session, delete_upload_session, load_options,
+    create_upload_session, get_upload_session, delete_upload_session,
 )
 
 router = APIRouter(prefix="/api/voc", tags=["voc"])
