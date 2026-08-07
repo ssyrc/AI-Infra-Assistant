@@ -48,20 +48,29 @@ docker compose -f docker-compose.dev.yml restart admin-console agent-server
 없습니다. `admin-console` 재시작도 **필수**입니다. 지난번 되돌리기 버튼이 옛 텍스트를 저장한 것은
 모듈 캐시 때문이었고(#147), 재시작해야 그 캐시가 비워집니다.
 
-## 2. [웹] 되돌리기 → [서버] **반드시 확인**
+## 2. [서버] 지시문이 최신인지 확인 — **매직 문자열 대신 파일과 통째로 비교**
 
-콘솔 설정 탭 → **`지시문을 최신 기본값으로 되돌리기`** → agent-server 재시작.
+> ✅ **이미 최신이었습니다.** 지난번 `아직 옛것 (12751자)`는 **제 확인 쿼리가 틀린 것**입니다.
+> 12,751자가 바로 지금 코드의 지시문 길이입니다. #149에서 `어디야?` 나열을 지웠는데
+> 확인 문자열은 #148 것을 그대로 둬서, 멀쩡한 상태를 "옛것"이라고 보고했습니다.
+
+이제 문구를 찾지 않고 **코드 파일과 DB를 직접 비교**합니다. 지시문을 아무리 고쳐도
+이 확인은 안 고쳐도 됩니다.
 
 ```bash
 cd /home/gpu1/yr9.choi/05_halo/AI-Infra-Assistant
-docker exec ai-infra-assistant-postgres-1 psql -U agent -d platform_config -tAc \
-  "select case when value like '%어디야?%' then '최신 OK' else '아직 옛것' end
-          || ' (' || length(value) || '자)'
-     from platform_settings where key='agent_system_instruction';"
+bash scripts/check-instruction.sh
 ```
 
-**`최신 OK`가 나오기 전에는 3번을 하지 마세요.** 답변 품질을 판단할 수 없습니다.
-`아직 옛것`이면 **글자 수를 알려주세요**(현재 코드 기준 약 12,700자).
+```
+코드 : 12751자 (sha fc0dbff1249c2143)
+DB   : 12751자
+
+✅ 최신입니다. DB의 지시문이 지금 코드와 같습니다.
+```
+
+`❌ 다릅니다`가 나오면 콘솔 설정 탭 → **`지시문을 최신 기본값으로 되돌리기`** →
+agent-server 재시작. 그래도 그대로면 `admin-console`을 재시작하세요(모듈 캐시, #147).
 
 ## 3. [웹] 세 질문 다시 확인
 
@@ -160,7 +169,7 @@ docker volume rm 1dc7527fd826d5a2afc08bd1b44e945219c2fd10da65c2747f49c2d367ab919
 
 | 증상 | 조치 |
 |---|---|
-| 되돌리기를 눌러도 옛 지시문 | `admin-console` 재시작이 빠진 것입니다(1번) |
+| 되돌리기를 눌러도 다르다고 나옴 | `admin-console` 재시작이 빠진 것입니다(1번) |
 | 답변이 행을 줄여도 | 이제 **원문 블록**에 전체가 있습니다. 블록이 아예 없으면 `execution_raw_output` 확인 |
 | 원문 블록이 너무 길다 | `execution_raw_output_min_lines`를 올리세요(예: 10) |
 | 홈 경로를 지어냄 | 같음. `최신 지시문 OK`인데도 그러면 알려주세요 |

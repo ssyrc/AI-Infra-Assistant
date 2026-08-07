@@ -2256,3 +2256,23 @@ def test_raw_output_summary_is_off_by_default():
     src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
     fn = src[src.index("async def _raw_output_summary"):]
     assert "return \"\"" in fn, "실패 시 조용히 넘어가지 않는다"
+
+
+# --- #151: 지시문 버전 확인을 **매직 문자열로 하지 않는다** ---------------------------
+def test_instruction_check_compares_file_not_magic_string():
+    """"지시문에 이 문구가 있으면 최신"은 지시문을 고칠 때마다 같이 고쳐야 하는데 잊는다.
+    실제로 #149에서 `어디야?` 나열을 지우자, 최신 지시문일수록 "옛것"이라고 나오는
+    확인이 됐다(#151). 문서에 사실을 복사하면 원본이 바뀔 때 거짓이 된다.
+    """
+    path = os.path.join(ROOT, "scripts", "check-instruction.sh")
+    assert os.path.isfile(path), "scripts/check-instruction.sh 가 없다"
+    script = open(path, encoding="utf-8").read()
+    # 파일을 직접 읽어 비교해야 한다(모듈 캐시도 타지 않는 방식, #147과 같은 이유).
+    assert "agent_instruction.py" in script and "compile(" in script
+    assert "length(value)" in script, "DB 값과 길이를 비교하지 않는다"
+
+    # NEXT-STEPS 가 지시문 본문의 문구로 최신 여부를 판정하면 안 된다.
+    steps = open(os.path.join(ROOT, "docs", "NEXT-STEPS.md"), encoding="utf-8").read()
+    assert "check-instruction.sh" in steps, "확인 절차가 스크립트를 쓰지 않는다"
+    assert "value like '%" not in steps, \
+        "NEXT-STEPS 가 아직 매직 문자열로 지시문 버전을 본다 - 지시문을 고치면 거짓이 된다"
