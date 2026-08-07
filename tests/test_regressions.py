@@ -785,7 +785,10 @@ def test_manual_search_exposes_location_and_document_separately():
 def test_instruction_asks_for_table_on_multi_column_output():
     """job 목록처럼 열이 있는 실행 결과는 표로 정리해야 한다(예전엔 그렇게 나왔다)."""
     instr = _instruction_text()
-    assert "마크다운 테이블" in instr and "job 목록" in instr
+    # 제목이나 예시 단어가 아니라 **규칙**을 검사한다. #153에서 지시문을 절반으로 줄이며
+    # 예시를 뺐는데, 예시를 검사하던 테스트가 규칙이 살아 있는데도 실패했다.
+    assert "마크다운 테이블" in instr
+    assert "값은 한 글자도 바꾸지 않습니다" in instr
 
 
 def test_ssh_master_health_is_observable():
@@ -1608,7 +1611,8 @@ def test_instruction_prefers_manual_for_infra_inventory():
     instr = _instruction_text()
     assert "인프라 \"현황·구성\"을 물으면" in instr
     assert "매뉴얼을 먼저 검색합니다" in instr
-    assert "## 도구를 이어서 씁니다" in instr
+    assert "이어서 씁니다" in instr, "도구를 이어서 쓰라는 규칙이 없다"
+    assert "순서는 정해져 있지 않습니다" in instr, "도구 순서가 자유롭다는 것을 말하지 않는다"
 
 
 def test_instruction_forbids_using_agent_name_as_account():
@@ -1750,7 +1754,9 @@ def test_agent_injects_caller_account_into_prompt():
 
 def test_instruction_answers_other_user_question_in_one_line():
     instr = _instruction_text()
-    assert "## 남의 계정을 묻는 질문" in instr
+    # 거절은 이제 **실행 도구의 거부 사유**를 그대로 전하는 일반 규칙으로 다룬다(#153).
+    # 질문 유형별 섹션을 두지 않는다 - 목록을 만들지 않는다는 원칙(#145·#149).
+    assert "거부 사유를 돌려주면" in instr and "한 줄로" in instr
     assert "가이드 문서 위치를 안내하지 않습니다" in instr
     assert "질문한 사용자 계정" in instr
 
@@ -2285,3 +2291,49 @@ def test_instruction_check_compares_file_not_magic_string():
     assert "check-instruction.sh" in steps, "확인 절차가 스크립트를 쓰지 않는다"
     assert "value like '%" not in steps, \
         "NEXT-STEPS 가 아직 매직 문자열로 지시문 버전을 본다 - 지시문을 고치면 거짓이 된다"
+
+
+# --- #153: 지시문 재작성 — 라우팅 중심으로 절반으로 줄였다 ----------------------------
+def test_instruction_is_within_prompt_budget():
+    """지시문이 12,751자(7,787토큰 = 컨텍스트의 24%)까지 불어나 있었다. 규칙을 덧붙여
+    고치려 한 것이 개별 규칙의 준수율을 떨어뜨렸다(#150에서 측정). 예산을 고정한다."""
+    sys.path.insert(0, os.path.join(ROOT, "mcp_servers", "execution_mcp"))
+    from agent_instruction import AGENT_INSTRUCTION as instr
+    from registry import estimate_prompt_tokens
+    _chars, tokens = estimate_prompt_tokens([instr])
+    assert tokens < 5000, (
+        f"지시문이 {tokens:,}토큰이다(32,768의 {tokens / 32768 * 100:.0f}%). "
+        "규칙을 더 넣기 전에 중복부터 지울 것 — 길수록 개별 규칙을 덜 지킨다.")
+
+
+def test_instruction_does_not_run_commands_for_symptom_reports():
+    """VOC 문의("접속이 원활하지 않다")에 GPU job 목록을 실행해 보여준 사고(#153).
+    증상 호소는 상태 조회 요청이 아니라 원인·해결을 묻는 것이다."""
+    instr = _instruction_text()
+    assert "증상을 호소하는 것은 상태 조회 요청이 아닙니다" in instr
+    assert "답과 상관없는 도구를 부르지 않습니다" in instr
+
+
+def test_instruction_isolates_each_turn():
+    """앞 턴에서 '다른 계정은 조회 못 한다'고 거절한 뒤, 전혀 다른 VOC 문의에도 같은 거절을
+    반복한 사고(#153). 새 메시지는 그 메시지만으로 판단해야 한다."""
+    instr = _instruction_text()
+    assert "그 메시지 하나만으로" in instr
+    assert "거절을 **이어붙이지 않습니다**" in instr or "이어붙이지 않습니다" in instr
+    assert "대명사를 푸는 데만" in instr
+
+
+def test_instruction_forbids_code_block_for_document_guidance():
+    """문서 안내를 bash 코드블록으로 출력한 사고(#153). 사용자가 실행할 명령으로 오해한다."""
+    instr = _instruction_text()
+    assert "코드 블록은 실행한 커맨드와 그 출력에만 씁니다" in instr
+    assert "코드 블록 없이" in instr
+
+
+def test_instruction_routing_covers_all_three_mcps():
+    """사용자 요구: 문의가 오면 매뉴얼·VOC 관련인지 확인하고, 실행으로 풀 수 있는지
+    에이전트가 판단해야 한다. 세 갈래가 한 곳에 모여 있어야 그 판단이 선다."""
+    instr = _instruction_text()
+    routing = instr[instr.index("## 2) 도구를 고릅니다"):instr.index("## 3) 멈춥니다")]
+    for tool in ("매뉴얼 검색", "과거 사례(VOC) 검색", "커맨드 실행"):
+        assert tool in routing, f"도구 선택 절에 '{tool}'이 없다"
