@@ -2269,7 +2269,13 @@ def test_instruction_check_compares_file_not_magic_string():
     script = open(path, encoding="utf-8").read()
     # 파일을 직접 읽어 비교해야 한다(모듈 캐시도 타지 않는 방식, #147과 같은 이유).
     assert "agent_instruction.py" in script and "compile(" in script
-    assert "length(value)" in script, "DB 값과 길이를 비교하지 않는다"
+    assert "md5(value)" in script, "DB 값과 해시를 비교하지 않는다"
+    # **구분자를 끼워 이어 붙이지 않는다**(#152). 처음에 앞뒤 200자를 `\x01`로 이어 비교했는데,
+    # psql에서는 리터럴 4글자, 파이썬에서는 1바이트가 되어 **내용이 같아도 항상 불일치**였다.
+    # 실제 postgres로 확인했다: md5는 파이썬 md5(t.encode("utf-8"))와 정확히 일치한다.
+    assert "x01" not in script, "이스케이프가 필요한 구분자를 다시 쓰고 있다"
+    assert "left(value" not in script and "right(value" not in script, \
+        "앞뒤 조각 이어붙이기로 되돌아갔다 - psql/파이썬 이스케이프가 어긋난다"
 
     # NEXT-STEPS 가 지시문 본문의 문구로 최신 여부를 판정하면 안 된다.
     steps = open(os.path.join(ROOT, "docs", "NEXT-STEPS.md"), encoding="utf-8").read()
