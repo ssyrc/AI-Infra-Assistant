@@ -2415,12 +2415,12 @@ def test_guard_accepts_prefetched_manual_as_evidence():
     body = ("자세한 내용은 다음 문서를 참고하세요:\n"
             " - 가이드 위치: 슈퍼컴 Portal > 활용 가이드\n - 가이드 문서: GPU 활용 가이드")
     g = G(True, "GPU 어떻게 신청해요", "")
-    g.seed_manual([{"guide_location": "슈퍼컴 Portal > 활용 가이드",
+    g.seed_rag([{"guide_location": "슈퍼컴 Portal > 활용 가이드",
                     "guide_document": "GPU 활용 가이드", "chunk_text": "신청 절차"}])
     assert g.review(body) == body
 
     g0 = G(True, "GPU 어떻게 신청해요", "")
-    g0.seed_manual([])                      # 0건 = 검색 안 한 것과 같다
+    g0.seed_rag([])                      # 0건 = 검색 안 한 것과 같다
     assert _FALLBACK_MARK in g0.review(body)
 
 
@@ -2466,28 +2466,114 @@ def test_guard_wired_into_every_answer_path():
     src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
     assert src.count("ground.observe(event)") == 6, src.count("ground.observe(event)")
     assert src.count("ground.review(") == 6, src.count("ground.review(")
-    assert src.count("ground.seed_manual(") == 3, src.count("ground.seed_manual(")
+    assert src.count("ground.seed_rag(") == 3, src.count("ground.seed_rag(")
     assert 'get_config("answer_grounding_check"' in src, "설정으로 끌 수 없다"
 
 
 # --- #155: 매뉴얼은 **무조건** 먼저 검색해서 그 근거로 답한다 --------------------------
-def test_manual_prefetch_wired_into_every_endpoint():
-    """사용자: "무조건 manual_mcp 사용해서 그 기반으로 대답하게끔 해줘.
-    콘솔에 매뉴얼 reference path 다 있는데 agent가 사용을 안한다고."
+def test_rag_prefetch_wired_into_every_endpoint():
+    """사용자: "사용자 문의가 들어오면 무조건!!! 제발!!!! manual_mcp, voc_mcp 로 rag 한 후에
+    답변 생성하길 바람."
 
-    지시문으로 세 번 시켰지만 모델은 자기가 안다고 판단하면 툴을 건너뛰었다.
-    **부를지 말지를 모델에게 맡기지 않는다** — 세 엔드포인트 모두에서 우리가 먼저 검색한다."""
+    지시문으로 네 번 시켰지만 모델은 자기가 안다고 판단하면 툴을 건너뛰었다.
+    **부를지 말지를 모델에게 맡기지 않는다** — 세 엔드포인트 모두에서 우리가 먼저 검색한다.
+    #155에서 매뉴얼만 했는데 VOC도 같은 이유로 안 불리고 있었다(voc_db에 있는 질문을 그대로
+    물었는데 엉뚱한 답이 나왔다)."""
     src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
-    assert src.count("await _manual_context(") == 3, src.count("await _manual_context(")
-    assert "search_manual_chunks" in src, "Manual MCP와 같은 검색 함수를 써야 결과가 안 갈린다"
-    assert 'get_config("manual_prefetch"' in src, "설정으로 끌 수 없다"
+    assert src.count("await _rag_context(") == 3, src.count("await _rag_context(")
+    # 각 MCP와 **같은 검색 함수**를 써야 결과가 갈리지 않는다.
+    assert "search_manual_chunks" in src and "search_voc_records" in src
+    assert 'get_config("rag_prefetch"' in src, "설정으로 끌 수 없다"
+
+
+def test_voc_search_has_one_shared_implementation():
+    """VOC 검색이 MCP 안에만 있으면 선검색이 같은 결과를 낼 수 없다. shared로 뺐다."""
+    mcp = open(os.path.join(ROOT, "mcp_servers", "voc_mcp", "server.py"),
+               encoding="utf-8").read()
+    assert "from voc_search import" in mcp, "MCP가 공용 검색을 쓰지 않는다"
+    assert "FULL OUTER JOIN" not in mcp, "MCP에 검색 SQL이 복제돼 있다(경로가 둘로 갈린다)"
+    shared = open(os.path.join(ROOT, "shared", "voc_search.py"), encoding="utf-8").read()
+    assert "async def search_voc_records" in shared
+
+
+def test_voc_prefetch_block_marks_who_handled_it():
+    """운영자가 조치한 건인지 사용자가 직접 한 건인지가 프롬프트에 있어야
+    '남이 해 준 조치를 사용자에게 시키는' 답이 안 나온다."""
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    block = src[src.index("def _voc_block("):src.index("async def _rag_context")]
+    assert "handled_by" in block
+    assert "운영자가 확인·조치" in block and "사용자가 직접 해결" in block
+
+
+def test_retrieval_query_carries_previous_user_turn():
+    """이어지는 질문("그러면 접속 못 하는거 아니야?")은 그 문장만으로 검색이 안 된다.
+    직전 **사용자** 발화를 붙인다. 어시스턴트 답변은 붙이지 않는다 —
+    지어낸 내용이 질의에 섞이면 그 방향으로 검색이 끌려간다."""
+    import re as _re
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    i = src.index("def _retrieval_query(")
+    ns = {}
+    exec(src[i:src.index("async def _search_manual_for")], ns)
+    q = ns["_retrieval_query"]("그러면 슈퍼컴 접속 못 하는거 아니야?", [
+        ("user", "login server 접속이 갑자기 안됩니다"),
+        ("assistant", "운영팀에 문의해 주세요"),
+    ])
+    assert "login server" in q, "앞 문맥이 질의에 안 들어갔다"
+    assert "운영팀에 문의해 주세요" not in q, "어시스턴트 답변이 질의에 섞였다"
+    assert q.endswith("그러면 슈퍼컴 접속 못 하는거 아니야?")
+    assert _re.sub(r"\s", "", ns["_retrieval_query"]("혼자 온 질문", [])) == "혼자온질문"
+
+
+def test_guard_keeps_grounded_lines_and_drops_only_bad_ones():
+    """#156: 값 하나가 근거에 없다고 답변을 통째로 버리면, 매뉴얼에서 확인된 점검 목록까지
+    사라진다. 사용자: "manual_db 기반으로 우선 사용자가 확인해야 할 사항들 먼저 쭉 가이드를
+    하고, 그 후에 운영팀한테 문의하라고 해야지." 지어낸 값이 든 **줄만** 덜어낸다."""
+    G = _grounding_cls()
+    g = G(True, "접속이 안돼요", "")
+    g.seed_rag([{"chunk_text": "ETX 클라이언트 버전을 확인하고 재설치합니다. "
+                               "사내망(VPN) 연결 상태를 확인합니다."}])
+    answer = ("1. ETX 클라이언트 버전을 확인하고 재설치합니다.\n"
+              "2. 사내망(VPN) 연결 상태를 확인합니다.\n"
+              "3. 10.20.30.40 으로 직접 접속해 봅니다.")
+    out = g.review(answer)
+    assert "10.20.30.40" not in out, "지어낸 IP가 그대로 나갔다"
+    assert "ETX 클라이언트 버전을 확인" in out, "근거 있는 안내까지 버렸다"
+    assert "사내망(VPN) 연결 상태" in out
+    assert "운영팀" in out, "확인해 볼 것을 안내한 뒤 운영팀으로 이어져야 한다"
+
+
+def test_guard_falls_back_when_nothing_grounded_survives():
+    """반대로 남는 게 껍데기뿐이면 그때는 통째로 운영팀 문의로 바꾼다."""
+    G = _grounding_cls()
+    g = G(True, "서버 주소 알려줘", "")
+    g.seed_rag([{"chunk_text": "무관한 내용"}])
+    out = g.review("## 접속 주소\n- 10.20.30.40\n- 10.20.30.41")
+    assert "10.20.30" not in out
+    assert _FALLBACK_MARK in out
+
+
+def test_instruction_guides_before_escalating():
+    """사용자: "바로 운영팀 확인이 필요하다고 하는데, manual_db 기반으로 우선 사용자가
+    확인해야 할 사항들 먼저 쭉 가이드를 하고, 그 후에 운영팀한테 문의하라고 해야지."
+    """
+    instr = _instruction_text()
+    assert "운영팀 문의는 맨 마지막입니다" in instr
+    voc = instr[instr.index("## 과거 사례(VOC)를 쓸 때"):]
+    assert "먼저 안내" in voc, "operator 사례에서 곧바로 접수로 넘기는 길이 열려 있다"
+
+
+def test_instruction_forbids_deciding_scope_by_itself():
+    """"~~ 클러스터는 슈퍼컴 인프라가 아니니까 다른 운영팀에 문의하라" — 지어낸 것이다.
+    무엇이 우리 소관인지는 검색 결과가 정하지, 모델이 정하지 않는다."""
+    instr = _instruction_text()
+    assert "소관인지 스스로 판단하지 않습니다" in instr
 
 
 def test_manual_prefetch_block_carries_reference_path():
     """선검색 블록에 `guide_location`(콘솔에 등록된 문서 위치)이 실려야 한다.
     이게 프롬프트에 없으니 모델이 문서 위치를 안내하지 못했다."""
     src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
-    block = src[src.index("async def _manual_context"):src.index("async def _summarize_turns")]
+    block = src[src.index("def _manual_block("):src.index("def _voc_block(")]
     assert 'r.get("guide_location")' in block
     assert 'r.get("guide_document")' in block
     assert "문서 위치" in block and "문서 이름" in block

@@ -577,16 +577,16 @@ class _AnswerGuard:
         self.searched_manual = False
         self.corpus = [question or "", env_text or ""]
 
-    def seed_manual(self, results: list):
-        """선검색(`_manual_context`)으로 이미 확보한 매뉴얼 근거를 등록한다.
+    def seed_rag(self, manual_hits: list, voc_hits: list = ()):
+        """선검색(`_rag_context`)으로 이미 확보한 근거를 등록한다.
 
-        모델이 툴을 부르지 않아도 매뉴얼을 본 것과 같으므로, 여기 실린 값은 근거로 인정한다.
-        **결과가 0건이면 검색한 것으로 치지 않는다** — 그 상태에서 문서를 안내하면 지어낸 것이다.
+        모델이 툴을 부르지 않아도 매뉴얼·VOC를 본 것과 같으므로, 여기 실린 값은 근거로
+        인정한다. **매뉴얼이 0건이면 검색한 것으로 치지 않는다** — 그 상태에서 문서를
+        안내하면 지어낸 것이다.
         """
-        if not results:
-            return
-        self.searched_manual = True
-        for r in results:
+        if manual_hits:
+            self.searched_manual = True
+        for r in list(manual_hits or []) + list(voc_hits or []):
             try:
                 self.corpus.append(json.dumps(r, ensure_ascii=False, default=str))
             except Exception:  # noqa: BLE001
@@ -613,15 +613,17 @@ class _AnswerGuard:
                     out.append(m)
         return out
 
+    def _intake_line(self) -> str:
+        return f"\n\n접수 경로: {self.intake}" if self.intake else ""
+
     def fallback(self, reason: str) -> str:
-        """근거가 없을 때 **대신 내보낼 답변**. 지어낸 값을 지우고 이것만 남긴다."""
-        text = ("문의하신 내용은 매뉴얼과 과거 사례에서 확인되지 않았습니다.\n"
-                "정확하지 않은 정보를 드리지 않기 위해 답변을 드리지 않습니다. "
-                "운영팀에 문의해 주세요.")
-        if self.intake:
-            text += f"\n\n접수 경로: {self.intake}"
+        """**남길 게 하나도 없을 때만** 쓰는 답변. 근거 있는 문장이 하나라도 남으면
+        `review`가 그것을 살린다(사용자 지시: 매뉴얼 기반 확인 사항을 먼저 안내하고,
+        그 다음에 운영팀 문의)."""
         print(f"[agent] 근거 없는 답변을 차단했습니다: {reason}")
-        return text
+        return ("문의하신 내용은 매뉴얼과 과거 사례에서 확인되지 않았습니다.\n"
+                "정확하지 않은 정보를 드리지 않기 위해 답변을 드리지 않습니다. "
+                "운영팀에 문의해 주세요." + self._intake_line())
 
     @property
     def hold(self) -> bool:
@@ -636,15 +638,34 @@ class _AnswerGuard:
         return self.enabled
 
     def review(self, answer: str) -> str:
-        """내보낼 최종 본문. 근거가 없으면 운영팀 문의 안내로 **갈아 끼운다**."""
+        """내보낼 최종 본문. 지어낸 값이 든 **줄만** 덜어내고 나머지는 살린다 (#156).
+
+        #155에서는 값 하나가 근거에 없으면 답변을 통째로 버렸다. 그게 지나쳤다 —
+        사용자 지적: "바로 운영팀 확인이 필요하다고 하는데, **manual_db 기반으로 우선
+        사용자가 확인해야 할 사항들 먼저 쭉 가이드를 하고, 그 후에** 운영팀한테 문의하라고
+        해야지." 매뉴얼에서 확인된 점검 목록 다섯 줄 중 한 줄에 지어낸 IP가 있다고 해서
+        나머지 네 줄까지 버리면, 사용자는 스스로 할 수 있는 일을 못 하게 된다.
+
+        지어낸 값이 사용자에게 **보이지 않는다**는 원칙은 그대로다. 그 줄만 지운다.
+        남는 게 없으면 그때 `fallback`으로 간다.
+        """
         if not self.enabled or not (answer or "").strip():
             return answer
-        bad = self._ungrounded(answer)
-        if bad:
-            return self.fallback("조회 결과에 없는 값: " + ", ".join(bad[:8]))
         if not self.searched_manual and any(k in answer for k in _GUIDE_MARKERS):
             return self.fallback("매뉴얼을 검색하지 않고 문서를 안내함")
-        return answer
+        bad = self._ungrounded(answer)
+        if not bad:
+            return answer
+
+        kept = [ln for ln in answer.split("\n") if not any(b in ln for b in bad)]
+        body = "\n".join(kept).strip()
+        # 표제·불릿 기호만 남은 껍데기는 답이 아니다. 실질 내용이 남았는지로 판단한다.
+        substantive = len(re.sub(r"[\s#\-*>|`0-9.]", "", body)) >= 20
+        if not substantive:
+            return self.fallback("조회 결과에 없는 값: " + ", ".join(bad[:8]))
+        print(f"[agent] 근거 없는 줄을 덜어냈습니다: {', '.join(bad[:8])}")
+        return (body + "\n\n확인되지 않은 내용은 제외했습니다. "
+                "더 필요하시면 운영팀에 문의해 주세요." + self._intake_line())
 
 
 async def _make_grounding(question: str, user_id: str = ""):
@@ -933,9 +954,9 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     mem_enabled = _mem_on(await get_config("memory_enabled", "true"))
     show_tools = _mem_on(await get_config("show_tool_activity", "true"))
     extra_instruction = await _longterm_memory_block(user_id, conv, last_text) if mem_enabled else None
-    manual_block, manual_hits = await _manual_context(last_text)
-    if manual_block:
-        extra_instruction = (extra_instruction or "") + manual_block
+    rag_block, manual_hits, voc_hits = await _rag_context(last_text, history)
+    if rag_block:
+        extra_instruction = (extra_instruction or "") + rag_block
 
     # 요청 단위로 에이전트를 만들어 호출자 헤더를 MCP에 전달한다.
     # System MCP는 X-User-Id로 user_scoped 툴(예: 본인 job 조회)의 user_id를 강제 주입하고,
@@ -952,7 +973,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
 
     raw = await _make_raw_outputs()
     ground = await _make_grounding(last_text, user_id)
-    ground.seed_manual(manual_hits)
+    ground.seed_rag(manual_hits, voc_hits)
 
     if not req.stream:
         final_text = ""
@@ -1083,56 +1104,60 @@ async def _longterm_memory_block(user_id: str, conversation_id: str | None, quer
     return format_memory_block(ctx["longterm"]) or None
 
 
-async def _manual_context(question: str) -> tuple[str, list]:
-    """**매 질문마다 매뉴얼을 먼저 검색해 프롬프트에 넣는다** (#155).
+def _retrieval_query(question: str, history: list | None = None,
+                     max_chars: int = 600) -> str:
+    """검색에 쓸 질의. **직전 사용자 발화를 앞에 붙인다** (#156).
 
-    사용자 지시: "무조건 manual_mcp 사용해서 그 기반으로 대답하게끔 해줘.
-    콘솔에 매뉴얼 reference path 다 있는데 agent가 사용을 안한다고."
+    이어지는 질문은 그 문장만으로는 검색이 안 된다 —
+    "그러면 슈퍼컴 접속 못 하는거 아니야?"에는 검색할 명사가 거의 없다.
+    실제로 사용자가 이 흐름에서 매뉴얼을 못 찾는 것을 봤다. 직전 사용자 발화를 붙이면
+    "login server 접속 …" 같은 앞 문맥이 질의에 들어와 같은 문서를 찾아낸다.
 
-    지시문으로 세 번 시켰지만("검색하지 않은 채로 설명하지 않습니다") 모델은 자기가 아는
-    일반지식으로 답할 수 있다고 판단하면 툴을 부르지 않았다. **부를지 말지를 모델에게
-    맡기지 않는다** — 우리가 먼저 검색해서 결과를 프롬프트에 넣는다. 그러면
-    "검색을 안 했다"는 실패 자체가 성립하지 않고, `guide_location`/`guide_document`도
-    모델 눈앞에 놓인다.
-
-    Manual MCP를 거치지 않고 같은 함수(`search_manual_chunks`)를 직접 부른다 — 검색 경로는
-    하나뿐이므로 결과가 갈릴 일이 없다. 툴 `search_manual`은 그대로 남아서, 첫 결과로
-    부족하면 모델이 다른 질의로 다시 찾는다.
-
-    Returns:
-        (프롬프트에 붙일 블록, 검색 결과) — 결과는 근거 검사(_AnswerGuard)의 근거로도 쓴다.
+    **답변(assistant)이 아니라 사용자 발화만** 붙인다. 답변까지 넣으면 지어낸 내용이
+    질의에 섞여 그 방향으로 검색이 끌려간다(틀린 답 → 틀린 근거 → 틀린 답의 고리).
     """
-    if not _mem_on(await get_config("manual_prefetch", "true")):
-        return "", []
-    if not (question or "").strip():
-        return "", []
-    try:
-        top_k = int(await get_config("manual_prefetch_top_k", "3"))
-    except (TypeError, ValueError):
-        top_k = 3
-    t0 = time.monotonic()
+    q = (question or "").strip()
+    prev = ""
+    for role, text in reversed(history or []):
+        if role == "user" and (text or "").strip():
+            prev = text.strip()
+            break
+    merged = f"{prev}\n{q}" if prev else q
+    return merged[-max_chars:] if len(merged) > max_chars else merged
+
+
+async def _search_manual_for(query: str, top_k: int):
     try:
         from manual_search import search_manual_chunks
-        _mode, results = await search_manual_chunks(question, max(1, top_k),
-                                                    with_neighbors=True)
+        _mode, results = await search_manual_chunks(query, top_k, with_neighbors=True)
+        return results
     except Exception as e:  # noqa: BLE001
         # 매뉴얼 DB나 임베딩이 죽어도 답변 자체는 계속돼야 한다(모델이 툴로 다시 시도한다).
         print(f"[agent] 매뉴얼 선검색 실패(무시): {type(e).__name__}: {e}")
-        return "", []
-    ms = int((time.monotonic() - t0) * 1000)
+        return []
+
+
+async def _search_voc_for(query: str, top_k: int):
+    try:
+        from voc_search import search_voc_records
+        return await search_voc_records(query, top_k)
+    except Exception as e:  # noqa: BLE001
+        print(f"[agent] VOC 선검색 실패(무시): {type(e).__name__}: {e}")
+        return []
+
+
+def _manual_block(results: list) -> str:
+    lines = ["\n\n# 이번 질문에 대한 매뉴얼 검색 결과"]
     if not results:
-        print(f"[agent] 매뉴얼 선검색 0건 ({ms}ms)")
-        return ("\n\n# 이번 질문에 대한 매뉴얼 검색 결과\n"
-                "**검색 결과가 없습니다.** 이 회사 시스템의 사용법·절차·정책에 대한 질문이라면, "
-                "매뉴얼에 없는 내용을 지어내지 말고 운영팀 문의로 안내하세요.\n"), []
-    print(f"[agent] 매뉴얼 선검색 {len(results)}건 ({ms}ms)")
-    lines = ["\n\n# 이번 질문에 대한 매뉴얼 검색 결과",
-             "아래는 사내 매뉴얼에서 이미 찾아 둔 근거입니다. **답변은 이 내용으로 만드세요.**",
-             "문서를 안내할 때 `문서 위치`는 **한 글자도 바꾸지 말고 그대로** 옮겨 적습니다."]
+        lines.append("**검색 결과가 없습니다.** 이 회사 시스템의 사용법·절차·정책에 대한 "
+                     "질문이라면, 매뉴얼에 없는 내용을 지어내지 마세요.")
+        return "\n".join(lines)
+    lines += ["아래는 사내 매뉴얼에서 이미 찾아 둔 근거입니다. **답변은 이 내용으로 만드세요.**",
+              "문서를 안내할 때 `문서 위치`는 **한 글자도 바꾸지 말고 그대로** 옮겨 적습니다."]
     for i, r in enumerate(results, 1):
         loc = (r.get("guide_location") or "").strip()
         doc = (r.get("guide_document") or "").strip()
-        lines.append(f"\n## 근거 {i}")
+        lines.append(f"\n## 매뉴얼 근거 {i}")
         if loc:
             lines.append(f"- 문서 위치: {loc}")
         if doc:
@@ -1140,9 +1165,74 @@ async def _manual_context(question: str) -> tuple[str, list]:
         if r.get("section_title"):
             lines.append(f"- 섹션: {r['section_title']}")
         lines.append(f"- 내용:\n{(r.get('chunk_text') or '').strip()}")
-    lines.append("\n여기에 답이 없으면 다른 표현으로 `search_manual`을 다시 부르거나, "
-                 "그래도 없으면 운영팀 문의로 안내하세요. 지어내지 마세요.")
-    return "\n".join(lines), results
+    return "\n".join(lines)
+
+
+def _voc_block(results: list) -> str:
+    lines = ["\n\n# 이번 질문에 대한 과거 사례(VOC) 검색 결과"]
+    if not results:
+        lines.append("**같은 사례가 없습니다.** 과거에 이런 문의가 있었던 것처럼 쓰지 마세요.")
+        return "\n".join(lines)
+    lines.append("아래는 실제로 접수됐던 문의와 그 답변입니다. 지금 질문과 **정말 같은 건인지** "
+                 "보고 쓰세요(증상만 비슷하고 대상이 다르면 쓰지 않습니다).")
+    for i, r in enumerate(results, 1):
+        by = r.get("handled_by") or ""
+        lines.append(f"\n## 과거 사례 {i} (처리: "
+                     f"{'운영자가 확인·조치' if by == 'operator' else '사용자가 직접 해결'})")
+        lines.append(f"- 문의: {(r.get('question') or '').strip()}")
+        lines.append(f"- 답변: {(r.get('answer') or '').strip()}")
+    return "\n".join(lines)
+
+
+async def _rag_context(question: str, history: list | None = None) -> tuple[str, list, list]:
+    """**매 질문마다 매뉴얼과 과거 사례를 먼저 검색해 프롬프트에 넣는다** (#155·#156).
+
+    사용자 지시: "사용자 문의가 들어오면 무조건!!! 제발!!!! manual_mcp, voc_mcp 로 rag 한 후에
+    답변 생성하길 바람."
+
+    지시문으로 네 번 시켰지만 모델은 자기가 아는 일반지식으로 답할 수 있다고 판단하면 툴을
+    부르지 않았다. **부를지 말지를 모델에게 맡기지 않는다** — 우리가 먼저 검색해서 결과를
+    프롬프트에 넣는다. 그러면 "검색을 안 했다"는 실패 자체가 성립하지 않는다.
+    (#155에서 매뉴얼만 했는데, VOC도 같은 이유로 안 불리고 있었다 — voc_db에 있는 질문을
+     그대로 물었는데 엉뚱한 답이 나왔다.)
+
+    검색 경로는 각 MCP가 쓰는 것과 **같은 것 하나뿐**이라 결과가 갈릴 일이 없다.
+    툴(`search_manual`·`search_voc`)은 그대로 남아서, 첫 결과로 부족하면 모델이 다른 질의로
+    다시 찾는다.
+
+    두 검색은 **동시에** 돈다 — 합이 아니라 둘 중 느린 쪽이 지연이다.
+
+    Returns:
+        (프롬프트에 붙일 블록, 매뉴얼 결과, VOC 결과)
+        결과는 근거 검사(_AnswerGuard)의 근거로도 쓴다.
+    """
+    if not _mem_on(await get_config("rag_prefetch", "true")):
+        return "", [], []
+    query = _retrieval_query(question, history)
+    if not query.strip():
+        return "", [], []
+    try:
+        mk = int(await get_config("manual_prefetch_top_k", "3"))
+    except (TypeError, ValueError):
+        mk = 3
+    try:
+        vk = int(await get_config("voc_prefetch_top_k", "3"))
+    except (TypeError, ValueError):
+        vk = 3
+
+    t0 = time.monotonic()
+    manual_hits, voc_hits = await asyncio.gather(
+        _search_manual_for(query, max(1, mk)),
+        _search_voc_for(query, max(1, vk)),
+    )
+    ms = int((time.monotonic() - t0) * 1000)
+    print(f"[agent] 선검색 매뉴얼 {len(manual_hits)}건 · VOC {len(voc_hits)}건 ({ms}ms)")
+
+    block = _manual_block(manual_hits) + _voc_block(voc_hits)
+    block += ("\n\n위 근거로 답을 만들 수 없으면 **다른 표현으로** `search_manual` 또는 "
+              "`search_voc`를 다시 부르세요. 그래도 없으면 지어내지 말고 확인되지 않는다고 "
+              "답합니다.")
+    return block, manual_hits, voc_hits
 async def _summarize_turns(turns: list[dict]) -> list[str]:
     """대화 턴들에서 '이 사용자에 대해 기억할' 사실/선호를 vLLM으로 뽑아 한 줄씩 반환한다."""
     base = await get_config("vllm_llm_base_url")
@@ -1246,9 +1336,9 @@ async def agent_query(body: AgentQueryIn, request: Request):
     history, extra_instruction = ([], None)
     if mem_enabled:
         history, extra_instruction = await _memory_context(user_id, conv, body.message)
-    manual_block, manual_hits = await _manual_context(body.message)
-    if manual_block:
-        extra_instruction = (extra_instruction or "") + manual_block
+    rag_block, manual_hits, voc_hits = await _rag_context(body.message, history)
+    if rag_block:
+        extra_instruction = (extra_instruction or "") + rag_block
 
     session_id = await _create_session(user_id, history)
     new_message = types.Content(role="user", parts=[types.Part(text=body.message)])
@@ -1263,7 +1353,7 @@ async def agent_query(body: AgentQueryIn, request: Request):
 
     raw = await _make_raw_outputs()
     ground = await _make_grounding(body.message, user_id)
-    ground.seed_manual(manual_hits)
+    ground.seed_rag(manual_hits, voc_hits)
 
     if not body.stream:
         final_text = ""
@@ -1501,8 +1591,8 @@ async def voc_query(body: VocQueryIn, request: Request):
         history, extra_instruction = await _memory_context(user_id, conv, message)
     fmt = _voc_format_instruction(body.output_option)
     extra_instruction = (extra_instruction + fmt) if extra_instruction else fmt
-    manual_block, manual_hits = await _manual_context(body_text)
-    extra_instruction += manual_block
+    rag_block, manual_hits, voc_hits = await _rag_context(body_text, history)
+    extra_instruction += rag_block
 
     session_id = await _create_session(user_id, history)
     new_message = types.Content(role="user", parts=[types.Part(text=message)])
@@ -1526,7 +1616,7 @@ async def voc_query(body: VocQueryIn, request: Request):
 
     raw = await _make_raw_outputs()
     ground = await _make_grounding(body_text, user_id)
-    ground.seed_manual(manual_hits)
+    ground.seed_rag(manual_hits, voc_hits)
 
     if not body.stream:
         final_text, ok = "", True

@@ -581,12 +581,15 @@ def config_seed() -> list[tuple[str, str, str, bool, bool, bool]]:
          "조회 결과에 없는 IP·경로가 답변에 있으면 그 답변을 버리고 운영팀 문의로 바꾼다"
          "(지어내기 방지). 켜져 있으면 본문은 검사 후 한 번에 나온다",
          True, False, False),
-        ("manual_prefetch", "true",
-         "매 질문마다 매뉴얼을 먼저 검색해 근거(문서 위치 포함)를 프롬프트에 넣는다. "
-         "모델이 매뉴얼 검색을 건너뛰고 지어내는 것을 막는다",
+        ("rag_prefetch", "true",
+         "매 질문마다 매뉴얼과 과거 사례(VOC)를 먼저 검색해 근거(문서 위치 포함)를 "
+         "프롬프트에 넣는다. 모델이 검색을 건너뛰고 지어내는 것을 막는다",
          True, False, False),
         ("manual_prefetch_top_k", "3",
          "매뉴얼 선검색으로 프롬프트에 넣을 근거 문단 수(늘리면 프롬프트가 커진다)",
+         True, False, False),
+        ("voc_prefetch_top_k", "3",
+         "VOC 선검색으로 프롬프트에 넣을 과거 사례 수(늘리면 프롬프트가 커진다)",
          True, False, False),
         ("execution_raw_output", "true",
          "실행 결과 원문을 모델 답변 뒤에 그대로 붙인다(모델이 행을 줄여도 전체가 보인다)",
