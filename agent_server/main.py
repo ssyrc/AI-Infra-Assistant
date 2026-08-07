@@ -546,6 +546,85 @@ async def _raw_output_summary(raw, question: str) -> str:
     return f"\n\n**요약**\n\n{text}" if text else ""
 
 
+# 답변에 들어가면 **치명적인** 값들. 조회 결과에 없으면 지어낸 것이다.
+#   · IP: 사용자가 그 주소로 접속을 시도한다. 틀린 IP는 곧바로 사고다(실제로 없는 서버 IP를
+#         만들어 안내한 적이 있다).
+#   · 절대 경로: 없는 경로를 안내하면 사용자가 헤맨다(#125의 `/home/ops_assistant`).
+_IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+_PATH_RE = re.compile(r"(?<![\w.])/(?:[\w.@+-]+/){1,}[\w.@+-]*")
+# 문서 안내를 시작하는 문구. 매뉴얼을 검색하지 않았다면 이 블록 자체가 지어낸 것이다.
+_GUIDE_MARKERS = ("자세한 내용은 다음 문서", "가이드 문서:", "가이드 위치:")
+
+
+class _Grounding:
+    """답변에 **조회 결과에 없는 값**이 들어갔는지 검사해 경고를 붙인다 (#154).
+
+    왜 코드인가: "지어내지 마라"를 지시문으로 네 번 강화했는데 계속 재발했다 - 없는 서버 IP를
+    만들어 안내하고, 매뉴얼을 검색하지도 않고 가이드 문서를 안내했다. 지시문은 확률이다.
+    #150의 원문 블록과 같은 방식으로, **LLM을 거치지 않고** 화면에 남긴다.
+
+    답변을 고쳐 쓰지는 않는다(모델 문장을 기계가 손대면 더 이상해진다). 대신 **근거 없는 값을
+    지목**해서, 사용자가 그걸 믿고 쓰지 않게 한다.
+    """
+
+    def __init__(self, enabled: bool, question: str, env_text: str = ""):
+        self.enabled = enabled
+        self.searched_manual = False
+        # 근거로 인정할 텍스트: 도구 결과 + 사용자 질문 + 우리가 프롬프트에 넣어 준 환경 값.
+        self.corpus = [question or "", env_text or ""]
+
+    def observe(self, event):
+        if not self.enabled:
+            return
+        for fc in (event.get_function_calls() or []):
+            if "manual" in (fc.name or "").lower():
+                self.searched_manual = True
+        for fr in (event.get_function_responses() or []):
+            try:
+                self.corpus.append(json.dumps(fr.response, ensure_ascii=False, default=str))
+            except Exception:  # noqa: BLE001
+                self.corpus.append(str(fr.response))
+
+    def check(self, answer: str) -> str:
+        if not self.enabled or not answer:
+            return ""
+        haystack = "\n".join(self.corpus)
+        problems = []
+
+        ungrounded = []
+        for pat in (_IP_RE, _PATH_RE):
+            for m in dict.fromkeys(pat.findall(answer)):     # 순서 유지 + 중복 제거
+                if m not in haystack:
+                    ungrounded.append(m)
+        if ungrounded:
+            problems.append("조회 결과에 없는 값: " + ", ".join(f"`{x}`" for x in ungrounded[:8]))
+
+        if not self.searched_manual and any(k in answer for k in _GUIDE_MARKERS):
+            problems.append("매뉴얼을 검색하지 않고 문서를 안내했습니다")
+
+        if not problems:
+            return ""
+        print(f"[agent] 근거 없는 값 감지: {problems}")
+        return ("\n\n> ⚠️ **아래 내용은 근거가 확인되지 않았습니다 — 그대로 믿지 마세요.**\n> "
+                + "\n> ".join(problems)
+                + "\n> 운영팀에 확인하시거나, 다시 질문해 주세요.")
+
+
+async def _make_grounding(question: str, user_id: str = ""):
+    """설정을 읽어 검사기를 만든다. 꺼져 있으면 검사하지 않는 빈 객체.
+
+    `build_agent`가 프롬프트에 넣어 주는 '이 환경의 값'은 우리가 준 사실이므로 근거로 인정한다
+    (그러지 않으면 로그인 서버 IP를 그대로 안내한 답변이 매번 경고를 받는다)."""
+    on = _mem_on(await get_config("answer_grounding_check", "true"))
+    env = " ".join(str(x) for x in (
+        user_id,
+        await get_config("execution_host", ""),
+        await get_config("openwebui_public_url", ""),
+        await get_config("voc_intake_guide", ""),
+    ) if x)
+    return _Grounding(on, question, env)
+
+
 class _Pace:
     """요청 하나가 어디에 시간을 썼는지 로그로 남긴다.
 
@@ -831,6 +910,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     pace.mark_ready()          # 여기까지가 LLM을 부르기 전 준비 시간
 
     raw = await _make_raw_outputs()
+    ground = await _make_grounding(last_text, user_id)
 
     if not req.stream:
         final_text = ""
@@ -841,6 +921,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                     pace.observe(event)
                     if raw:
                         raw.observe(event)
+                    ground.observe(event)
                     if event.is_final_response():
                         final_text = _event_text(event) or final_text
         finally:
@@ -851,6 +932,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         _bg_persist(user_id, conv, "openwebui", last_text, final_text, mem_enabled)
         # 원문 블록은 **이력에 저장한 뒤** 붙인다(다음 프롬프트가 부풀지 않게).
         body = await _chart_inliner().whole(final_text)
+        body += ground.check(final_text)          # 근거 없는 값을 지목(모델을 거치지 않는다)
         if raw:
             body += raw.block() + await _raw_output_summary(raw, last_text)
         return JSONResponse({
@@ -879,6 +961,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                     pace.observe(event)
                     if raw:
                         raw.observe(event)
+                    ground.observe(event)
                     if show_tools:
                         status = _tool_status_lines(event)
                         if status:
@@ -904,6 +987,9 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             if in_think:
                 yield _sse(request_id, model_name, "\n")
             # **모델 답변이 끝난 뒤** 원문을 붙인다. 모델이 행을 줄여도 전체가 화면에 남는다.
+            warn = ground.check(dedup.full)
+            if warn:
+                yield _sse(request_id, model_name, warn)
             if raw:
                 block = raw.block()
                 if block:
@@ -1068,6 +1154,7 @@ async def agent_query(body: AgentQueryIn, request: Request):
     runner = Runner(agent=agent, app_name=APP_NAME, session_service=state["session_service"])
 
     raw = await _make_raw_outputs()
+    ground = await _make_grounding(body.message, user_id)
 
     if not body.stream:
         final_text = ""
@@ -1077,13 +1164,14 @@ async def agent_query(body: AgentQueryIn, request: Request):
                                                     new_message=new_message):
                     if raw:
                         raw.observe(event)
+                    ground.observe(event)
                     if event.is_final_response():
                         final_text = _event_text(event) or final_text
         finally:
             await _cleanup_session(user_id, session_id)
             await _close_toolsets(toolsets)
         _bg_persist(user_id, conv, body.source, body.message, final_text, mem_enabled)
-        answer = final_text
+        answer = final_text + ground.check(final_text)
         if raw:
             answer += raw.block() + await _raw_output_summary(raw, body.message)
         return JSONResponse({"answer": answer, "conversation_id": conv,
@@ -1102,6 +1190,7 @@ async def agent_query(body: AgentQueryIn, request: Request):
                         break
                     if raw:
                         raw.observe(event)
+                    ground.observe(event)
                     if show_tools:
                         status = _tool_status_lines(event)
                         if status:
@@ -1124,6 +1213,9 @@ async def agent_query(body: AgentQueryIn, request: Request):
                 yield _sse(request_id, model_name, tail)
             if in_think:
                 yield _sse(request_id, model_name, "\n")
+            warn = ground.check(dedup.full)
+            if warn:
+                yield _sse(request_id, model_name, warn)
             if raw:
                 block = raw.block()
                 if block:
@@ -1322,6 +1414,7 @@ async def voc_query(body: VocQueryIn, request: Request):
             return []
 
     raw = await _make_raw_outputs()
+    ground = await _make_grounding(body_text, user_id)
 
     if not body.stream:
         final_text, ok = "", True
@@ -1331,6 +1424,7 @@ async def voc_query(body: VocQueryIn, request: Request):
                                                     new_message=new_message):
                     if raw:
                         raw.observe(event)
+                    ground.observe(event)
                     if event.is_final_response():
                         final_text = _event_text(event) or final_text
         except Exception as e:  # noqa: BLE001
@@ -1344,7 +1438,7 @@ async def voc_query(body: VocQueryIn, request: Request):
         if not ok or not final_text:
             return JSONResponse({"success": False, "answer": None})
         # 외부로 나가는 본문에서는 차트 표시자를 실제 이미지로 바꿔 준다(이력은 표시자 유지).
-        content = await _chart_inliner().whole(final_text)
+        content = await _chart_inliner().whole(final_text) + ground.check(final_text)
         if raw:
             content += raw.block() + await _raw_output_summary(raw, body_text)
         answer = {"content": content}
@@ -1364,13 +1458,14 @@ async def voc_query(body: VocQueryIn, request: Request):
                         break
                     if raw:
                         raw.observe(event)
+                    ground.observe(event)
                     delta = dedup.feed(event)
                     if delta:
                         yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
             # 마지막에 가이드 계약 형태의 완성 envelope을 한 번 더 보낸다.
             if dedup.full:
                 similar = await _collect_similar()
-                content = await _chart_inliner().whole(dedup.full)
+                content = await _chart_inliner().whole(dedup.full) + ground.check(dedup.full)
                 if raw:
                     content += raw.block() + await _raw_output_summary(raw, body_text)
                 answer = {"content": content}

@@ -2152,10 +2152,11 @@ def test_progress_line_always_shows_line_count():
     사용자가 답변의 행 수와 눈으로 대조할 수 있다.
     """
     import json as _json
+    import re as _re
     src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
     i = src.index("def _unwrap_result")      # _result_phrase가 이걸 쓴다
     end = src.index("\nclass _StreamDedup")
-    ns = {"json": _json}
+    ns = {"json": _json, "re": _re, "_mem_on": lambda x: True}
     exec(src[i:end], ns)
     phrase = ns["_result_phrase"]
 
@@ -2337,3 +2338,83 @@ def test_instruction_routing_covers_all_three_mcps():
     routing = instr[instr.index("## 2) 도구를 고릅니다"):instr.index("## 3) 멈춥니다")]
     for tool in ("매뉴얼 검색", "과거 사례(VOC) 검색", "커맨드 실행"):
         assert tool in routing, f"도구 선택 절에 '{tool}'이 없다"
+
+
+# --- #154: 지어내기를 **코드로** 잡는다 ------------------------------------------------
+def _grounding_cls():
+    import json as _json
+    import re as _re
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    i = src.index("_IP_RE = re.compile")
+    ns = {"json": _json, "re": _re, "_mem_on": lambda x: True}
+    exec(src[i:src.index("\nclass _Pace:")], ns)
+    return ns["_Grounding"]
+
+
+class _FakeCall:
+    def __init__(self, name):
+        self.name = name
+
+
+class _FakeEv2:
+    def __init__(self, calls=None, responses=None):
+        self._c = [_FakeCall(n) for n in (calls or [])]
+        self._r = [type("FR", (), {"response": x})() for x in (responses or [])]
+
+    def get_function_calls(self):
+        return self._c
+
+    def get_function_responses(self):
+        return self._r
+
+
+def test_grounding_flags_invented_ip():
+    """없는 서버 IP를 만들어 안내한 사고(#154). 사용자가 그 주소로 접속을 시도하므로
+    곧바로 사고다. 지시문으로 네 번 막았는데 재발해서 코드로 잡는다."""
+    G = _grounding_cls()
+    g = G(True, "login server 접속이 안됩니다", "202.20.185.100")
+    g.observe(_FakeEv2(calls=["search_manual"],
+                       responses=[{"results": [{"chunk_text": "ETX 클라이언트로 접속"}]}]))
+    assert "10.20.30.40" in g.check("10.20.30.40 으로 접속하세요.")
+    # 우리가 프롬프트에 넣어 준 환경 값은 근거로 인정한다(매번 경고가 뜨면 못 쓴다).
+    assert g.check("202.20.185.100 으로 접속합니다.") == ""
+
+
+def test_grounding_flags_guide_without_manual_search():
+    """매뉴얼을 검색하지도 않고 '가이드 문서: …'를 안내한 사고(#154).
+    사용자: '가이드 위치와 제목은 manual_mcp에서 확인할 수 있을 때만 알려야 함'."""
+    G = _grounding_cls()
+    g = G(True, "접속이 안돼요", "")
+    g.observe(_FakeEv2(responses=[{"exit_code": 0, "stdout": "x\ny"}]))
+    warn = g.check("자세한 내용은 다음 문서를 참고하세요:\n - 가이드 문서: 사용자 매뉴얼")
+    assert "매뉴얼을 검색하지 않고" in warn
+
+    # 검색했으면 경고하지 않는다.
+    g2 = G(True, "접속이 안돼요", "")
+    g2.observe(_FakeEv2(calls=["search_manual"], responses=[{"results": [{"chunk_text": "a"}]}]))
+    assert g2.check("자세한 내용은 다음 문서를 참고하세요:\n - 가이드 문서: 사용자 매뉴얼") == ""
+
+
+def test_grounding_flags_invented_path_but_allows_real_one():
+    """`/home/ops_assistant` 처럼 없는 경로를 안내한 사고가 있었다(#125)."""
+    G = _grounding_cls()
+    g = G(True, "홈이 어디야", "")
+    g.observe(_FakeEv2(responses=[{"exit_code": 0, "stdout": "/home/gpu1/yr9.choi"}]))
+    assert g.check("홈은 /home/gpu1/yr9.choi 입니다.") == ""
+    assert "/home/yr9.choi" in g.check("홈은 /home/yr9.choi 입니다.")
+
+
+def test_grounding_is_quiet_on_normal_answers():
+    """정상 답변에 경고가 붙으면 경고를 아무도 안 읽게 된다."""
+    G = _grounding_cls()
+    g = G(True, "job 목록 보여줘", "")
+    g.observe(_FakeEv2(responses=[{"exit_code": 0, "stdout": "23836848 Queued\n23836892 Queued"}]))
+    assert g.check("Queued 상태인 job은 23836848, 23836892 두 건입니다.") == ""
+
+
+def test_grounding_wired_into_every_answer_path():
+    """여섯 지점(엔드포인트 3 × 스트리밍/비스트리밍) 전부에 붙어야 한다."""
+    src = open(os.path.join(ROOT, "agent_server", "main.py"), encoding="utf-8").read()
+    assert src.count("ground.observe(event)") == 6, src.count("ground.observe(event)")
+    assert src.count("ground.check(") == 6, src.count("ground.check(")
+    assert 'get_config("answer_grounding_check"' in src, "설정으로 끌 수 없다"
